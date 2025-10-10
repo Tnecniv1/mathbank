@@ -35,6 +35,16 @@ import { publish } from '@/app/actions/publish';
 /* -------------------------------- Types -------------------------------- */
 type Option = { id: string; label: string };
 
+// Élément de question : chaîne simple ou objet enrichi
+type QuestionElem =
+  | string
+  | {
+      text: string;
+      style?: 'blank' | 'ruled';
+      heightCm?: number;
+      points?: number;
+    };
+
 type Item = {
   id: string;
   ref: string;
@@ -42,11 +52,16 @@ type Item = {
   solution_md: string | null;
   exercise_id: string;
   tags?: string[];
+  // NEW: liste de questions JSONB (array de strings ou d'objets)
+  questions?: QuestionElem[] | null;
+  // (optionnel) overrides pour le rendu
+  responseHeightCm?: number;
+  responseStyle?: 'blank' | 'ruled';
 };
 
 type Exercise = { id: string; chapter_id: string };
-type Chapter  = { id: string; subject_id: string };
-type Subject  = { id: string; complexity_id: string };
+type Chapter = { id: string; subject_id: string };
+type Subject = { id: string; complexity_id: string };
 
 type Scope = {
   complexity_id?: string | null;
@@ -70,9 +85,9 @@ function storageSafeRef(ref: string) {
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, ''); // accents
   return base
-    .replace(/[^a-z0-9._-]+/g, '-')    // tout sauf a-z0-9 . _ -
-    .replace(/-+/g, '-')               // compacter les '-'
-    .replace(/^[-.]+|[-.]+$/g, '');    // pas de -/. au début/fin
+    .replace(/[^a-z0-9._-]+/g, '-') // tout sauf a-z0-9 . _ -
+    .replace(/-+/g, '-') // compacter les '-'
+    .replace(/^[-.]+|[-.]+$/g, ''); // pas de -/. au début/fin
 }
 
 /* --------------------------- Menus (filtres G) -------------------------- */
@@ -80,14 +95,14 @@ function useScopeMenus() {
   const supabase = useSupabase();
 
   const [complexities, setComplexities] = useState<Option[]>([]);
-  const [subjects, setSubjects]         = useState<Option[]>([]);
-  const [chapters, setChapters]         = useState<Option[]>([]);
-  const [exercises, setExercises]       = useState<Option[]>([]);
+  const [subjects, setSubjects] = useState<Option[]>([]);
+  const [chapters, setChapters] = useState<Option[]>([]);
+  const [exercises, setExercises] = useState<Option[]>([]);
 
   const [complexityId, setComplexityId] = useState('');
-  const [subjectId, setSubjectId]       = useState('');
-  const [chapterId, setChapterId]       = useState('');
-  const [exerciseId, setExerciseId]     = useState('');
+  const [subjectId, setSubjectId] = useState('');
+  const [chapterId, setChapterId] = useState('');
+  const [exerciseId, setExerciseId] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -102,9 +117,12 @@ function useScopeMenus() {
   }, [supabase]);
 
   useEffect(() => {
-    setSubjects([]); setSubjectId('');
-    setChapters([]); setChapterId('');
-    setExercises([]); setExerciseId('');
+    setSubjects([]);
+    setSubjectId('');
+    setChapters([]);
+    setChapterId('');
+    setExercises([]);
+    setExerciseId('');
     if (!complexityId) return;
     (async () => {
       const { data } = await supabase
@@ -117,8 +135,10 @@ function useScopeMenus() {
   }, [complexityId, supabase]);
 
   useEffect(() => {
-    setChapters([]); setChapterId('');
-    setExercises([]); setExerciseId('');
+    setChapters([]);
+    setChapterId('');
+    setExercises([]);
+    setExerciseId('');
     if (!subjectId) return;
     (async () => {
       const { data } = await supabase
@@ -132,7 +152,8 @@ function useScopeMenus() {
   }, [subjectId, supabase]);
 
   useEffect(() => {
-    setExercises([]); setExerciseId('');
+    setExercises([]);
+    setExerciseId('');
     if (!chapterId) return;
     (async () => {
       const { data } = await supabase
@@ -145,9 +166,18 @@ function useScopeMenus() {
   }, [chapterId, supabase]);
 
   return {
-    complexities, subjects, chapters, exercises,
-    complexityId, subjectId, chapterId, exerciseId,
-    setComplexityId, setSubjectId, setChapterId, setExerciseId,
+    complexities,
+    subjects,
+    chapters,
+    exercises,
+    complexityId,
+    subjectId,
+    chapterId,
+    exerciseId,
+    setComplexityId,
+    setSubjectId,
+    setChapterId,
+    setExerciseId,
   };
 }
 
@@ -156,14 +186,14 @@ function usePublicationScopeMenus() {
   const supabase = useSupabase();
 
   const [complexities, setComplexities] = useState<Option[]>([]);
-  const [subjects, setSubjects]         = useState<Option[]>([]);
-  const [chapters, setChapters]         = useState<Option[]>([]);
-  const [exercises, setExercises]       = useState<Option[]>([]);
+  const [subjects, setSubjects] = useState<Option[]>([]);
+  const [chapters, setChapters] = useState<Option[]>([]);
+  const [exercises, setExercises] = useState<Option[]>([]);
 
   const [complexityId, setComplexityId] = useState('');
-  const [subjectId, setSubjectId]       = useState('');
-  const [chapterId, setChapterId]       = useState('');
-  const [exerciseId, setExerciseId]     = useState('');
+  const [subjectId, setSubjectId] = useState('');
+  const [chapterId, setChapterId] = useState('');
+  const [exerciseId, setExerciseId] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -178,9 +208,12 @@ function usePublicationScopeMenus() {
   }, [supabase]);
 
   useEffect(() => {
-    setSubjects([]); setSubjectId('');
-    setChapters([]); setChapterId('');
-    setExercises([]); setExerciseId('');
+    setSubjects([]);
+    setSubjectId('');
+    setChapters([]);
+    setChapterId('');
+    setExercises([]);
+    setExerciseId('');
     if (!complexityId) return;
     (async () => {
       const { data } = await supabase
@@ -193,8 +226,10 @@ function usePublicationScopeMenus() {
   }, [complexityId, supabase]);
 
   useEffect(() => {
-    setChapters([]); setChapterId('');
-    setExercises([]); setExerciseId('');
+    setChapters([]);
+    setChapterId('');
+    setExercises([]);
+    setExerciseId('');
     if (!subjectId) return;
     (async () => {
       const { data } = await supabase
@@ -208,7 +243,8 @@ function usePublicationScopeMenus() {
   }, [subjectId, supabase]);
 
   useEffect(() => {
-    setExercises([]); setExerciseId('');
+    setExercises([]);
+    setExerciseId('');
     if (!chapterId) return;
     (async () => {
       const { data } = await supabase
@@ -221,9 +257,18 @@ function usePublicationScopeMenus() {
   }, [chapterId, supabase]);
 
   return {
-    complexities, subjects, chapters, exercises,
-    complexityId, subjectId, chapterId, exerciseId,
-    setComplexityId, setSubjectId, setChapterId, setExerciseId,
+    complexities,
+    subjects,
+    chapters,
+    exercises,
+    complexityId,
+    subjectId,
+    chapterId,
+    exerciseId,
+    setComplexityId,
+    setSubjectId,
+    setChapterId,
+    setExerciseId,
   };
 }
 
@@ -231,9 +276,9 @@ function usePublicationScopeMenus() {
 function useScopeMaps() {
   const supabase = useSupabase();
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [chapters, setChapters]   = useState<Chapter[]>([]);
-  const [subjects, setSubjects]   = useState<Subject[]>([]);
-  const [loading, setLoading]     = useState(true);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -250,9 +295,9 @@ function useScopeMaps() {
     })();
   }, [supabase]);
 
-  const exToCh = useMemo(() => new Map(exercises.map(e => [e.id, e.chapter_id])), [exercises]);
-  const chToSu = useMemo(() => new Map(chapters.map(c => [c.id, c.subject_id])), [chapters]);
-  const suToCo = useMemo(() => new Map(subjects.map(s => [s.id, s.complexity_id])), [subjects]);
+  const exToCh = useMemo(() => new Map(exercises.map((e) => [e.id, e.chapter_id])), [exercises]);
+  const chToSu = useMemo(() => new Map(chapters.map((c) => [c.id, c.subject_id])), [chapters]);
+  const suToCo = useMemo(() => new Map(subjects.map((s) => [s.id, s.complexity_id])), [subjects]);
 
   return { loading, exToCh, chToSu, suToCo };
 }
@@ -260,7 +305,7 @@ function useScopeMaps() {
 /* --------------------------- Items (chargement) --------------------------- */
 function useAllItems() {
   const supabase = useSupabase();
-  const [items, setItems]   = useState<Item[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -269,7 +314,7 @@ function useAllItems() {
       const { data } = await supabase
         .from('items')
         .select(`
-          id, ref, statement_md, solution_md, exercise_id,
+          id, ref, statement_md, solution_md, exercise_id, questions,
           item_tags!left( tags(name) )
         `)
         .order('ref');
@@ -280,9 +325,15 @@ function useAllItems() {
         statement_md: row.statement_md,
         solution_md: row.solution_md,
         exercise_id: row.exercise_id,
-        tags: Array.from(new Set((row.item_tags ?? [])
-          .map((it: any) => it?.tags?.name)
-          .filter(Boolean))),
+        // questions: tableau JSONB (défaut [])
+        questions: Array.isArray(row.questions) ? (row.questions as QuestionElem[]) : [],
+        tags: Array.from(
+          new Set(
+            (row.item_tags ?? [])
+              .map((it: any) => it?.tags?.name)
+              .filter(Boolean)
+          )
+        ),
       })) as Item[];
 
       setItems(mapped);
@@ -307,10 +358,18 @@ function usePublishedItemIds() {
         .select('id')
         .eq('status', 'published');
 
-      if (error) { setIds(new Set()); setLoading(false); return; }
+      if (error) {
+        setIds(new Set());
+        setLoading(false);
+        return;
+      }
 
       const pubIds = (pubs ?? []).map((p: any) => p.id);
-      if (pubIds.length === 0) { setIds(new Set()); setLoading(false); return; }
+      if (pubIds.length === 0) {
+        setIds(new Set());
+        setLoading(false);
+        return;
+      }
 
       const { data: links } = await supabase
         .from('publication_items')
@@ -342,35 +401,44 @@ export default function AtelierPage() {
   const [usageFilter, setUsageFilter] = useState<Usage>('');
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const toggleTag = (t: string) =>
-    setActiveTags(prev => (prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]));
+    setActiveTags((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
 
   const loadingAny = itemsLoading || mapsLoading || publishedLoading;
 
   const filteredItems = useMemo(() => {
-    if (loadingAny) return [];
-    return allItems.filter(it => {
-      const chapterId    = exToCh.get(it.exercise_id);
-      const subjectId    = chapterId ? chToSu.get(chapterId) : undefined;
+    if (loadingAny) return [] as Item[];
+    return allItems.filter((it) => {
+      const chapterId = exToCh.get(it.exercise_id);
+      const subjectId = chapterId ? chToSu.get(chapterId) : undefined;
       const complexityId = subjectId ? suToCo.get(subjectId) : undefined;
 
       if (menus.complexityId && complexityId !== menus.complexityId) return false;
-      if (menus.subjectId    && subjectId    !== menus.subjectId)     return false;
-      if (menus.chapterId    && chapterId    !== menus.chapterId)     return false;
-      if (menus.exerciseId   && it.exercise_id !== menus.exerciseId)  return false;
+      if (menus.subjectId && subjectId !== menus.subjectId) return false;
+      if (menus.chapterId && chapterId !== menus.chapterId) return false;
+      if (menus.exerciseId && it.exercise_id !== menus.exerciseId) return false;
 
       if (usageFilter === 'published' && !publishedIds.has(it.id)) return false;
-      if (usageFilter === 'never'     &&  publishedIds.has(it.id)) return false;
+      if (usageFilter === 'never' && publishedIds.has(it.id)) return false;
 
       if (activeTags.length > 0) {
         const ts = it.tags ?? [];
-        if (!ts.some(t => activeTags.includes(t))) return false;
+        if (!ts.some((t) => activeTags.includes(t))) return false;
       }
       return true;
     });
   }, [
-    loadingAny, allItems,
-    menus.complexityId, menus.subjectId, menus.chapterId, menus.exerciseId,
-    usageFilter, activeTags, exToCh, chToSu, suToCo, publishedIds
+    loadingAny,
+    allItems,
+    menus.complexityId,
+    menus.subjectId,
+    menus.chapterId,
+    menus.exerciseId,
+    usageFilter,
+    activeTags,
+    exToCh,
+    chToSu,
+    suToCo,
+    publishedIds,
   ]);
 
   /* ----------------------- Sélection (DnD) ----------------------- */
@@ -382,7 +450,7 @@ export default function AtelierPage() {
   function handleDragStart(e: DragStartEvent) {
     const raw = String(e.active.id);
     const id = raw.startsWith('sel-') ? raw.slice(4) : raw;
-    const src = filteredItems.find(i => i.id === id) || selected.find(i => i.id === id) || null;
+    const src = filteredItems.find((i) => i.id === id) || selected.find((i) => i.id === id) || null;
     setActiveDrag(src);
   }
 
@@ -392,9 +460,9 @@ export default function AtelierPage() {
 
     // Réordonnage
     if (a.startsWith('sel-') && o && o.startsWith('sel-')) {
-      const from = selected.findIndex(i => 'sel-' + i.id === a);
-      const to   = selected.findIndex(i => 'sel-' + i.id === o);
-      if (from !== -1 && to !== -1 && from !== to) setSelected(prev => arrayMove(prev, from, to));
+      const from = selected.findIndex((i) => 'sel-' + i.id === a);
+      const to = selected.findIndex((i) => 'sel-' + i.id === o);
+      if (from !== -1 && to !== -1 && from !== to) setSelected((prev) => arrayMove(prev, from, to));
       setActiveDrag(null);
       return;
     }
@@ -402,140 +470,237 @@ export default function AtelierPage() {
     // Ajout
     if (o === 'selection-drop') {
       const id = a.startsWith('sel-') ? a.slice(4) : a;
-      const it = filteredItems.find(i => i.id === id) || selected.find(i => i.id === id);
-      if (it && !selected.some(s => s.id === it.id)) setSelected(prev => [...prev, it]);
+      const it = filteredItems.find((i) => i.id === id) || selected.find((i) => i.id === id);
+      if (it && !selected.some((s) => s.id === it.id)) setSelected((prev) => [...prev, it]);
     }
 
     setActiveDrag(null);
   }
 
-  const removeFromSelection = (id: string) =>
-    setSelected(prev => prev.filter(i => i.id !== id));
+  const removeFromSelection = (id: string) => setSelected((prev) => prev.filter((i) => i.id !== id));
 
   /* ---------------------- Export / Publication ---------------------- */
   const [refTitle, setRefTitle] = useState('');
   const canExport = refTitle.trim().length > 0 && selected.length > 0;
 
+  // (resté à dispo si utile côté UI titre)
   const latexSafe = (s: string) => s.replace(/([#%&~_^$])/g, '\\$1');
+
+  // Helper: transforme ____ en ligne LaTeX imprimable
+  const blanksafe = (s?: string) => (s ?? '').replace(/_{2,}/g, () => String.raw`\makebox[1.6cm]{\hrulefill}`);
+
+  // Helper: extrait le texte d'un élément de question
+  function qText(q: QuestionElem): string {
+    return typeof q === 'string' ? q : q?.text ?? '';
+  }
+
+  // Helper: concatène les questions pour le bloc \begin{reponse} ...
+  function renderQuestions(questions?: QuestionElem[] | null): string {
+    if (!questions || questions.length === 0) return '';
+    // Chaque question sur sa propre ligne (\\). On laisse le LaTeX "brut" et on sécurise seulement les blanks.
+    return questions.map((q) => blanksafe(qText(q))).join(' \\\n');
+  }
+
+  const normalizeLatexText = (s: string) => (s ?? '').replace(/\\n\\/g, '\n\\');
 
   function makeMainTex(
     title: string,
-    items: { ref: string; statement_md: string; solution_md?: string }[],
+    items: Array<{
+      ref: string;
+      statement_md: string;        // LaTeX
+      solution_md?: string;        // LaTeX
+      questions?: any[] | null;    // JSONB : éléments contenant du LaTeX
+      responseHeightCm?: number;
+      responseStyle?: 'blank' | 'ruled';
+    }>,
     options?: {
-      responseHeightCm?: number; // hauteur des zones de réponse (par défaut 7.0 cm)
-      extraReserveCm?: number;   // marge fixe ajoutée à la réserve Needspace (par défaut 3.0 cm)
+      responseHeightCm?: number;   // défaut 8.0
+      extraReserveCm?: number;     // défaut 3.0
+      responseStyle?: 'blank' | 'ruled'; // défaut 'blank'
+      addParskip?: boolean;        // défaut true
     }
   ) {
-    const latexSafe = (s: string) => (s ?? "").replace(/([#$%&_{}~^\\])/g, "\\$1");
-    const baseTitle = (title.split("|")[0] ?? title).trim();
-    const refRight = (ref: string) => (ref.split("|").pop() ?? ref).trim();
+    // -------- utilitaires --------
+    const latexSafeInner = (s: string) => (s ?? '').replace(/([#$%&_{}~^\\])/g, '\\$1');
+    const refRight = (ref: string) => (ref.split('|').pop() ?? ref).trim();
 
-    // Réglages "Flex" stables :
-    const responseH = options?.responseHeightCm ?? 8.0;  // typiquement 7.0–7.5 cm
-    const extraReserve = options?.extraReserveCm ?? 3.0; // ~ titre + enonce + marges
-    const needspace = (responseH + extraReserve).toFixed(2); // cm
+    // Transforme le contenu JSONB « text » en vrai LaTeX
+    const decodeJsonbLatex = (s?: string) => {
+      if (!s) return '';
+      let t = s.replace(/\r\n/g, '\n'); // normalise CRLF
+      // ⚠️ NE PAS transformer \n -> newline (sinon on casse \n, \noindent, \node…)
+      // Dé-échappe seulement les accolades littérales (venues de l’export JSON)
+      t = t.replace(/\\\{/g, '{').replace(/\\\}/g, '}');
+      // Tabulations optionnelles
+      t = t.replace(/\\t/g, '\t');
+      return t;
+    };
 
-  return `
-\\documentclass[12pt]{article}
-\\usepackage[utf8]{inputenc}
-\\usepackage[T1]{fontenc}
-\\usepackage[french]{babel}
-\\usepackage{amsmath, amssymb}
-\\usepackage{geometry}
-\\geometry{margin=2cm}
-\\usepackage{graphicx}
-\\usepackage{array}
-\\setlength{\\tabcolsep}{8pt}
-\\renewcommand{\\arraystretch}{1.6}
+    const renderQuestionsBlock = (qs: any[] | null | undefined) => {
+      const parts = (qs ?? [])
+        .map(q => (typeof q === 'string' ? decodeJsonbLatex(q)
+                : q && typeof q.text === 'string' ? decodeJsonbLatex(q.text)
+                : ''))
+        .filter(Boolean);
+      return parts.join('\n');
+    };
 
-\\title{${latexSafe(title)}}
-\\date{}
+    // -------- options --------
+    const responseHGlobal = options?.responseHeightCm ?? 8.0;
+    const extraReserve   = options?.extraReserveCm ?? 3.0;
+    const defaultStyle: 'blank' | 'ruled' = options?.responseStyle ?? 'blank';
+    const addParskip     = options?.addParskip ?? true;
 
-% ==== Titres & mise en page ====
-\\usepackage{titlesec}
-\\titleformat{\\subsection}[block]{\\large\\bfseries}{}{0pt}{}
-\\titlespacing*{\\subsection}{0pt}{0.6ex}{0.5ex} % compact pour favoriser 2 exos/page
+    // -------- LaTeX --------
+    return `
+  \\documentclass[12pt]{article}
+  \\usepackage[utf8]{inputenc}
+  \\usepackage[T1]{fontenc}
+  \\usepackage[french]{babel}
+  \\usepackage{amsmath, amssymb}
+  \\usepackage{geometry}
+  \\geometry{margin=2cm}
+  \\usepackage{graphicx}
+  \\usepackage{array}
+  \\setlength{\\tabcolsep}{8pt}
+  \\renewcommand{\\arraystretch}{1.6}
+  ${addParskip ? '\\usepackage{parskip}' : ''}
 
-% ==== Encadrés ====
-\\usepackage[most]{tcolorbox}
-\\tcbset{
-  enhanced,
-  boxsep=4pt,
-  colback=white,
-  colframe=black!20,
-  sharp corners=rounded,
-  before skip=3pt, after skip=5pt
-}
+  \\usepackage{microtype}
+  \\usepackage[hidelinks]{hyperref}
+  \\usepackage{enumitem}
+  \\usepackage{tikz}
 
-\\newtcolorbox{enonce}{
-  colback=black!2, colframe=black!15, left=8pt, right=8pt, top=5pt, bottom=5pt
-}
+  \\title{${latexSafeInner(title)}}
+  \\date{}
 
-\\newtcolorbox{reponse}[1][${responseH}]{
-  colback=white, colframe=black!20, height=#1cm, valign=center
-}
+  % ==== Titres & mise en page ====
+  \\usepackage{titlesec}
+  \\titleformat{\\subsection}[block]{\\large\\bfseries}{}{0pt}{}
+  \\titlespacing*{\\subsection}{0pt}{0.6ex}{0.5ex}
 
-% Variante lignée (optionnelle)
-\\usepackage{tikz}
-\\newtcolorbox{reponseLignees}[1][7]{
-  colback=white, colframe=black!20,
-  enhanced, borderline={0.4pt}{0pt}{black!20},
-  overlay={%
-    \\foreach \\y in {0.8,1.6,...,#1} {%
-      \\draw[black!10] ([xshift=4pt]frame.south west) ++(0,\\y cm) -- ([xshift=-4pt]frame.south east) ++(0,\\y cm);
-    }
-  },
-  height=#1cm, valign=top
-}
+  % ==== Encadrés ====
+  \\usepackage[most]{tcolorbox}
+  \\tcbset{
+    enhanced,
+    boxsep=4pt,
+    colback=white,
+    colframe=black!20,
+    arc=2mm,
+    before skip=3pt, after skip=5pt
+  }
 
-% ==== Pagination "Flex" (max 2 exos/page) ====
-\\usepackage{needspace}
-\\newcounter{exopagecount}
-\\newcommand{\\ExoGate}{%
-  \\ifnum\\value{exopagecount}=2
-    \\clearpage
-    \\setcounter{exopagecount}{0}%
-  \\fi
-  \\stepcounter{exopagecount}%
-  \\Needspace{${needspace}cm}% = réponse (${responseH}cm) + marge (${extraReserve}cm)
-}
+  % Énoncé
+  \\newtcolorbox{enonce}{
+    breakable,
+    colback=black!2, colframe=black!15, left=8pt, right=8pt, top=5pt, bottom=5pt
+  }
 
-\\begin{document}
-\\raggedbottom             % évite d'étirer verticalement (important pour la page 2)
-\\maketitle
-\\thispagestyle{empty}     % page 1 : titre seul, sans en-tête/pied
-\\clearpage                % --> on force le début des exercices en page 2
+  % Boîte "réponse" à hauteur fixe (pour zones à remplir)
+  \\newtcolorbox{reponse}[1][${responseHGlobal}]{
+    colback=white, colframe=black!20, height=#1cm, valign=top
+  }
 
-% ===== ÉNONCÉS (démarre en page 2) =====
-\\section*{Énoncés}
-\\setcounter{exopagecount}{0} % reset du modulo ici
+  % Boîte lignée à hauteur fixe
+  \\newtcolorbox{reponseLignees}[1][${responseHGlobal}]{
+    colback=white, colframe=black!20,
+    enhanced, borderline={0.4pt}{0pt}{black!20},
+    overlay={%
+      \\begin{scope}
+        \\clip (frame.south west) rectangle (frame.north east);
+        \\pgfmathsetmacro\\H{#1}
+        \\foreach \\yy in {0.8,1.6,...,100} {%
+          \\ifdim \\yy cm<\\H cm
+            \\draw[black!10] ([xshift=4pt]frame.south west) ++(0,\\yy cm) -- ([xshift=-4pt]frame.south east) ++(0,\\yy cm);
+          \\fi
+        }
+      \\end{scope}
+    },
+    height=#1cm, valign=top
+  }
 
-${items.map((it, i) => `
-\\ExoGate
-\\subsection*{Exercice ${i + 1} — ${latexSafe(baseTitle)} | ${latexSafe(refRight(it.ref))}}
-\\begin{enonce}
-${it.statement_md ?? ""}
-\\end{enonce}
-\\begin{reponse}[${responseH}]
-\\end{reponse}
-`).join(`\n`)}
+  % ✅ Boîte AUTO-HAUTEUR (pour TikZ & contenu variable) — pas de height=, breakable
+  \\newtcolorbox{reponseAuto}{
+    breakable,
+    enhanced,
+    colback=white, colframe=black!20,
+    left=4pt, right=4pt, top=4pt, bottom=4pt
+  }
 
-\\clearpage                % solutions sur une nouvelle page propre
+  % ==== Pagination "Flex" (max 2 exos/page) ====
+  \\usepackage{needspace}
+  \\newcounter{exopagecount}
+  \\newcommand{\\ExoGate}[1]{%
+    \\ifnum\\value{exopagecount}=2
+      \\clearpage
+      \\setcounter{exopagecount}{0}%
+    \\fi
+    \\stepcounter{exopagecount}%
+    \\Needspace{#1cm}%
+  }
 
-% ===== SOLUTIONS =====
-\\section*{Solutions}
-\\setcounter{exopagecount}{0} % reset pour avoir jusqu'à 2 solutions/page aussi
+  \\begin{document}
+  \\raggedbottom
+  \\maketitle
+  \\thispagestyle{empty}
+  \\clearpage
 
-${items.map((it, i) => `
-\\ExoGate
-\\subsection*{Exercice ${i + 1} — ${latexSafe(baseTitle)} | ${latexSafe(refRight(it.ref))}}
-${it.solution_md ?? ""}
-\\vspace{0.5cm} % espace demandé après chaque solution
-`).join(`\n`)}
+  % ===== ÉNONCÉS =====
+  \\section*{Énoncés}
+  \\setcounter{exopagecount}{0}
 
-\\end{document}
-`.trim();
-}
+  ${
+    items.map((it, i) => {
+      const rh = (it.responseHeightCm ?? responseHGlobal).toFixed(2);
+      const reserve = (parseFloat(rh) + extraReserve).toFixed(2);
+      const qBlock = renderQuestionsBlock(it.questions);
+
+      // Si le bloc contient du TikZ, on passe en boîte auto-hauteur
+      const hasTikz = /\\\\begin\\{tikzpicture\\}/.test(qBlock) || /\\begin\\{tikzpicture\\}/.test(qBlock);
+      const boxEnv = hasTikz
+        ? 'reponseAuto'
+        : ((it.responseStyle ?? defaultStyle) === 'ruled' ? 'reponseLignees' : 'reponse');
+
+      const stmt = decodeJsonbLatex(it.statement_md);
+
+      return `
+  \\ExoGate{${reserve}}
+  \\subsection*{Exercice ${i + 1} — ${latexSafeInner(refRight(it.ref))}}
+  \\begin{enonce}
+  ${stmt}
+  \\end{enonce}
+  \\begin{${boxEnv}}${hasTikz ? '' : `[${rh}]`}
+  \\noindent
+  ${qBlock}
+  \\end{${boxEnv}}`.trim();
+    }).join('\n\n')
+  }
+
+  \\clearpage
+
+  % ===== SOLUTIONS =====
+  \\section*{Solutions}
+  \\setcounter{exopagecount}{0}
+
+  ${
+    items.map((it, i) => {
+      const rh = (it.responseHeightCm ?? responseHGlobal).toFixed(2);
+      const reserve = (parseFloat(rh) + extraReserve).toFixed(2);
+      const sol = decodeJsonbLatex(it.solution_md ?? '');
+      return `
+  \\ExoGate{${reserve}}
+  \\subsection*{Exercice ${i + 1} — ${latexSafeInner(refRight(it.ref))}}
+  ${sol}
+  \\vspace{0.5cm}`.trim();
+    }).join('\n\n')
+  }
+
+  \\end{document}
+  `.trim();
+  }
+
+
+
 
 
   const [publicationId, setPublicationId] = useState<string | null>(null);
@@ -545,9 +710,9 @@ ${it.solution_md ?? ""}
   function currentScope(): Scope {
     return {
       complexity_id: pubMenus.complexityId || null,
-      subject_id:    pubMenus.subjectId    || null,
-      chapter_id:    pubMenus.chapterId    || null,
-      exercise_id:   pubMenus.exerciseId   || null,
+      subject_id: pubMenus.subjectId || null,
+      chapter_id: pubMenus.chapterId || null,
+      exercise_id: pubMenus.exerciseId || null,
     };
   }
 
@@ -563,7 +728,7 @@ ${it.solution_md ?? ""}
     } else {
       await createPublication(ref, ref, currentScope()); // mise à jour du scope
     }
-    await setPublicationItems(id!, selected.map(i => i.id));
+    await setPublicationItems(id!, selected.map((i) => i.id));
     return id!;
   }
 
@@ -571,7 +736,10 @@ ${it.solution_md ?? ""}
     if (!canExport) return;
 
     const safe = storageSafeRef(refTitle.trim());
-    if (!safe) { alert('Référence invalide. Choisis un nom non vide.'); return; }
+    if (!safe) {
+      alert('Référence invalide. Choisis un nom non vide.');
+      return;
+    }
 
     const zip = new JSZip();
     const main = makeMainTex(refTitle.trim(), selected as any);
@@ -586,25 +754,38 @@ ${it.solution_md ?? ""}
     a.remove();
     URL.revokeObjectURL(a.href);
 
-    try { await ensurePublication(); } catch { alert('Erreur création de publication'); }
+    try {
+      await ensurePublication();
+    } catch {
+      alert('Erreur création de publication');
+    }
   }
 
   async function handlePdfUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!refTitle.trim()) { alert('Renseigne la Référence PDF'); e.target.value = ''; return; }
+    if (!refTitle.trim()) {
+      alert('Renseigne la Référence PDF');
+      e.target.value = '';
+      return;
+    }
 
     const safe = storageSafeRef(refTitle.trim());
-    if (!safe) { alert('Référence invalide. Choisis un nom non vide.'); e.target.value = ''; return; }
+    if (!safe) {
+      alert('Référence invalide. Choisis un nom non vide.');
+      e.target.value = '';
+      return;
+    }
 
     try {
       setUploading(true);
       const id = await ensurePublication();
       const objectPath = `${safe}.pdf`;
 
-      const { error } = await supabase
-        .storage.from('pdfs')
-        .upload(objectPath, file, { contentType: 'application/pdf', upsert: true });
+      const { error } = await supabase.storage.from('pdfs').upload(objectPath, file, {
+        contentType: 'application/pdf',
+        upsert: true,
+      });
 
       if (error) throw error;
 
@@ -619,7 +800,10 @@ ${it.solution_md ?? ""}
   }
 
   async function handlePublish() {
-    if (!publicationId) { alert('Aucune publication en cours. Dépose d’abord un PDF.'); return; }
+    if (!publicationId) {
+      alert('Aucune publication en cours. Dépose d’abord un PDF.');
+      return;
+    }
     try {
       setPublishing(true);
       await publish(publicationId);
@@ -637,6 +821,7 @@ ${it.solution_md ?? ""}
       <div className="mx-auto max-w-[1400px] space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold">Atelier — Éditeur de PDF d’exercices</h1>
+          {/* NOTE: la page "/nouvel-item" devra être mise à jour pour offrir le champ "Questions" (JSONB). */}
           <Link
             href="/nouvel-item"
             className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-neutral-50"
@@ -662,14 +847,14 @@ ${it.solution_md ?? ""}
 
                   <div className="flex flex-wrap items-center gap-2">
                     <Select value={menus.complexityId} onChange={menus.setComplexityId} label="Complexité" options={menus.complexities} />
-                    <Select value={menus.subjectId}    onChange={menus.setSubjectId}    label="Sujet"      options={menus.subjects}     disabled={!menus.complexityId}/>
-                    <Select value={menus.chapterId}    onChange={menus.setChapterId}    label="Chapitre"   options={menus.chapters}    disabled={!menus.subjectId}/>
-                    <Select value={menus.exerciseId}   onChange={menus.setExerciseId}   label="Exercice"   options={menus.exercises}   disabled={!menus.chapterId}/>
+                    <Select value={menus.subjectId} onChange={menus.setSubjectId} label="Sujet" options={menus.subjects} disabled={!menus.complexityId} />
+                    <Select value={menus.chapterId} onChange={menus.setChapterId} label="Chapitre" options={menus.chapters} disabled={!menus.subjectId} />
+                    <Select value={menus.exerciseId} onChange={menus.setExerciseId} label="Exercice" options={menus.exercises} disabled={!menus.chapterId} />
 
                     <select
                       className="px-2 py-1 border rounded-md text-sm"
                       value={usageFilter}
-                      onChange={(e)=>setUsageFilter(e.target.value as any)}
+                      onChange={(e) => setUsageFilter(e.target.value as any)}
                     >
                       <option value="">Usage</option>
                       <option value="published">Déjà publiés</option>
@@ -677,9 +862,9 @@ ${it.solution_md ?? ""}
                     </select>
 
                     <div className="flex items-center gap-3 ml-2">
-                      {['Mécanique','Chaotique','Théorème'].map(tag => (
+                      {['Mécanique', 'Chaotique', 'Théorème'].map((tag) => (
                         <label key={tag} className="flex items-center gap-1 text-sm">
-                          <input type="checkbox" checked={activeTags.includes(tag)} onChange={()=>toggleTag(tag)} />
+                          <input type="checkbox" checked={activeTags.includes(tag)} onChange={() => toggleTag(tag)} />
                           {tag}
                         </label>
                       ))}
@@ -697,7 +882,7 @@ ${it.solution_md ?? ""}
                     <EmptyState text="Aucun item avec les filtres actuels" />
                   ) : (
                     <ul className="space-y-2">
-                      {filteredItems.map(it => (
+                      {filteredItems.map((it) => (
                         <DraggableSource key={it.id} id={it.id}>
                           <ItemCard item={it} published={publishedIds.has(it.id)} />
                         </DraggableSource>
@@ -718,26 +903,65 @@ ${it.solution_md ?? ""}
                 <div className="p-4 space-y-4">
                   {/* Référence PDF */}
                   <div className="space-y-1">
-                    <label htmlFor="pdf-ref" className="text-sm font-medium">Référence PDF</label>
+                    <label htmlFor="pdf-ref" className="text-sm font-medium">
+                      Référence PDF
+                    </label>
                     <input
                       id="pdf-ref"
                       value={refTitle}
-                      onChange={(e)=>setRefTitle(e.target.value)}
+                      onChange={(e) => setRefTitle(e.target.value)}
                       type="text"
                       placeholder="ex. arithmetique-cm1-serie-01"
                       className="w-full rounded-md border px-3 py-2 text-sm"
                     />
-                    <p className="text-xs text-neutral-500">Nom du projet Overleaf et du PDF publié (.zip / .pdf).</p>
+                    <p className="text-xs text-neutral-500">
+                      Nom du projet Overleaf et du PDF publié (.zip / .pdf).
+                    </p>
                   </div>
 
                   {/* Scope du PDF */}
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Scope du PDF</div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      <Select value={pubMenus.complexityId} onChange={(v)=>{ pubMenus.setComplexityId(v); pubMenus.setSubjectId(''); pubMenus.setChapterId(''); pubMenus.setExerciseId(''); }} label="Complexité" options={pubMenus.complexities} />
-                      <Select value={pubMenus.subjectId} onChange={(v)=>{ pubMenus.setSubjectId(v); pubMenus.setChapterId(''); pubMenus.setExerciseId(''); }} label="Sujet" options={pubMenus.subjects} disabled={!pubMenus.complexityId} />
-                      <Select value={pubMenus.chapterId} onChange={(v)=>{ pubMenus.setChapterId(v); pubMenus.setExerciseId(''); }} label="Chapitre" options={pubMenus.chapters} disabled={!pubMenus.subjectId} />
-                      <Select value={pubMenus.exerciseId} onChange={pubMenus.setExerciseId} label="Exercice" options={pubMenus.exercises} disabled={!pubMenus.chapterId} />
+                      <Select
+                        value={pubMenus.complexityId}
+                        onChange={(v) => {
+                          pubMenus.setComplexityId(v);
+                          pubMenus.setSubjectId('');
+                          pubMenus.setChapterId('');
+                          pubMenus.setExerciseId('');
+                        }}
+                        label="Complexité"
+                        options={pubMenus.complexities}
+                      />
+                      <Select
+                        value={pubMenus.subjectId}
+                        onChange={(v) => {
+                          pubMenus.setSubjectId(v);
+                          pubMenus.setChapterId('');
+                          pubMenus.setExerciseId('');
+                        }}
+                        label="Sujet"
+                        options={pubMenus.subjects}
+                        disabled={!pubMenus.complexityId}
+                      />
+                      <Select
+                        value={pubMenus.chapterId}
+                        onChange={(v) => {
+                          pubMenus.setChapterId(v);
+                          pubMenus.setExerciseId('');
+                        }}
+                        label="Chapitre"
+                        options={pubMenus.chapters}
+                        disabled={!pubMenus.subjectId}
+                      />
+                      <Select
+                        value={pubMenus.exerciseId}
+                        onChange={pubMenus.setExerciseId}
+                        label="Exercice"
+                        options={pubMenus.exercises}
+                        disabled={!pubMenus.chapterId}
+                      />
                     </div>
                     <p className="text-xs text-neutral-500">Ce scope est utilisé pour filtrer la Bibliothèque.</p>
                   </div>
@@ -751,15 +975,12 @@ ${it.solution_md ?? ""}
                 {/* Boîte droppable strictement limitée à la liste */}
                 <div className="rounded-md border-2 border-dashed p-3 overflow-hidden">
                   <SelectionDroppable>
-                    <SortableContext
-                      items={selected.map(i => 'sel-' + i.id)}
-                      strategy={verticalListSortingStrategy}
-                    >
+                    <SortableContext items={selected.map((i) => 'sel-' + i.id)} strategy={verticalListSortingStrategy}>
                       {selected.length === 0 ? (
                         <EmptyState text="Glisse ici les items à compiler" />
                       ) : (
                         <ul className="space-y-2">
-                          {selected.map(it => (
+                          {selected.map((it) => (
                             <SortableSelected key={it.id} id={'sel-' + it.id}>
                               <ItemCard item={it} published={publishedIds.has(it.id)}>
                                 <button
@@ -784,7 +1005,9 @@ ${it.solution_md ?? ""}
                   type="button"
                   onClick={handleExportZip}
                   disabled={!canExport}
-                  className={`w-full rounded-md px-3 py-2 text-sm border shadow-sm ${canExport ? 'hover:bg-neutral-50' : 'opacity-60 cursor-not-allowed'}`}
+                  className={`w-full rounded-md px-3 py-2 text-sm border shadow-sm ${
+                    canExport ? 'hover:bg-neutral-50' : 'opacity-60 cursor-not-allowed'
+                  }`}
                 >
                   Exporter ZIP (Overleaf)
                 </button>
@@ -817,7 +1040,7 @@ ${it.solution_md ?? ""}
 
           <DragOverlay>
             {activeDrag ? (
-              <ItemCard item={activeDrag} published={selected.some(s => s.id === activeDrag.id)} ghost />
+              <ItemCard item={activeDrag} published={selected.some((s) => s.id === activeDrag.id)} ghost />
             ) : null}
           </DragOverlay>
         </DndContext>
@@ -828,22 +1051,37 @@ ${it.solution_md ?? ""}
 
 /* ------------------------------- UI utils ------------------------------- */
 function Select({
-  value, onChange, label, options, disabled,
-}: { value: string; onChange: (v: string) => void; label: string; options: Option[]; disabled?: boolean }) {
+  value,
+  onChange,
+  label,
+  options,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+  options: Option[];
+  disabled?: boolean;
+}) {
   return (
     <select
       className="px-2.5 py-1.5 border rounded-md text-sm bg-white"
       value={value}
-      onChange={(e)=>onChange(e.target.value)}
+      onChange={(e) => onChange(e.target.value)}
       disabled={!!disabled}
     >
       <option value="">{label}</option>
-      {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+      {options.map((o) => (
+        <option key={o.id} value={o.id}>
+          {o.label}
+        </option>
+      ))}
     </select>
   );
 }
 
 function ItemCard({ item, published, ghost, children }: { item: Item; published?: boolean; ghost?: boolean; children?: React.ReactNode }) {
+  const qCount = Array.isArray(item.questions) ? item.questions.length : 0;
   return (
     <div className={`rounded-md border px-3 py-2 text-sm bg-white ${ghost ? 'opacity-70 shadow-lg' : 'hover:bg-neutral-50'} shadow-sm`}>
       <div className="flex items-start justify-between gap-3">
@@ -858,10 +1096,18 @@ function ItemCard({ item, published, ghost, children }: { item: Item; published?
         </div>
       </div>
       <div className="text-xs text-neutral-600 mt-1 break-words">{item.statement_md ?? '—'}</div>
+      <div className="mt-1.5 flex items-center gap-2 text-[10px] text-neutral-600">
+        <span className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 bg-neutral-50">
+          <span>Questions</span>
+          <strong>{qCount}</strong>
+        </span>
+      </div>
       {item.tags && item.tags.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {item.tags.map(t => (
-            <span key={t} className="text-[10px] px-1.5 py-0.5 border rounded-md bg-neutral-50">{t}</span>
+          {item.tags.map((t) => (
+            <span key={t} className="text-[10px] px-1.5 py-0.5 border rounded-md bg-neutral-50">
+              {t}
+            </span>
           ))}
         </div>
       )}
@@ -889,11 +1135,7 @@ function DraggableSource({ id, children }: { id: string; children: React.ReactNo
 function SelectionDroppable({ children }: { children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: 'selection-drop' });
   return (
-    <div
-      ref={setNodeRef}
-      className={`min-h-[140px] ${isOver ? 'bg-neutral-50' : ''}`}
-      id="selection-drop-box"
-    >
+    <div ref={setNodeRef} className={`min-h-[140px] ${isOver ? 'bg-neutral-50' : ''}`} id="selection-drop-box">
       {children}
     </div>
   );
