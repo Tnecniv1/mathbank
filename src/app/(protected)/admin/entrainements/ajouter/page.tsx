@@ -1,12 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL as string,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string
-);
+import { supabase } from '@/lib/supabaseClient';
 
 type ScopeType = 'niveau' | 'sujet' | 'chapitre' | 'lecon';
 type Mode = 'entrainement' | 'variante';
@@ -38,10 +33,11 @@ export default function AjouterEntrainementPage() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [varianteNo, setVarianteNo] = useState(1);
 
-  // 🔹 Nouveaux états: tags + difficulté
+  // 🔹 Nouveaux états: tags + difficulté + score_max
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [complexite, setComplexite] = useState<number | ''>('');
+  const [scoreMax, setScoreMax] = useState<number | ''>('');
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -213,12 +209,15 @@ export default function AjouterEntrainementPage() {
       if (!selectedEntrainement) throw new Error('Veuillez sélectionner un entraînement');
       if (!pdfFile) throw new Error('Veuillez sélectionner un fichier PDF');
 
-      // 🔒 Obligations nouvelles : au moins un tag + une complexité
+      // 🔒 Obligations nouvelles : au moins un tag + une complexité + score_max
       if (selectedTagIds.length === 0) {
         throw new Error('Veuillez sélectionner au moins un tag pour cette variante');
       }
       if (complexite === '' || typeof complexite !== 'number' || complexite < 1 || complexite > 5) {
         throw new Error('Veuillez choisir un niveau de difficulté (1 à 5)');
+      }
+      if (scoreMax === '' || typeof scoreMax !== 'number' || scoreMax < 0) {
+        throw new Error('Veuillez indiquer un score maximum valide');
       }
 
       // Upload du PDF
@@ -234,14 +233,15 @@ export default function AjouterEntrainementPage() {
         throw new Error("Erreur lors de l'upload du PDF: " + uploadError.message);
       }
 
-      // Créer la variante (inclut maintenant la complexité)
+      // Créer la variante (inclut maintenant la complexité + score_max)
       const { data: variante, error: varianteError } = await supabase
         .from('entrainement_variante')
         .insert({
           entrainement_id: selectedEntrainement,
           publication: filePath,
           variante_no: varianteNo,
-          complexite: complexite
+          complexite: complexite,
+          score_max: scoreMax
         })
         .select()
         .single();
@@ -266,7 +266,7 @@ export default function AjouterEntrainementPage() {
         );
       }
 
-      setMessage({ type: 'success', text: 'Variante PDF ajoutée avec succès (tags + difficulté ok) !' });
+      setMessage({ type: 'success', text: 'Variante PDF ajoutée avec succès (tags + difficulté + score max ok) !' });
 
       // Réinitialiser le formulaire variante
       setSelectedEntrainement('');
@@ -274,6 +274,7 @@ export default function AjouterEntrainementPage() {
       setVarianteNo(1);
       setSelectedTagIds([]);
       setComplexite('');
+      setScoreMax('');
     } catch (error: any) {
       console.error('Erreur complète:', error);
       const errorMessage = error?.message || error?.toString() || 'Une erreur est survenue';
@@ -480,7 +481,7 @@ export default function AjouterEntrainementPage() {
             <div className="bg-cyan-900/30 border border-cyan-500/50 rounded-lg p-4 mb-4">
               <p className="text-cyan-300 text-sm">
                 ℹ️ <strong>Étape 2</strong> : Sélectionnez un entraînement existant et ajoutez-y un PDF
-                (variante). <strong>Un tag et une difficulté sont obligatoires.</strong>
+                (variante). <strong>Un tag, une difficulté et un score maximum sont obligatoires.</strong>
               </p>
             </div>
 
@@ -548,6 +549,26 @@ export default function AjouterEntrainementPage() {
                 <option value="4">★ 4</option>
                 <option value="5">★ 5</option>
               </select>
+            </div>
+
+            {/* 🆕 Score Maximum (obligatoire) */}
+            <div>
+              <label className="block text-sm font-semibold text-cyan-300 mb-2">
+                Score Maximum *
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={scoreMax}
+                onChange={(e) => setScoreMax(e.target.value ? parseInt(e.target.value) : '')}
+                className="w-full px-4 py-2 bg-gray-700 border-2 border-gray-600 text-white rounded-lg focus:border-cyan-400 focus:outline-none"
+                placeholder="Ex: 100"
+                required
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Points maximum atteignables pour cette variante
+              </p>
             </div>
 
             {/* 🔹 Sélection des tags (obligatoire : au moins un) */}

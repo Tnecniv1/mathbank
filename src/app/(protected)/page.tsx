@@ -10,30 +10,23 @@ export default function HomePage() {
         <div className="flex gap-3 justify-center flex-wrap">
           <Link
             href="/library"
-            className="px-4 py-2 rounded-xl shadow bg-black text-white"
+            className="px-4 py-2 rounded-xl shadow bg-black text-white hover:bg-gray-800 transition-colors"
           >
             Bibliothèque
           </Link>
 
           <Link
-            href="/admin/entrainements/ajouter"
-            className="px-4 py-2 rounded-xl shadow bg-blue-600 text-white"
+            href="/progression"
+            className="px-4 py-2 rounded-xl shadow bg-purple-600 text-white hover:bg-purple-700 transition-colors"
           >
-            Admin - Ajouter un entraînement
+            Progression
           </Link>
 
           <Link
-            href="/admin/cours"
-            className="px-4 py-2 rounded-xl shadow bg-teal-600 text-white"
+            href="/admin"
+            className="px-4 py-2 rounded-xl shadow bg-teal-600 text-white hover:bg-teal-700 transition-colors"
           >
-            Admin - Ajouter un cours
-          </Link>
-
-          <Link
-            href="/admin/scope"
-            className="px-4 py-2 rounded-xl shadow bg-purple-600 text-white"
-          >
-            Admin - Gérer le Scope
+            Administration
           </Link>
         </div>
       </div>
