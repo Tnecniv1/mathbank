@@ -18,6 +18,7 @@ export default function AuthPage() {
   const [signupData, setSignupData] = useState({
     firstName: "",
     lastName: "",
+    birthDate: "", // NOUVEAU
     email: "",
     password: "",
     confirmPassword: "",
@@ -35,6 +36,10 @@ export default function AuthPage() {
   const validateSignupForm = () => {
     if (!signupData.firstName || !signupData.lastName) {
       setError("Nom et prénom sont requis");
+      return false;
+    }
+    if (!signupData.birthDate) {
+      setError("Date de naissance est requise");
       return false;
     }
     if (!signupData.email) {
@@ -121,6 +126,7 @@ export default function AuthPage() {
           preferences: {
             first_name: signupData.firstName,
             last_name: signupData.lastName,
+            birth_date: signupData.birthDate, // NOUVEAU
             address: signupData.address,
             city: signupData.city,
             postal_code: signupData.postalCode,
@@ -141,6 +147,7 @@ export default function AuthPage() {
       setSignupData({
         firstName: "",
         lastName: "",
+        birthDate: "",
         email: "",
         password: "",
         confirmPassword: "",
@@ -202,11 +209,11 @@ export default function AuthPage() {
         {mode === "login" && (
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label htmlFor="login-email" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+              <label htmlFor="loginEmail" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Email
               </label>
               <input
-                id="login-email"
+                id="loginEmail"
                 type="email"
                 required
                 value={loginEmail}
@@ -217,11 +224,11 @@ export default function AuthPage() {
             </div>
 
             <div>
-              <label htmlFor="login-password" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+              <label htmlFor="loginPassword" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Mot de passe
               </label>
               <input
-                id="login-password"
+                id="loginPassword"
                 type="password"
                 required
                 value={loginPassword}
@@ -277,13 +284,28 @@ export default function AuthPage() {
               </div>
             </div>
 
+            {/* Date de naissance - NOUVEAU */}
+            <div>
+              <label htmlFor="birthDate" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Date de naissance <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="birthDate"
+                type="date"
+                required
+                value={signupData.birthDate}
+                onChange={(e) => setSignupData({ ...signupData, birthDate: e.target.value })}
+                className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+              />
+            </div>
+
             {/* Email */}
             <div>
-              <label htmlFor="signup-email" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+              <label htmlFor="email" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Email <span className="text-red-500">*</span>
               </label>
               <input
-                id="signup-email"
+                id="email"
                 type="email"
                 required
                 value={signupData.email}
