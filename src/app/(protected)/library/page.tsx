@@ -52,8 +52,9 @@ type Progression = {
   score: number | null;
   temps_total: number;
   sessions: SessionTravail[];
-  statut: string; // NOUVEAU
-  commentaire_chef: string | null; // NOUVEAU
+  statut: string;
+  commentaire_chef: string | null;
+  est_bloquee?: boolean; // NOUVEAU : Feuille bloquée par le chef
 };
 
 /* ---------- Icônes ---------- */
@@ -86,6 +87,14 @@ const IconCircleFilled = () => (
 const IconCheck = () => (
   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
     <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const IconLock = () => (
+  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
+    <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="2" />
+    <path d="M12 15v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    <path d="M7 11V7a5 5 0 0110 0v4" stroke="currentColor" strokeWidth="2" />
   </svg>
 );
 
@@ -164,41 +173,60 @@ function FeuilleCard({
 }) {
   const [showModal, setShowModal] = useState(false);
 
-  // Déterminer le statut de la feuille
-  const estEnAttente = progression?.statut === 'en_attente';
+  // Déterminer le statut de la feuille (SIMPLIFIÉ - 3 COULEURS)
   const estValidee = progression?.statut === 'validee';
-  const estRejetee = progression?.statut === 'rejetee';
-  const estTerminee = progression?.est_termine && estValidee;
+  const estEnProgression = progression && !estValidee; // En cours, en attente, ou rejetée
+  const estBloquee = progression?.est_bloquee;
 
   const handlePastilleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    
+    // Si bloquée, afficher message
+    if (estBloquee) {
+      alert('🔒 Cette feuille est bloquée. Votre chef doit d\'abord valider votre travail en cours.');
+      return;
+    }
+    
     setShowModal(true);
+  };
+
+  const handleCardClick = () => {
+    // Si bloquée, empêcher l'ouverture
+    if (estBloquee) {
+      alert('🔒 Cette feuille est bloquée. Seule la feuille autorisée par votre chef est accessible.');
+      return;
+    }
+    
+    onOpen();
   };
 
   return (
     <>
       <button
-        onClick={onOpen}
-        className="group relative flex items-center gap-4 w-full px-4 py-3 rounded-lg border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-teal-500 dark:hover:border-teal-400 hover:shadow-md transition-all duration-200"
+        onClick={handleCardClick}
+        disabled={estBloquee}
+        className={`group relative flex items-center gap-4 w-full px-4 py-3 rounded-lg border-2 transition-all duration-200 ${
+          estBloquee
+            ? 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 opacity-60 cursor-not-allowed'
+            : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-teal-500 dark:hover:border-teal-400 hover:shadow-md'
+        }`}
       >
-        {/* Badge de statut */}
-        {estEnAttente && (
+        {/* Badge de blocage uniquement */}
+        {estBloquee && (
           <div className="absolute top-2 right-2 z-10">
-            <span className="px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-xs font-medium rounded-full">
-              ⏳ En attente
-            </span>
-          </div>
-        )}
-        {estRejetee && (
-          <div className="absolute top-2 right-2 z-10">
-            <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-medium rounded-full">
-              ❌ À revoir
+            <span className="px-2 py-1 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 text-xs font-medium rounded-full flex items-center gap-1">
+              <IconLock />
+              Bloquée
             </span>
           </div>
         )}
 
         {/* Numéro d'ordre avec pastille */}
-        <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-teal-500 to-teal-600 dark:from-teal-600 dark:dark:to-teal-700 text-white font-bold text-lg shadow-md group-hover:scale-110 transition-transform">
+        <div className={`flex items-center justify-center w-10 h-10 rounded-full text-white font-bold text-lg shadow-md transition-transform ${
+          estBloquee 
+            ? 'bg-slate-400 dark:bg-slate-600'
+            : 'bg-gradient-to-br from-teal-500 to-teal-600 dark:from-teal-600 dark:to-teal-700 group-hover:scale-110'
+        }`}>
           {feuille.ordre}
         </div>
 
@@ -216,29 +244,32 @@ function FeuilleCard({
         </div>
 
         {/* Icône PDF */}
-        <div className="text-slate-400 group-hover:text-teal-500 transition-colors">
+        <div className={`transition-colors ${
+          estBloquee 
+            ? 'text-slate-400'
+            : 'text-slate-400 group-hover:text-teal-500'
+        }`}>
           <IconFile />
         </div>
 
-        {/* Pastille de progression */}
+        {/* Pastille de progression - 3 COULEURS UNIQUEMENT */}
         <div
           onClick={handlePastilleClick}
           className="absolute -top-2 -right-2 cursor-pointer hover:scale-110 transition-transform"
         >
-          {estTerminee ? (
+          {estValidee ? (
+            // 🟣 VIOLET = Fait (validée)
             <div className="text-purple-600 dark:text-purple-400 drop-shadow-md">
               <IconCircleFilled />
             </div>
-          ) : estEnAttente ? (
+          ) : estEnProgression ? (
+            // 🟠 ORANGE = En progression (en cours, en attente, ou rejetée)
             <div className="text-orange-500 dark:text-orange-400 drop-shadow-md">
               <IconCircleFilled />
             </div>
-          ) : estRejetee ? (
-            <div className="text-red-500 dark:text-red-400 drop-shadow-md">
-              <IconCircleFilled />
-            </div>
           ) : (
-            <div className="text-slate-400 dark:text-slate-600 hover:text-purple-400 dark:hover:text-purple-500 transition-colors">
+            // ⚫ NOIR = Non fait
+            <div className="text-slate-800 dark:text-slate-400 hover:text-purple-400 dark:hover:text-purple-500 transition-colors">
               <IconCircleEmpty />
             </div>
           )}
@@ -246,7 +277,7 @@ function FeuilleCard({
       </button>
 
       {/* Modal de progression */}
-      {showModal && (
+      {showModal && !estBloquee && (
         <ProgressionModal
           feuille={feuille}
           progression={progression}
@@ -453,9 +484,8 @@ function ProgressionModal({
   };
 
   const tempsTotal = sessions.reduce((acc, s) => acc + s.duree, 0);
-  const estEnAttente = progression?.statut === 'en_attente';
-  const estRejetee = progression?.statut === 'rejetee';
   const estValidee = progression?.statut === 'validee';
+  const estEnProgression = progression && !estValidee; // En cours, en attente, ou rejetée
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -469,16 +499,16 @@ function ProgressionModal({
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Afficher le commentaire du chef si rejeté */}
-          {estRejetee && progression?.commentaire_chef && (
-            <div className="p-4 bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800 rounded-xl">
+          {/* Afficher le commentaire du chef si présent */}
+          {progression?.commentaire_chef && (
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl">
               <div className="flex items-start gap-3">
                 <div className="text-2xl">💬</div>
                 <div className="flex-1">
-                  <div className="font-semibold text-red-900 dark:text-red-100 mb-1">
+                  <div className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
                     Commentaire du chef :
                   </div>
-                  <p className="text-red-800 dark:text-red-200">
+                  <p className="text-blue-800 dark:text-blue-200">
                     {progression.commentaire_chef}
                   </p>
                 </div>
@@ -486,16 +516,16 @@ function ProgressionModal({
             </div>
           )}
 
-          {/* Afficher si en attente */}
-          {estEnAttente && (
-            <div className="p-4 bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-200 dark:border-orange-800 rounded-xl text-center">
-              <div className="text-3xl mb-2">⏳</div>
-              <div className="font-semibold text-orange-900 dark:text-orange-100">
-                En attente de validation
+          {/* Afficher si validée avec score */}
+          {estValidee && progression?.score && (
+            <div className="p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl text-center">
+              <div className="text-3xl mb-2">✅</div>
+              <div className="font-semibold text-green-900 dark:text-green-100">
+                Feuille validée !
               </div>
-              <p className="text-sm text-orange-700 dark:text-orange-300 mt-1">
-                Votre chef d'équipe doit valider votre travail
-              </p>
+              <div className="text-2xl font-bold text-green-700 dark:text-green-300 mt-2">
+                {progression.score}/20
+              </div>
             </div>
           )}
 
@@ -519,7 +549,7 @@ function ProgressionModal({
           <div>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-slate-900 dark:text-slate-100">Sessions de travail</h3>
-              {!estEnAttente && !estValidee && (
+              {!estValidee && (
                 <button
                   onClick={() => setShowAddSession(!showAddSession)}
                   className="px-3 py-1 bg-teal-500 hover:bg-teal-600 text-white text-sm font-medium rounded-lg transition-colors"
@@ -599,7 +629,7 @@ function ProgressionModal({
                         {session.duree} min {session.commentaire && `• ${session.commentaire}`}
                       </div>
                     </div>
-                    {!estEnAttente && !estValidee && (
+                    {!estValidee && (
                       <button
                         onClick={() => handleDeleteSession(session.id)}
                         className="px-3 py-1 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg transition-colors"
@@ -618,7 +648,7 @@ function ProgressionModal({
           </div>
 
           {/* Score final */}
-          {!estEnAttente && !estValidee && sessions.length > 0 && (
+          {!estValidee && sessions.length > 0 && (
             <div>
               <label className="block text-sm font-medium mb-2">Score final (sur 20)</label>
               <input
@@ -633,13 +663,11 @@ function ProgressionModal({
             </div>
           )}
 
-          {estValidee && progression?.score && (
-            <div className="p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl text-center">
-              <div className="text-3xl mb-2">✅</div>
-              <div className="font-semibold text-green-900 dark:text-green-100">
-                Feuille validée !
-              </div>
-              <div className="text-2xl font-bold text-green-700 dark:text-green-300 mt-2">
+          {/* Affichage du score si validée */}
+          {estValidee && progression?.score !== null && (
+            <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl text-center">
+              <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">Score final</div>
+              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">
                 {progression.score}/20
               </div>
             </div>
@@ -654,7 +682,7 @@ function ProgressionModal({
               Fermer
             </button>
             
-            {!estEnAttente && !estValidee && sessions.length > 0 && (
+            {!estValidee && sessions.length > 0 && (
               <button
                 onClick={handleValider}
                 disabled={saving}
@@ -780,8 +808,20 @@ export default function LibraryPage() {
       } else {
         setParcours(result.data);
         
-        // Charger les progressions de l'utilisateur
+        // ========================================
+        // NOUVEAU : Charger progressions + autorisations
+        // ========================================
         if (result.data) {
+          // Vérifier si membre d'une équipe
+          const { data: membre } = await supabase
+            .from('membre_equipe')
+            .select('feuille_autorisee_id')
+            .eq('user_id', user.id)
+            .single();
+
+          const feuilleAutoriseeId = membre?.feuille_autorisee_id;
+
+          // Charger progressions
           const { data: progressionsData } = await supabase
             .from('progression_feuille')
             .select(`
@@ -793,6 +833,11 @@ export default function LibraryPage() {
           if (progressionsData) {
             const progMap = new Map<string, Progression>();
             progressionsData.forEach((prog: any) => {
+              // Calculer si la feuille est bloquée
+              const estBloquee = membre && 
+                                 prog.feuille_id !== feuilleAutoriseeId && 
+                                 prog.statut !== 'validee';
+
               progMap.set(prog.feuille_id, {
                 id: prog.id,
                 feuille_id: prog.feuille_id,
@@ -802,6 +847,7 @@ export default function LibraryPage() {
                 sessions: prog.sessions || [],
                 statut: prog.statut || 'en_cours',
                 commentaire_chef: prog.commentaire_chef,
+                est_bloquee: estBloquee, // NOUVEAU
               });
             });
             setProgressions(progMap);
@@ -824,6 +870,15 @@ export default function LibraryPage() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session || !session.user) return;
     
+    // Recharger avec les autorisations
+    const { data: membre } = await supabase
+      .from('membre_equipe')
+      .select('feuille_autorisee_id')
+      .eq('user_id', session.user.id)
+      .single();
+
+    const feuilleAutoriseeId = membre?.feuille_autorisee_id;
+
     const { data: progressionsData } = await supabase
       .from('progression_feuille')
       .select(`
@@ -835,6 +890,10 @@ export default function LibraryPage() {
     if (progressionsData) {
       const progMap = new Map<string, Progression>();
       progressionsData.forEach((prog: any) => {
+        const estBloquee = membre && 
+                           prog.feuille_id !== feuilleAutoriseeId && 
+                           prog.statut !== 'validee';
+
         progMap.set(prog.feuille_id, {
           id: prog.id,
           feuille_id: prog.feuille_id,
@@ -844,6 +903,7 @@ export default function LibraryPage() {
           sessions: prog.sessions || [],
           statut: prog.statut || 'en_cours',
           commentaire_chef: prog.commentaire_chef,
+          est_bloquee: estBloquee,
         });
       });
       setProgressions(progMap);

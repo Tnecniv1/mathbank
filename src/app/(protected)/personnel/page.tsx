@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 
+/* ---------- TYPES ---------- */
 type Notification = {
   id: string;
   type: string;
@@ -38,6 +39,13 @@ type UserInfo = {
   role: string;
 };
 
+type Feuille = {
+  id: string;
+  titre: string;
+  ordre: number;
+};
+
+/* ---------- COMPOSANT PRINCIPAL ---------- */
 export default function PersonnelPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -53,10 +61,11 @@ export default function PersonnelPage() {
 
   // Modals
   const [showRejetModal, setShowRejetModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false); // NOUVEAU
-  const [showEditEquipeModal, setShowEditEquipeModal] = useState(false); // NOUVEAU
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showEditEquipeModal, setShowEditEquipeModal] = useState(false);
+  const [showValidationModal, setShowValidationModal] = useState(false); // NOUVEAU
   const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
-  const [equipeSelectionnee, setEquipeSelectionnee] = useState<MonEquipe | null>(null); // NOUVEAU
+  const [equipeSelectionnee, setEquipeSelectionnee] = useState<MonEquipe | null>(null);
   
   // État pour l'édition des infos
   const [editData, setEditData] = useState<UserInfo>({
@@ -70,7 +79,7 @@ export default function PersonnelPage() {
     role: '',
   });
 
-  // État pour l'édition d'équipe - NOUVEAU
+  // État pour l'édition d'équipe
   const [editEquipeData, setEditEquipeData] = useState({
     nom: '',
     description: '',
@@ -93,16 +102,10 @@ export default function PersonnelPage() {
 
       setUserId(session.user.id);
 
-      // Charger les infos personnelles - NOUVEAU
+      // Charger les données
       await loadUserInfo(session.user);
-
-      // Charger les notifications
       await loadNotifications(session.user.id);
-
-      // Charger mon équipe (si membre)
       await loadMonEquipe(session.user.id);
-
-      // Charger mes équipes (si chef)
       await loadMesEquipes(session.user.id);
 
     } catch (error: any) {
@@ -339,14 +342,26 @@ export default function PersonnelPage() {
     }
   }
 
+  // MODIFICATION : Ouvrir le modal de validation avec sélection de feuille
   async function handleValiderSoumission(notification: Notification) {
-    try {
-      const progressionId = notification.metadata?.progression_id;
-      if (!progressionId) return;
+    setNotificationSelectionnee(notification);
+    setShowValidationModal(true);
+  }
 
+  // NOUVEAU : Valider avec choix de la prochaine feuille
+  async function handleValiderAvecFeuille(
+    prochaineFeuilleId: string,
+    commentaire?: string
+  ) {
+    if (!notificationSelectionnee) return;
+
+    try {
+      const progressionId = notificationSelectionnee.metadata?.progression_id;
+      
       const { data, error } = await supabase.rpc('valider_soumission', {
         p_progression_id: progressionId,
-        p_commentaire: null,
+        p_commentaire: commentaire || null,
+        p_prochaine_feuille_id: prochaineFeuilleId,
       });
 
       if (error) throw error;
@@ -356,12 +371,14 @@ export default function PersonnelPage() {
         return;
       }
 
-      alert('✅ Soumission validée !');
-      marquerCommeLue(notification.id);
+      alert('✅ Soumission validée et prochaine feuille autorisée !');
+      marquerCommeLue(notificationSelectionnee.id);
+      setShowValidationModal(false);
+      setNotificationSelectionnee(null);
       loadData();
     } catch (error: any) {
       console.error(error);
-      alert('Erreur');
+      alert('Erreur lors de la validation');
     }
   }
 
@@ -499,9 +516,9 @@ export default function PersonnelPage() {
         </h1>
 
         <div className="grid md:grid-cols-2 gap-6">
-          {/* Colonne gauche : Stats, infos personnelles et équipe */}
+          {/* Colonne gauche : Infos et équipe */}
           <div className="space-y-6">
-            {/* Informations personnelles - NOUVEAU */}
+            {/* Informations personnelles */}
             {userInfo && (
               <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
                 <div className="flex items-center justify-between mb-4">
@@ -574,8 +591,6 @@ export default function PersonnelPage() {
               </div>
             )}
 
-
-
             {/* Mon équipe (si membre) */}
             {monEquipe && !isChef && (
               <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
@@ -630,7 +645,7 @@ export default function PersonnelPage() {
                             setEquipeSelectionnee(equipe);
                             setEditEquipeData({
                               nom: equipe.nom,
-                              description: '', // On chargera depuis la DB
+                              description: '',
                               couleur: equipe.couleur,
                             });
                             setShowEditEquipeModal(true);
@@ -709,7 +724,7 @@ export default function PersonnelPage() {
           </div>
         </div>
 
-        {/* Modal rejet */}
+        {/* Modals */}
         {showRejetModal && (
           <ModalRejet
             onClose={() => {
@@ -720,7 +735,6 @@ export default function PersonnelPage() {
           />
         )}
 
-        {/* Modal édition infos - NOUVEAU */}
         {showEditModal && (
           <ModalEditInfo
             data={editData}
@@ -730,7 +744,6 @@ export default function PersonnelPage() {
           />
         )}
 
-        {/* Modal édition équipe - NOUVEAU */}
         {showEditEquipeModal && equipeSelectionnee && (
           <ModalEditEquipe
             equipe={equipeSelectionnee}
@@ -743,12 +756,24 @@ export default function PersonnelPage() {
             onSave={handleSaveEquipe}
           />
         )}
+
+        {/* NOUVEAU : Modal de validation avec sélection de feuille */}
+        {showValidationModal && notificationSelectionnee && (
+          <ModalValidationAvecFeuille
+            notification={notificationSelectionnee}
+            onClose={() => {
+              setShowValidationModal(false);
+              setNotificationSelectionnee(null);
+            }}
+            onValider={handleValiderAvecFeuille}
+          />
+        )}
       </div>
     </main>
   );
 }
 
-// Composant : Carte de notification
+/* ---------- COMPOSANT : Carte de notification ---------- */
 function NotificationCard({ 
   notification, 
   onAccepter, 
@@ -834,7 +859,7 @@ function NotificationCard({
   );
 }
 
-// Modal : Rejeter une soumission
+/* ---------- MODAL : Rejeter une soumission ---------- */
 function ModalRejet({ onClose, onRejeter }: any) {
   const [commentaire, setCommentaire] = useState('');
 
@@ -881,7 +906,7 @@ function ModalRejet({ onClose, onRejeter }: any) {
   );
 }
 
-// Modal : Modifier les informations - NOUVEAU
+/* ---------- MODAL : Modifier les informations ---------- */
 function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
@@ -1041,9 +1066,8 @@ function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
   );
 }
 
-// Modal : Modifier une équipe - NOUVEAU
+/* ---------- MODAL : Modifier une équipe ---------- */
 function ModalEditEquipe({ equipe, data, onClose, onChange, onSave }: any) {
-  // Charger la description depuis la DB au montage
   React.useEffect(() => {
     async function loadEquipeDetails() {
       const { data: equipeData } = await supabase
@@ -1130,6 +1154,104 @@ function ModalEditEquipe({ equipe, data, onClose, onChange, onSave }: any) {
               className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all"
             >
               Enregistrer
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- MODAL : Validation avec sélection de feuille ---------- */
+function ModalValidationAvecFeuille({ 
+  notification, 
+  onClose, 
+  onValider 
+}: {
+  notification: Notification;
+  onClose: () => void;
+  onValider: (prochaineFeuilleId: string, commentaire?: string) => void;
+}) {
+  const [feuilles, setFeuilles] = useState<Feuille[]>([]);
+  const [feuilleSelectionnee, setFeuilleSelectionnee] = useState<string>('');
+  const [commentaire, setCommentaire] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadFeuilles() {
+      const { data } = await supabase
+        .from('feuille_entrainement')
+        .select('id, titre, ordre')
+        .order('ordre');
+      
+      setFeuilles(data || []);
+      setLoading(false);
+    }
+    loadFeuilles();
+  }, []);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full">
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">
+          Valider la soumission
+        </h2>
+
+        <div className="space-y-4">
+          {/* Sélection de la prochaine feuille */}
+          <div>
+            <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">
+              Prochaine feuille autorisée <span className="text-red-500">*</span>
+            </label>
+            {loading ? (
+              <div className="text-sm text-slate-500">Chargement...</div>
+            ) : (
+              <select
+                required
+                value={feuilleSelectionnee}
+                onChange={(e) => setFeuilleSelectionnee(e.target.value)}
+                className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              >
+                <option value="">-- Choisir une feuille --</option>
+                {feuilles.map(f => (
+                  <option key={f.id} value={f.id}>
+                    {f.ordre}. {f.titre}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Cette feuille sera la seule accessible par le membre
+            </p>
+          </div>
+
+          {/* Commentaire optionnel */}
+          <div>
+            <label className="block text-sm font-medium mb-1 text-slate-700 dark:text-slate-300">
+              Commentaire (optionnel)
+            </label>
+            <textarea
+              value={commentaire}
+              onChange={(e) => setCommentaire(e.target.value)}
+              placeholder="Bon travail ! Continue comme ça."
+              rows={3}
+              className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+            />
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={() => onValider(feuilleSelectionnee, commentaire)}
+              disabled={!feuilleSelectionnee}
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all"
+            >
+              Valider
             </button>
           </div>
         </div>
