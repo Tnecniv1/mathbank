@@ -327,17 +327,35 @@ function ProgressionModal({
         return;
       }
 
+      // NOUVEAU : Vérifier qu'il n'y a pas déjà une feuille en cours
+      if (!progression) {
+        const { data: autreEnCours } = await supabase
+          .from('progression_feuille')
+          .select('id')
+          .eq('user_id', userSession.user.id)
+          .is('statut', null) // Feuilles pas encore soumises
+          .neq('feuille_id', feuille.id);
+
+        if (autreEnCours && autreEnCours.length > 0) {
+          alert('⚠️ Vous avez déjà une autre feuille en cours. Terminez-la avant d\'en commencer une nouvelle.');
+          return;
+        }
+      }
+
       // Créer ou récupérer la progression
       let progressionId = progression?.id;
 
       if (!progressionId) {
+        // IMPORTANT : Ne pas créer la progression avec statut 'en_cours'
+        // Elle restera NULL jusqu'à la soumission
         const { data: newProg, error: progError } = await supabase
           .from('progression_feuille')
           .insert({
             user_id: userSession.user.id,
             feuille_id: feuille.id,
             est_termine: false,
-            statut: 'en_cours',
+            en_cours: false, // Pas "en cours" tant que non soumise
+            statut: null, // Pas de statut tant que non soumise
           })
           .select()
           .single();
@@ -385,8 +403,14 @@ function ProgressionModal({
     try {
       setSaving(true);
       
-      if (!progression) {
-        alert('Aucune progression à valider');
+      // Vérifier qu'on a des sessions ET un score
+      if (sessions.length === 0) {
+        alert('Ajoutez au moins une session de travail');
+        return;
+      }
+
+      if (!score || parseInt(score) < 0 || parseInt(score) > 20) {
+        alert('Veuillez entrer un score valide entre 0 et 20');
         return;
       }
 
@@ -409,19 +433,42 @@ function ProgressionModal({
         // → Soumettre pour validation par le chef
         // ========================================
         
-        // Mettre à jour le score d'abord
-        const { error: updateError } = await supabase
-          .from('progression_feuille')
-          .update({
-            score: score ? parseInt(score) : null,
-          })
-          .eq('id', progression.id);
+        // Créer ou récupérer la progression
+        let progressionId = progression?.id;
 
-        if (updateError) throw updateError;
+        if (!progressionId) {
+          const { data: newProg, error: progError } = await supabase
+            .from('progression_feuille')
+            .insert({
+              user_id: userSession.user.id,
+              feuille_id: feuille.id,
+              est_termine: false,
+              en_cours: true, // Maintenant oui, car on soumet
+              statut: 'en_cours',
+              score: parseInt(score),
+            })
+            .select()
+            .single();
+
+          if (progError) throw progError;
+          progressionId = newProg.id;
+        } else {
+          // Mettre à jour le score et le statut
+          const { error: updateError } = await supabase
+            .from('progression_feuille')
+            .update({
+              score: parseInt(score),
+              en_cours: true,
+              statut: 'en_cours',
+            })
+            .eq('id', progressionId);
+
+          if (updateError) throw updateError;
+        }
 
         // Appeler la fonction de soumission
         const { data, error } = await supabase.rpc('soumettre_feuille', {
-          p_progression_id: progression.id
+          p_progression_id: progressionId
         });
 
         if (error) throw error;
@@ -438,17 +485,38 @@ function ProgressionModal({
         // → Validation automatique (comme avant)
         // ========================================
         
-        const { error } = await supabase
-          .from('progression_feuille')
-          .update({
-            est_termine: true,
-            statut: 'validee',
-            score: score ? parseInt(score) : null,
-            validee_at: new Date().toISOString()
-          })
-          .eq('id', progression.id);
+        let progressionId = progression?.id;
 
-        if (error) throw error;
+        if (!progressionId) {
+          const { data: newProg, error: progError } = await supabase
+            .from('progression_feuille')
+            .insert({
+              user_id: userSession.user.id,
+              feuille_id: feuille.id,
+              est_termine: true,
+              en_cours: false,
+              statut: 'validee',
+              score: parseInt(score),
+              validee_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+          if (progError) throw progError;
+        } else {
+          const { error } = await supabase
+            .from('progression_feuille')
+            .update({
+              est_termine: true,
+              en_cours: false,
+              statut: 'validee',
+              score: parseInt(score),
+              validee_at: new Date().toISOString()
+            })
+            .eq('id', progressionId);
+
+          if (error) throw error;
+        }
 
         alert('✅ Feuille terminée !');
       }
@@ -485,7 +553,232 @@ function ProgressionModal({
 
   const tempsTotal = sessions.reduce((acc, s) => acc + s.duree, 0);
   const estValidee = progression?.statut === 'validee';
-  const estEnProgression = progression && !estValidee; // En cours, en attente, ou rejetée
+  const estEnProgression = progression && !estValidee;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-gradient-to-r from-teal-500 to-teal-600 dark:from-teal-600 dark:to-teal-700 p-6 rounded-t-2xl">
+          <h2 className="text-2xl font-bold text-white">{feuille.titre}</h2>
+          {feuille.description && (
+            <p className="text-teal-100 mt-1">{feuille.description}</p>
+          )}
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* Afficher le commentaire du chef si présent */}
+          {progression?.commentaire_chef && (
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">💬</div>
+                <div className="flex-1">
+                  <div className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
+                    Commentaire du chef :
+                  </div>
+                  <p className="text-blue-800 dark:text-blue-200">
+                    {progression.commentaire_chef}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Afficher si validée avec score */}
+          {estValidee && progression?.score !== null && (
+            <div className="p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl text-center">
+              <div className="text-3xl mb-2">✅</div>
+              <div className="font-semibold text-green-900 dark:text-green-100">
+                Feuille validée !
+              </div>
+              <div className="text-2xl font-bold text-green-700 dark:text-green-300 mt-2">
+                {progression.score}/20
+              </div>
+            </div>
+          )}
+
+          {/* Statistiques */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl text-center">
+              <div className="text-2xl font-bold text-teal-600 dark:text-teal-400">
+                {sessions.length}
+              </div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">Session{sessions.length > 1 ? 's' : ''}</div>
+            </div>
+            <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl text-center">
+              <div className="text-2xl font-bold text-teal-600 dark:text-teal-400">
+                {tempsTotal} min
+              </div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">Temps total</div>
+            </div>
+          </div>
+
+          {/* Liste des sessions */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-slate-900 dark:text-slate-100">Sessions de travail</h3>
+              {!estValidee && (
+                <button
+                  onClick={() => setShowAddSession(!showAddSession)}
+                  className="px-3 py-1 bg-teal-500 hover:bg-teal-600 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  {showAddSession ? 'Annuler' : '+ Ajouter'}
+                </button>
+              )}
+            </div>
+
+            {/* Formulaire d'ajout */}
+            {showAddSession && (
+              <div className="mb-4 p-4 bg-slate-100 dark:bg-slate-800 rounded-xl space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Date</label>
+                    <input
+                      type="date"
+                      value={newSession.date}
+                      onChange={(e) => setNewSession({ ...newSession, date: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Heure</label>
+                    <input
+                      type="time"
+                      value={newSession.heure}
+                      onChange={(e) => setNewSession({ ...newSession, heure: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Durée (minutes)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newSession.duree}
+                    onChange={(e) => setNewSession({ ...newSession, duree: e.target.value })}
+                    placeholder="60"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Commentaire (optionnel)</label>
+                  <textarea
+                    value={newSession.commentaire}
+                    onChange={(e) => setNewSession({ ...newSession, commentaire: e.target.value })}
+                    placeholder="Notes sur cette session..."
+                    rows={2}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <button
+                  onClick={handleAddSession}
+                  className="w-full px-4 py-2 bg-teal-500 hover:bg-teal-600 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+                >
+                  <IconCheck />
+                  Enregistrer la session
+                </button>
+              </div>
+            )}
+
+            {/* Liste */}
+            {sessions.length > 0 ? (
+              <div className="space-y-2">
+                {sessions.map((session) => (
+                  <div
+                    key={session.id}
+                    className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg flex items-center justify-between"
+                  >
+                    <div className="flex-1">
+                      <div className="font-medium text-slate-900 dark:text-slate-100">
+                        {new Date(session.date).toLocaleDateString('fr-FR')} à {session.heure}
+                      </div>
+                      <div className="text-sm text-slate-600 dark:text-slate-400">
+                        {session.duree} min {session.commentaire && `• ${session.commentaire}`}
+                      </div>
+                    </div>
+                    {!estValidee && (
+                      <button
+                        onClick={() => handleDeleteSession(session.id)}
+                        className="px-3 py-1 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg transition-colors"
+                      >
+                        Supprimer
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-slate-500 dark:text-slate-400 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-lg">
+                Aucune session enregistrée
+              </div>
+            )}
+          </div>
+
+          {/* IMPORTANT : Score TOUJOURS visible (sauf si validée) */}
+          {!estValidee && (
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Score final (sur 20) <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="20"
+                step="0.5"
+                value={score}
+                onChange={(e) => setScore(e.target.value)}
+                placeholder="18"
+                className="w-full px-4 py-3 rounded-lg border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Requis pour soumettre la feuille
+              </p>
+            </div>
+          )}
+
+          {/* Affichage du score si validée */}
+          {estValidee && progression?.score !== null && (
+            <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl text-center">
+              <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">Score final</div>
+              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">
+                {progression.score}/20
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-3 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
+            >
+              Fermer
+            </button>
+            
+            {/* Bouton de soumission visible seulement si sessions + score */}
+            {!estValidee && (
+              <button
+                onClick={handleValider}
+                disabled={saving || sessions.length === 0 || !score}
+                className="flex-1 px-4 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-semibold rounded-xl shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                title={
+                  sessions.length === 0 
+                    ? "Ajoutez au moins une session"
+                    : !score 
+                    ? "Entrez un score"
+                    : ""
+                }
+              >
+                {saving ? 'Soumission...' : 'Valider et soumettre'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+} // En cours, en attente, ou rejetée
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

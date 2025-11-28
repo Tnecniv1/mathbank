@@ -63,7 +63,8 @@ export default function PersonnelPage() {
   const [showRejetModal, setShowRejetModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEditEquipeModal, setShowEditEquipeModal] = useState(false);
-  const [showValidationModal, setShowValidationModal] = useState(false); // NOUVEAU
+  const [showValidationModal, setShowValidationModal] = useState(false);
+  const [showAcceptationModal, setShowAcceptationModal] = useState(false); // NOUVEAU
   const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
   const [equipeSelectionnee, setEquipeSelectionnee] = useState<MonEquipe | null>(null);
   
@@ -297,8 +298,26 @@ export default function PersonnelPage() {
       const demandeId = notification.metadata?.demande_id;
       if (!demandeId) return;
 
+      // NOUVEAU : Demander au chef de choisir la feuille de départ
+      // Pour simplifier, on ouvre un modal pour sélectionner la feuille
+      setNotificationSelectionnee(notification);
+      setShowAcceptationModal(true);
+    } catch (error: any) {
+      console.error(error);
+      alert('Erreur');
+    }
+  }
+
+  // NOUVELLE FONCTION : Accepter avec feuille de départ
+  async function handleAccepterAvecFeuille(feuilleDepart: string) {
+    if (!notificationSelectionnee) return;
+
+    try {
+      const demandeId = notificationSelectionnee.metadata?.demande_id;
+      
       const { data, error } = await supabase.rpc('accepter_demande', {
         p_demande_id: demandeId,
+        p_feuille_depart_id: feuilleDepart,
       });
 
       if (error) throw error;
@@ -308,12 +327,14 @@ export default function PersonnelPage() {
         return;
       }
 
-      alert('✅ Demande acceptée !');
-      marquerCommeLue(notification.id);
+      alert('✅ Demande acceptée et feuille de départ définie !');
+      marquerCommeLue(notificationSelectionnee.id);
+      setShowAcceptationModal(false);
+      setNotificationSelectionnee(null);
       loadData();
     } catch (error: any) {
       console.error(error);
-      alert('Erreur');
+      alert('Erreur lors de l\'acceptation');
     }
   }
 
@@ -766,6 +787,18 @@ export default function PersonnelPage() {
               setNotificationSelectionnee(null);
             }}
             onValider={handleValiderAvecFeuille}
+          />
+        )}
+
+        {/* NOUVEAU : Modal d'acceptation avec sélection de feuille de départ */}
+        {showAcceptationModal && notificationSelectionnee && (
+          <ModalAcceptationAvecFeuille
+            notification={notificationSelectionnee}
+            onClose={() => {
+              setShowAcceptationModal(false);
+              setNotificationSelectionnee(null);
+            }}
+            onAccepter={handleAccepterAvecFeuille}
           />
         )}
       </div>
@@ -1252,6 +1285,93 @@ function ModalValidationAvecFeuille({
               className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all"
             >
               Valider
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- MODAL : Acceptation avec sélection de feuille de départ ---------- */
+function ModalAcceptationAvecFeuille({
+  notification,
+  onClose,
+  onAccepter,
+}: {
+  notification: Notification;
+  onClose: () => void;
+  onAccepter: (feuilleDepart: string) => void;
+}) {
+  const [feuilles, setFeuilles] = useState<Feuille[]>([]);
+  const [feuilleSelectionnee, setFeuilleSelectionnee] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadFeuilles() {
+      const { data } = await supabase
+        .from('feuille_entrainement')
+        .select('id, titre, ordre')
+        .order('ordre');
+      
+      setFeuilles(data || []);
+      setLoading(false);
+    }
+    loadFeuilles();
+  }, []);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full">
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">
+          Accepter dans l'équipe
+        </h2>
+
+        <p className="text-slate-600 dark:text-slate-400 mb-6">
+          Choisissez la feuille par laquelle ce membre doit commencer.
+        </p>
+
+        <div className="space-y-4">
+          {/* Sélection de la feuille de départ */}
+          <div>
+            <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">
+              Feuille de départ <span className="text-red-500">*</span>
+            </label>
+            {loading ? (
+              <div className="text-sm text-slate-500">Chargement...</div>
+            ) : (
+              <select
+                required
+                value={feuilleSelectionnee}
+                onChange={(e) => setFeuilleSelectionnee(e.target.value)}
+                className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              >
+                <option value="">-- Choisir une feuille --</option>
+                {feuilles.map(f => (
+                  <option key={f.id} value={f.id}>
+                    {f.ordre}. {f.titre}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Cette feuille sera la seule accessible au début
+            </p>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={() => onAccepter(feuilleSelectionnee)}
+              disabled={!feuilleSelectionnee}
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all"
+            >
+              Accepter
             </button>
           </div>
         </div>
