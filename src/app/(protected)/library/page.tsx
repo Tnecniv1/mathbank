@@ -172,6 +172,25 @@ function FeuilleCard({
   onUpdateProgression: () => void;
 }) {
   const [showModal, setShowModal] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+
+  // Vérifier si cette feuille est la feuille autorisée
+  useEffect(() => {
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session || !session.user) return;
+
+      const { data: membre } = await supabase
+        .from('membre_equipe')
+        .select('feuille_autorisee_id')
+        .eq('user_id', session.user.id)
+        .single();
+
+      if (membre && membre.feuille_autorisee_id === feuille.id) {
+        setIsAuthorized(true);
+      }
+    })();
+  }, [feuille.id]);
 
   // Déterminer le statut de la feuille (SIMPLIFIÉ - 3 COULEURS)
   const estValidee = progression?.statut === 'validee';
@@ -208,15 +227,26 @@ function FeuilleCard({
         className={`group relative flex items-center gap-4 w-full px-4 py-3 rounded-lg border-2 transition-all duration-200 ${
           estBloquee
             ? 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 opacity-60 cursor-not-allowed'
+            : isAuthorized && !estValidee
+            ? 'border-green-400 dark:border-green-600 bg-green-50 dark:bg-green-900/20 hover:border-green-500 dark:hover:border-green-500 hover:shadow-lg'
             : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-teal-500 dark:hover:border-teal-400 hover:shadow-md'
         }`}
       >
-        {/* Badge de blocage uniquement */}
+        {/* Badge de blocage */}
         {estBloquee && (
           <div className="absolute top-2 right-2 z-10">
             <span className="px-2 py-1 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 text-xs font-medium rounded-full flex items-center gap-1">
               <IconLock />
               Bloquée
+            </span>
+          </div>
+        )}
+
+        {/* Badge feuille autorisée */}
+        {isAuthorized && !estValidee && !estBloquee && (
+          <div className="absolute top-2 right-2 z-10">
+            <span className="px-3 py-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white text-xs font-bold rounded-full flex items-center gap-1 shadow-md animate-pulse">
+              ✓ À faire
             </span>
           </div>
         )}
@@ -912,8 +942,10 @@ export default function LibraryPage() {
             `)
             .eq('user_id', user.id);
 
+          const progMap = new Map<string, Progression>();
+
+          // Remplir avec les progressions existantes
           if (progressionsData) {
-            const progMap = new Map<string, Progression>();
             progressionsData.forEach((prog: any) => {
               // Calculer si la feuille est bloquée
               const estBloquee = membre && 
@@ -929,11 +961,38 @@ export default function LibraryPage() {
                 sessions: prog.sessions || [],
                 statut: prog.statut || 'en_cours',
                 commentaire_chef: prog.commentaire_chef,
-                est_bloquee: estBloquee, // NOUVEAU
+                est_bloquee: estBloquee,
               });
             });
-            setProgressions(progMap);
           }
+
+          // NOUVEAU : Si membre d'équipe, bloquer TOUTES les feuilles sauf l'autorisée
+          if (membre && feuilleAutoriseeId) {
+            // Parcourir toutes les feuilles du parcours
+            result.data.sujets.forEach((sujet: any) => {
+              sujet.chapitres.forEach((chapitre: any) => {
+                chapitre.feuilles.forEach((feuille: any) => {
+                  // Si cette feuille n'a pas de progression ET n'est pas autorisée
+                  if (!progMap.has(feuille.id) && feuille.id !== feuilleAutoriseeId) {
+                    // Créer une entrée "bloquée"
+                    progMap.set(feuille.id, {
+                      id: '',
+                      feuille_id: feuille.id,
+                      est_termine: false,
+                      score: null,
+                      temps_total: 0,
+                      sessions: [],
+                      statut: null,
+                      commentaire_chef: null,
+                      est_bloquee: true, // BLOQUÉE
+                    });
+                  }
+                });
+              });
+            });
+          }
+
+          setProgressions(progMap);
         }
       }
       setLoading(false);
@@ -947,7 +1006,7 @@ export default function LibraryPage() {
 
   // Recharger la progression après mise à jour
   const handleProgressionUpdate = async () => {
-    if (!niveauSelectionne) return;
+    if (!niveauSelectionne || !parcours) return;
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session || !session.user) return;
@@ -969,8 +1028,10 @@ export default function LibraryPage() {
       `)
       .eq('user_id', session.user.id);
 
+    const progMap = new Map<string, Progression>();
+
+    // Remplir avec les progressions existantes
     if (progressionsData) {
-      const progMap = new Map<string, Progression>();
       progressionsData.forEach((prog: any) => {
         const estBloquee = membre && 
                            prog.feuille_id !== feuilleAutoriseeId && 
@@ -988,8 +1049,32 @@ export default function LibraryPage() {
           est_bloquee: estBloquee,
         });
       });
-      setProgressions(progMap);
     }
+
+    // NOUVEAU : Si membre d'équipe, bloquer TOUTES les feuilles sauf l'autorisée
+    if (membre && feuilleAutoriseeId && parcours) {
+      parcours.sujets.forEach((sujet: any) => {
+        sujet.chapitres.forEach((chapitre: any) => {
+          chapitre.feuilles.forEach((feuille: any) => {
+            if (!progMap.has(feuille.id) && feuille.id !== feuilleAutoriseeId) {
+              progMap.set(feuille.id, {
+                id: '',
+                feuille_id: feuille.id,
+                est_termine: false,
+                score: null,
+                temps_total: 0,
+                sessions: [],
+                statut: null,
+                commentaire_chef: null,
+                est_bloquee: true,
+              });
+            }
+          });
+        });
+      });
+    }
+
+    setProgressions(progMap);
   };
 
   /* ---------- États de chargement / erreur ---------- */
