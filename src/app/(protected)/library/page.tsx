@@ -778,9 +778,6 @@ function ProgressionModal({
       </div>
     </div>
   );
-} // En cours, en attente, ou rejetée
-
-
 
 /* ---------- Composant Chapitre ---------- */
 function ChapitreSection({ chapitre, progressions, onOpenPdf, onProgressionUpdate }: { chapitre: Chapitre; progressions: Map<string, Progression>; onOpenPdf: (url: string) => void; onProgressionUpdate: () => void }) {
