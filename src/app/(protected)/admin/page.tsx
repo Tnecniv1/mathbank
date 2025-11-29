@@ -45,6 +45,17 @@ type NiveauWithData = Niveau & {
   })[];
 };
 
+type DemandeCreation = {
+  id: string;
+  demandeur_id: string;
+  nom_equipe: string;
+  description: string | null;
+  statut: 'en_attente' | 'approuvee' | 'refusee';
+  created_at: string;
+  demandeur_nom?: string;
+  demandeur_email?: string;
+};
+
 /* ---------- Icônes ---------- */
 const IconPlus = () => (
   <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
@@ -967,6 +978,10 @@ function NiveauItem({
 /* ---------- Page principale ---------- */
 export default function AdminPage() {
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [activeTab, setActiveTab] = useState<'bibliotheque' | 'demandes'>('bibliotheque');
+  
+  // États bibliothèque
   const [niveaux, setNiveaux] = useState<NiveauWithData[]>([]);
   const [openNiveaux, setOpenNiveaux] = useState<Set<string>>(new Set());
   const [openSujets, setOpenSujets] = useState<Set<string>>(new Set());
@@ -976,10 +991,41 @@ export default function AdminPage() {
   const [modalType, setModalType] = useState<'niveau' | 'sujet' | 'chapitre' | 'feuille' | null>(null);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [parentId, setParentId] = useState<string | null>(null);
+  
+  // États demandes d'équipes
+  const [demandes, setDemandes] = useState<DemandeCreation[]>([]);
+  const [loadingDemandes, setLoadingDemandes] = useState(false);
 
   useEffect(() => {
-    loadData();
+    checkAdminAndLoadData();
   }, []);
+
+  async function checkAdminAndLoadData() {
+    setLoading(true);
+    
+    // Vérifier si l'utilisateur est admin
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      alert('Vous devez être connecté');
+      window.location.href = '/';
+      return;
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('user_id', session.user.id)
+      .single();
+
+    if (profile?.role !== 'admin') {
+      alert('⛔ Accès refusé : Cette page est réservée aux administrateurs');
+      window.location.href = '/';
+      return;
+    }
+
+    setIsAdmin(true);
+    await Promise.all([loadData(), loadDemandes()]);
+  }
 
   async function loadData() {
     setLoading(true);
@@ -1017,6 +1063,84 @@ export default function AdminPage() {
       }
     }
     setLoading(false);
+  }
+
+  async function loadDemandes() {
+    setLoadingDemandes(true);
+    try {
+      const { data: demandesData } = await supabase
+        .from('demande_creation_equipe')
+        .select('*')
+        .eq('statut', 'en_attente')
+        .order('created_at', { ascending: false });
+
+      if (demandesData) {
+        const formatted = await Promise.all(demandesData.map(async (d: any) => {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('user_id', d.demandeur_id)
+            .single();
+
+          return {
+            ...d,
+            demandeur_nom: profile?.full_name || 'Utilisateur inconnu',
+          };
+        }));
+        setDemandes(formatted);
+      }
+    } catch (error) {
+      console.error('Erreur chargement demandes:', error);
+    }
+    setLoadingDemandes(false);
+  }
+
+  async function handleApprouverDemande(demandeId: string) {
+    if (!confirm('Approuver cette demande de création d\'équipe ?')) return;
+
+    try {
+      const { data, error } = await supabase.rpc('approuver_creation_equipe', {
+        p_demande_id: demandeId
+      });
+
+      if (error) throw error;
+
+      if (!data.success) {
+        alert(data.error);
+        return;
+      }
+
+      alert('✅ Équipe créée avec succès !');
+      loadDemandes();
+    } catch (error: any) {
+      console.error(error);
+      alert('Erreur lors de l\'approbation: ' + error.message);
+    }
+  }
+
+  async function handleRefuserDemande(demandeId: string) {
+    const raison = prompt('Raison du refus :');
+    if (!raison || !raison.trim()) return;
+
+    try {
+      const { data, error } = await supabase.rpc('refuser_creation_equipe', {
+        p_demande_id: demandeId,
+        p_raison_refus: raison
+      });
+
+      if (error) throw error;
+
+      if (!data.success) {
+        alert(data.error);
+        return;
+      }
+
+      alert('Demande refusée');
+      loadDemandes();
+    } catch (error: any) {
+      console.error(error);
+      alert('Erreur lors du refus: ' + error.message);
+    }
   }
 
   async function moveItem(table: string, items: any[], index: number, direction: 'up' | 'down') {
@@ -1107,19 +1231,55 @@ export default function AdminPage() {
     <main className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100">
       <div className="max-w-5xl mx-auto px-6 py-8">
         {/* Header */}
-        <header className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-extrabold tracking-tight mb-2">
-              <span className="text-slate-800 dark:text-white">Administration </span>
-              <span className="text-teal-600 dark:text-teal-400">Bibliothèque</span>
-            </h1>
-            <p className="text-slate-500 dark:text-slate-400">Gérez la structure et le contenu de votre parcours</p>
+        <header className="mb-8">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="text-3xl font-extrabold tracking-tight mb-2">
+                <span className="text-slate-800 dark:text-white">Administration</span>
+              </h1>
+              <p className="text-slate-500 dark:text-slate-400">Gérez la bibliothèque et les demandes d'équipes</p>
+            </div>
           </div>
-          <Button onClick={() => openModal('niveau')}>
-            <IconPlus />
-            Nouveau niveau
-          </Button>
+
+          {/* Onglets */}
+          <div className="flex gap-4">
+            <button
+              onClick={() => setActiveTab('bibliotheque')}
+              className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
+                activeTab === 'bibliotheque'
+                  ? 'bg-teal-500 text-white shadow-lg'
+                  : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700'
+              }`}
+            >
+              📚 Bibliothèque
+            </button>
+            <button
+              onClick={() => setActiveTab('demandes')}
+              className={`px-6 py-3 rounded-lg font-semibold transition-colors relative ${
+                activeTab === 'demandes'
+                  ? 'bg-teal-500 text-white shadow-lg'
+                  : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700'
+              }`}
+            >
+              👥 Demandes d'équipes
+              {demandes.length > 0 && (
+                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-pulse">
+                  {demandes.length}
+                </span>
+              )}
+            </button>
+          </div>
         </header>
+
+        {/* Contenu selon l'onglet */}
+        {activeTab === 'bibliotheque' ? (
+          <>
+            <div className="mb-4">
+              <Button onClick={() => openModal('niveau')}>
+                <IconPlus />
+                Nouveau niveau
+              </Button>
+            </div>
 
         {/* Contenu */}
         {niveaux.length === 0 ? (
@@ -1174,6 +1334,76 @@ export default function AdminPage() {
             ))}
           </div>
         )}
+          </>
+        ) : (
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 border-2 border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                        Demandes de création d'équipes
+                      </h2>
+                      {demandes.length > 0 && (
+                        <span className="px-4 py-2 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 font-semibold rounded-full">
+                          {demandes.length} en attente
+                        </span>
+                      )}
+                    </div>
+
+                    {loadingDemandes ? (
+                      <div className="text-center py-12">
+                        <Loader />
+                        <p className="mt-4 text-slate-600 dark:text-slate-400">Chargement...</p>
+                      </div>
+                    ) : demandes.length === 0 ? (
+                      <div className="text-center py-16">
+                        <div className="text-6xl mb-4">✅</div>
+                        <p className="text-lg font-medium">Aucune demande en attente</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {demandes.map(demande => (
+                          <div key={demande.id} className="p-6 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-slate-200 dark:border-slate-700">
+                            <div className="flex items-start justify-between mb-4">
+                              <div className="flex-1">
+                                <h3 className="text-xl font-bold mb-1">{demande.nom_equipe}</h3>
+                                <p className="text-sm text-slate-600 dark:text-slate-400">
+                                  Par : <span className="font-semibold">{demande.demandeur_nom}</span>
+                                </p>
+                                <p className="text-xs text-slate-500 mt-1">
+                                  {new Date(demande.created_at).toLocaleDateString('fr-FR', {
+                                    day: 'numeric',
+                                    month: 'long',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </p>
+                                {demande.description && (
+                                  <p className="mt-3 p-3 bg-white dark:bg-slate-900 rounded-lg border">
+                                    "{demande.description}"
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex gap-3 pt-4 border-t">
+                              <button
+                                onClick={() => handleApprouverDemande(demande.id)}
+                                className="flex-1 px-5 py-3 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg"
+                              >
+                                ✓ Approuver
+                              </button>
+                              <button
+                                onClick={() => handleRefuserDemande(demande.id)}
+                                className="flex-1 px-5 py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg"
+                              >
+                                ✗ Refuser
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
       </div>
 
       {/* Modal */}

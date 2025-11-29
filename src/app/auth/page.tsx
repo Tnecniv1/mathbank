@@ -79,7 +79,7 @@ export default function AuthPage() {
 
       if (error) throw error;
 
-      router.push("/library");
+      router.push("/");
       router.refresh();
     } catch (e: any) {
       setError(e.message ?? "Erreur de connexion");

@@ -91,12 +91,11 @@ export default function ClassementPage() {
     }
   }
 
-  async function handleCreateEquipe(nom: string, description: string, couleur: string) {
+  async function handleDemanderCreation(nom: string, description: string) {
     try {
-      const { data, error } = await supabase.rpc('create_equipe', {
-        p_nom: nom,
-        p_description: description,
-        p_couleur: couleur,
+      const { data, error } = await supabase.rpc('demander_creation_equipe', {
+        p_nom_equipe: nom,
+        p_description: description || null,
       });
 
       if (error) throw error;
@@ -106,12 +105,12 @@ export default function ClassementPage() {
         return;
       }
 
-      alert('✅ Équipe créée avec succès !');
+      alert('✅ Demande envoyée ! Un administrateur va examiner votre demande.');
       setShowCreateModal(false);
       loadClassement();
     } catch (error: any) {
       console.error(error);
-      alert('Erreur lors de la création');
+      alert('Erreur lors de l\'envoi de la demande');
     }
   }
 
@@ -162,9 +161,9 @@ export default function ClassementPage() {
 
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg transition-all"
+            className="px-6 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-semibold rounded-xl shadow-lg transition-all"
           >
-            ➕ Créer une équipe
+            📝 Demander création d'équipe
           </button>
         </div>
 
@@ -219,7 +218,7 @@ export default function ClassementPage() {
         {showCreateModal && (
           <ModalCreateEquipe
             onClose={() => setShowCreateModal(false)}
-            onCreate={handleCreateEquipe}
+            onCreate={handleDemanderCreation}
           />
         )}
 
@@ -452,23 +451,25 @@ function ClassementUtilisateurs({
   );
 }
 
-// Modal : Créer une équipe
+// Modal : Demander création d'équipe
 function ModalCreateEquipe({ onClose, onCreate }: any) {
   const [nom, setNom] = useState('');
   const [description, setDescription] = useState('');
-  const [couleur, setCouleur] = useState('#3B82F6');
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">
-          Créer une équipe
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-2">
+          Demander la création d'une équipe
         </h2>
+        <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+          Votre demande sera examinée par un administrateur
+        </p>
 
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">
-              Nom <span className="text-red-500">*</span>
+              Nom de l'équipe <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
@@ -481,23 +482,13 @@ function ModalCreateEquipe({ onClose, onCreate }: any) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Description</label>
+            <label className="block text-sm font-medium mb-1">Description (optionnelle)</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Description de l'équipe..."
+              placeholder="Pourquoi souhaitez-vous créer cette équipe ?"
               rows={3}
               className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Couleur</label>
-            <input
-              type="color"
-              value={couleur}
-              onChange={(e) => setCouleur(e.target.value)}
-              className="w-full h-12 rounded-xl border border-slate-300 dark:border-slate-700 cursor-pointer"
             />
           </div>
 
@@ -509,11 +500,11 @@ function ModalCreateEquipe({ onClose, onCreate }: any) {
               Annuler
             </button>
             <button
-              onClick={() => onCreate(nom, description, couleur)}
-              disabled={!nom}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all"
+              onClick={() => onCreate(nom, description)}
+              disabled={!nom.trim()}
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all"
             >
-              Créer
+              📝 Envoyer la demande
             </button>
           </div>
         </div>

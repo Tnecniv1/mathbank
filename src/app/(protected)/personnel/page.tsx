@@ -639,74 +639,85 @@ export default function PersonnelPage() {
             )}
 
             {/* Mes équipes (si chef) */}
-            {isChef && mesEquipes.length > 0 && (
+            {isChef && (
               <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
                 <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">
                   👑 Mes équipes
                 </h2>
-                <div className="space-y-3">
-                  {mesEquipes.map(equipe => (
-                    <div key={equipe.id} className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-3 h-8 rounded-full" style={{ backgroundColor: equipe.couleur }} />
-                          <div>
-                            <div className="font-semibold text-slate-900 dark:text-slate-100">
-                              {equipe.nom}
-                            </div>
-                            <div className="text-sm text-slate-600 dark:text-slate-400">
-                              {equipe.nb_membres} membre{equipe.nb_membres > 1 ? 's' : ''}
+
+                {mesEquipes.length > 0 && (
+                  <>
+                    <div className="space-y-3">
+                      {mesEquipes.map(equipe => (
+                        <div key={equipe.id} className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-3 h-8 rounded-full" style={{ backgroundColor: equipe.couleur }} />
+                              <div>
+                                <div className="font-semibold text-slate-900 dark:text-slate-100">
+                                  {equipe.nom}
+                                </div>
+                                <div className="text-sm text-slate-600 dark:text-slate-400">
+                                  {equipe.nb_membres} membre{equipe.nb_membres > 1 ? 's' : ''}
+                                </div>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            setEquipeSelectionnee(equipe);
-                            setEditEquipeData({
-                              nom: equipe.nom,
-                              description: '',
-                              couleur: equipe.couleur,
-                            });
-                            setShowEditEquipeModal(true);
-                          }}
-                          className="flex-1 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/20 hover:bg-blue-200 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-sm font-medium rounded-lg transition-colors"
-                        >
-                          Modifier
-                        </button>
-                        <button
-                          onClick={() => handleSupprimerEquipe(equipe.id)}
-                          className="flex-1 px-3 py-1.5 bg-red-100 dark:bg-red-900/20 hover:bg-red-200 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg transition-colors"
-                        >
-                          Supprimer
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {membres.length > 0 && (
-                  <div className="mt-4">
-                    <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-2">
-                      Membres
-                    </h3>
-                    <div className="space-y-2">
-                      {membres.map(membre => (
-                        <div key={membre.user_id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-                          <span className="text-sm text-slate-900 dark:text-slate-100">
-                            {membre.full_name}
-                          </span>
-                          <button
-                            onClick={() => handleExcluireMembre(membre.user_id, mesEquipes[0].id)}
-                            className="px-3 py-1 bg-red-100 dark:bg-red-900/20 hover:bg-red-200 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 text-xs font-medium rounded-lg transition-colors"
-                          >
-                            Exclure
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => router.push(`/gestion-equipe?id=${equipe.id}`)}
+                              className="flex-1 px-3 py-1.5 bg-teal-100 dark:bg-teal-900/20 hover:bg-teal-200 dark:hover:bg-teal-900/30 text-teal-600 dark:text-teal-400 text-sm font-medium rounded-lg transition-colors"
+                            >
+                              📝 Gérer
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEquipeSelectionnee(equipe);
+                                setEditEquipeData({
+                                  nom: equipe.nom,
+                                  description: '',
+                                  couleur: equipe.couleur,
+                                });
+                                setShowEditEquipeModal(true);
+                              }}
+                              className="flex-1 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/20 hover:bg-blue-200 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-sm font-medium rounded-lg transition-colors"
+                            >
+                              Modifier
+                            </button>
+                            <button
+                              onClick={() => handleSupprimerEquipe(equipe.id)}
+                              className="flex-1 px-3 py-1.5 bg-red-100 dark:bg-red-900/20 hover:bg-red-200 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg transition-colors"
+                            >
+                              Supprimer
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
-                  </div>
+
+                    {membres.length > 0 && (
+                      <div className="mt-4">
+                        <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                          Membres
+                        </h3>
+                        <div className="space-y-2">
+                          {membres.map(membre => (
+                            <div key={membre.user_id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                              <span className="text-sm text-slate-900 dark:text-slate-100">
+                                {membre.full_name}
+                              </span>
+                              <button
+                                onClick={() => handleExcluireMembre(membre.user_id, mesEquipes[0].id)}
+                                className="px-3 py-1 bg-red-100 dark:bg-red-900/20 hover:bg-red-200 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 text-xs font-medium rounded-lg transition-colors"
+                              >
+                                Exclure
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -1320,45 +1331,86 @@ function ModalAcceptationAvecFeuille({
     loadFeuilles();
   }, []);
 
+  const feuilleChoisie = feuilles.find(f => f.id === feuilleSelectionnee);
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">
-          Accepter dans l'équipe
-        </h2>
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-lg w-full">
+        {/* Header avec icône */}
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+            <span className="text-2xl">👤</span>
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+              Accepter le nouveau membre
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Définir son parcours d'apprentissage
+            </p>
+          </div>
+        </div>
 
-        <p className="text-slate-600 dark:text-slate-400 mb-6">
-          Choisissez la feuille par laquelle ce membre doit commencer.
-        </p>
+        {/* Explication */}
+        <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+          <div className="flex gap-3">
+            <div className="text-xl">💡</div>
+            <div className="flex-1">
+              <p className="text-sm text-blue-900 dark:text-blue-100 font-medium mb-1">
+                Pourquoi choisir une feuille de départ ?
+              </p>
+              <p className="text-xs text-blue-800 dark:text-blue-200">
+                Pour un apprentissage structuré, seule la feuille que vous choisissez sera accessible. 
+                Le membre devra la compléter avant de passer à la suivante.
+              </p>
+            </div>
+          </div>
+        </div>
 
         <div className="space-y-4">
           {/* Sélection de la feuille de départ */}
           <div>
             <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">
-              Feuille de départ <span className="text-red-500">*</span>
+              📋 Sélectionner la première feuille <span className="text-red-500">*</span>
             </label>
             {loading ? (
-              <div className="text-sm text-slate-500">Chargement...</div>
+              <div className="text-sm text-slate-500 p-3">Chargement des feuilles...</div>
             ) : (
               <select
                 required
                 value={feuilleSelectionnee}
                 onChange={(e) => setFeuilleSelectionnee(e.target.value)}
-                className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                className="w-full border-2 border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium focus:border-green-500 focus:ring-2 focus:ring-green-200 dark:focus:ring-green-900 transition-all"
               >
-                <option value="">-- Choisir une feuille --</option>
+                <option value="">-- Choisir une feuille de départ --</option>
                 {feuilles.map(f => (
                   <option key={f.id} value={f.id}>
-                    {f.ordre}. {f.titre}
+                    Feuille {f.ordre} : {f.titre}
                   </option>
                 ))}
               </select>
             )}
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Cette feuille sera la seule accessible au début
-            </p>
           </div>
 
+          {/* Aperçu de la sélection */}
+          {feuilleChoisie && (
+            <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border-2 border-green-200 dark:border-green-800">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">✅</div>
+                <div className="flex-1">
+                  <p className="font-semibold text-green-900 dark:text-green-100 mb-1">
+                    Feuille sélectionnée : {feuilleChoisie.titre}
+                  </p>
+                  <p className="text-sm text-green-800 dark:text-green-200">
+                    Le membre pourra uniquement travailler sur cette feuille. 
+                    Une fois validée, vous choisirez la suivante.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
           <div className="flex gap-3 pt-4">
             <button
               onClick={onClose}
@@ -1369,13 +1421,13 @@ function ModalAcceptationAvecFeuille({
             <button
               onClick={() => onAccepter(feuilleSelectionnee)}
               disabled={!feuilleSelectionnee}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all"
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
             >
-              Accepter
+              {feuilleSelectionnee ? '✓ Accepter et commencer' : 'Choisir une feuille'}
             </button>
           </div>
         </div>
       </div>
     </div>
   );
-} 
+}

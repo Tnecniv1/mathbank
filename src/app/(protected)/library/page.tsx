@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabaseClient';
 type FeuilleEntrainement = {
   id: string;
   ordre: number;
+  ordre_dans_niveau: number;
   titre: string;
   description: string | null;
   pdf_url: string;
@@ -111,7 +112,7 @@ async function getParcoursComplet(niveauId: string) {
           chapitres:chapitre (
             id, ordre, titre, description,
             feuilles:feuille_entrainement (
-              id, ordre, titre, description, pdf_url
+              id, ordre, ordre_dans_niveau, titre, description, pdf_url
             )
           )
         )
@@ -174,27 +175,36 @@ function FeuilleCard({
   const [showModal, setShowModal] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState(false);
 
-  // Vérifier si cette feuille est la feuille autorisée
+  // Vérifier si cette feuille est autorisée (nouveau système)
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session || !session.user) return;
 
+      // Récupérer l'ID du membre
       const { data: membre } = await supabase
         .from('membre_equipe')
-        .select('feuille_autorisee_id')
+        .select('id')
         .eq('user_id', session.user.id)
         .single();
 
-      if (membre && membre.feuille_autorisee_id === feuille.id) {
-        setIsAuthorized(true);
+      if (membre) {
+        // Vérifier si cette feuille est dans les feuilles autorisées
+        const { data: autorisee, count } = await supabase
+          .from('feuilles_autorisees')
+          .select('feuille_id', { count: 'exact', head: true })
+          .eq('membre_id', membre.id)
+          .eq('feuille_id', feuille.id);
+        
+        if (count && count > 0) {
+          setIsAuthorized(true);
+        }
       }
     })();
   }, [feuille.id]);
 
-  // Déterminer le statut de la feuille (SIMPLIFIÉ - 3 COULEURS)
+  // Déterminer le statut de la feuille
   const estValidee = progression?.statut === 'validee';
-  const estEnProgression = progression && !estValidee; // En cours, en attente, ou rejetée
   const estBloquee = progression?.est_bloquee;
 
   const handlePastilleClick = (e: React.MouseEvent) => {
@@ -257,7 +267,7 @@ function FeuilleCard({
             ? 'bg-slate-400 dark:bg-slate-600'
             : 'bg-gradient-to-br from-teal-500 to-teal-600 dark:from-teal-600 dark:to-teal-700 group-hover:scale-110'
         }`}>
-          {feuille.ordre}
+          {feuille.ordre_dans_niveau}
         </div>
 
         {/* Contenu */}
@@ -282,23 +292,23 @@ function FeuilleCard({
           <IconFile />
         </div>
 
-        {/* Pastille de progression - 3 COULEURS UNIQUEMENT */}
+        {/* Pastille de progression - 3 COULEURS */}
         <div
           onClick={handlePastilleClick}
           className="absolute -top-2 -right-2 cursor-pointer hover:scale-110 transition-transform"
         >
           {estValidee ? (
-            // 🟣 VIOLET = Fait (validée)
+            // 🟣 VIOLET = Validée
             <div className="text-purple-600 dark:text-purple-400 drop-shadow-md">
               <IconCircleFilled />
             </div>
-          ) : estEnProgression ? (
-            // 🟠 ORANGE = En progression (en cours, en attente, ou rejetée)
+          ) : isAuthorized && !estBloquee ? (
+            // 🟠 ORANGE = Autorisée/Disponible
             <div className="text-orange-500 dark:text-orange-400 drop-shadow-md">
               <IconCircleFilled />
             </div>
           ) : (
-            // ⚫ NOIR = Non fait
+            // ⚫ NOIR = Bloquée/Non autorisée
             <div className="text-slate-800 dark:text-slate-400 hover:text-purple-400 dark:hover:text-purple-500 transition-colors">
               <IconCircleEmpty />
             </div>
@@ -921,17 +931,28 @@ export default function LibraryPage() {
         setParcours(result.data);
         
         // ========================================
-        // NOUVEAU : Charger progressions + autorisations
+        // NOUVEAU : Charger progressions + feuilles autorisées
         // ========================================
         if (result.data) {
-          // Vérifier si membre d'une équipe
+          // Vérifier si membre d'une équipe et charger TOUTES les feuilles autorisées
           const { data: membre } = await supabase
             .from('membre_equipe')
-            .select('feuille_autorisee_id')
+            .select('id')
             .eq('user_id', user.id)
             .single();
 
-          const feuilleAutoriseeId = membre?.feuille_autorisee_id;
+          // Charger les feuilles autorisées (plusieurs feuilles possibles)
+          let feuillesAutoriseesIds = new Set<string>();
+          if (membre) {
+            const { data: autorisees } = await supabase
+              .from('feuilles_autorisees')
+              .select('feuille_id')
+              .eq('membre_id', membre.id);
+            
+            if (autorisees) {
+              feuillesAutoriseesIds = new Set(autorisees.map(a => a.feuille_id));
+            }
+          }
 
           // Charger progressions
           const { data: progressionsData } = await supabase
@@ -948,8 +969,9 @@ export default function LibraryPage() {
           if (progressionsData) {
             progressionsData.forEach((prog: any) => {
               // Calculer si la feuille est bloquée
+              // Bloquée = membre d'équipe ET (pas autorisée ET pas validée)
               const estBloquee = membre && 
-                                 prog.feuille_id !== feuilleAutoriseeId && 
+                                 !feuillesAutoriseesIds.has(prog.feuille_id) && 
                                  prog.statut !== 'validee';
 
               progMap.set(prog.feuille_id, {
@@ -959,22 +981,25 @@ export default function LibraryPage() {
                 score: prog.score,
                 temps_total: prog.temps_total || 0,
                 sessions: prog.sessions || [],
-                statut: prog.statut || 'en_cours',
+                statut: prog.statut,
                 commentaire_chef: prog.commentaire_chef,
                 est_bloquee: estBloquee,
               });
             });
           }
 
-          // NOUVEAU : Si membre d'équipe, bloquer TOUTES les feuilles sauf l'autorisée
-          if (membre && feuilleAutoriseeId) {
+          // Si membre d'équipe, bloquer TOUTES les feuilles non autorisées
+          if (membre) {
             // Parcourir toutes les feuilles du parcours
             result.data.sujets.forEach((sujet: any) => {
               sujet.chapitres.forEach((chapitre: any) => {
                 chapitre.feuilles.forEach((feuille: any) => {
-                  // Si cette feuille n'a pas de progression ET n'est pas autorisée
-                  if (!progMap.has(feuille.id) && feuille.id !== feuilleAutoriseeId) {
-                    // Créer une entrée "bloquée"
+                  // Si cette feuille n'a pas de progression
+                  if (!progMap.has(feuille.id)) {
+                    // Est-elle autorisée ?
+                    const estAutorisee = feuillesAutoriseesIds.has(feuille.id);
+                    
+                    // Créer une entrée (bloquée si pas autorisée)
                     progMap.set(feuille.id, {
                       id: '',
                       feuille_id: feuille.id,
@@ -984,7 +1009,7 @@ export default function LibraryPage() {
                       sessions: [],
                       statut: null,
                       commentaire_chef: null,
-                      est_bloquee: true, // BLOQUÉE
+                      est_bloquee: !estAutorisee, // BLOQUÉE si pas autorisée
                     });
                   }
                 });
@@ -1138,6 +1163,45 @@ export default function LibraryPage() {
             </select>
           </div>
         )}
+
+        {/* Section En Progression */}
+        {parcours && (() => {
+          const feuillesEnCours: Array<{feuille: FeuilleEntrainement, progression: Progression, chapitre: string}> = [];
+          parcours.sujets?.forEach(sujet => {
+            sujet.chapitres?.forEach(chapitre => {
+              chapitre.feuilles?.forEach(feuille => {
+                const prog = progressions.get(feuille.id);
+                if (prog && !prog.est_bloquee && prog.statut !== 'validee') {
+                  feuillesEnCours.push({ feuille, progression: prog, chapitre: chapitre.titre });
+                }
+              });
+            });
+          });
+
+          if (feuillesEnCours.length === 0) return null;
+
+          return (
+            <div className="mb-8 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 rounded-2xl p-6 border-2 border-orange-200 dark:border-orange-800">
+              <h2 className="text-2xl font-bold text-orange-900 dark:text-orange-100 mb-4 flex items-center gap-2">
+                🔥 En Progression
+                <span className="text-sm font-normal text-orange-600 dark:text-orange-400">
+                  ({feuillesEnCours.length})
+                </span>
+              </h2>
+              <div className="space-y-2">
+                {feuillesEnCours.map(({ feuille, progression }) => (
+                  <FeuilleCard
+                    key={feuille.id}
+                    feuille={feuille}
+                    progression={progression}
+                    onOpen={() => {}}
+                    onUpdateProgression={handleProgressionUpdate}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Contenu du parcours */}
         {!parcours || !parcours.sujets || parcours.sujets.length === 0 ? (
