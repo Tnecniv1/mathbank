@@ -1031,20 +1031,10 @@ export default function LibraryPage() {
 
   // Recharger la progression après mise à jour
   const handleProgressionUpdate = async () => {
-    if (!niveauSelectionne || !parcours) return;
-
     const { data: { session } } = await supabase.auth.getSession();
     if (!session || !session.user) return;
     
-    // Recharger avec les autorisations
-    const { data: membre } = await supabase
-      .from('membre_equipe')
-      .select('feuille_autorisee_id')
-      .eq('user_id', session.user.id)
-      .single();
-
-    const feuilleAutoriseeId = membre?.feuille_autorisee_id;
-
+    // Recharger UNIQUEMENT les progressions
     const { data: progressionsData } = await supabase
       .from('progression_feuille')
       .select(`
@@ -1053,53 +1043,26 @@ export default function LibraryPage() {
       `)
       .eq('user_id', session.user.id);
 
-    const progMap = new Map<string, Progression>();
+    if (!progressionsData) return;
 
-    // Remplir avec les progressions existantes
-    if (progressionsData) {
-      progressionsData.forEach((prog: any) => {
-        const estBloquee = membre && 
-                           prog.feuille_id !== feuilleAutoriseeId && 
-                           prog.statut !== 'validee';
+    // Mettre à jour la Map locale
+    const newProgMap = new Map(progressions);
 
-        progMap.set(prog.feuille_id, {
-          id: prog.id,
-          feuille_id: prog.feuille_id,
-          est_termine: prog.est_termine,
-          score: prog.score,
-          temps_total: prog.temps_total || 0,
-          sessions: prog.sessions || [],
-          statut: prog.statut || 'en_cours',
-          commentaire_chef: prog.commentaire_chef,
-          est_bloquee: estBloquee,
-        });
+    progressionsData.forEach((prog: any) => {
+      newProgMap.set(prog.feuille_id, {
+        id: prog.id,
+        feuille_id: prog.feuille_id,
+        est_termine: prog.est_termine,
+        score: prog.score,
+        temps_total: prog.temps_total || 0,
+        sessions: prog.sessions || [],
+        statut: prog.statut || 'en_cours',
+        commentaire_chef: prog.commentaire_chef,
+        est_bloquee: newProgMap.get(prog.feuille_id)?.est_bloquee || false,
       });
-    }
+    });
 
-    // NOUVEAU : Si membre d'équipe, bloquer TOUTES les feuilles sauf l'autorisée
-    if (membre && feuilleAutoriseeId && parcours) {
-      parcours.sujets.forEach((sujet: any) => {
-        sujet.chapitres.forEach((chapitre: any) => {
-          chapitre.feuilles.forEach((feuille: any) => {
-            if (!progMap.has(feuille.id) && feuille.id !== feuilleAutoriseeId) {
-              progMap.set(feuille.id, {
-                id: '',
-                feuille_id: feuille.id,
-                est_termine: false,
-                score: null,
-                temps_total: 0,
-                sessions: [],
-                statut: null,
-                commentaire_chef: null,
-                est_bloquee: true,
-              });
-            }
-          });
-        });
-      });
-    }
-
-    setProgressions(progMap);
+    setProgressions(newProgMap);
   };
 
   /* ---------- États de chargement / erreur ---------- */

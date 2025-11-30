@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
+import ModalObserverFeuilles from '@/components/ModalObserverFeuilles';
 /* ---------- Types ---------- */
 type Membre = {
   membre_id: string;
@@ -399,6 +400,7 @@ export default function GestionEquipePage() {
   const [membreSelectionne, setMembreSelectionne] = useState<Membre | null>(null);
   const [showModalGestion, setShowModalGestion] = useState(false);
   const [equipeId, setEquipeId] = useState<string | null>(null);
+  const [showObserverModal, setShowObserverModal] = useState(false);
   
   // États pour validation/rejet
   const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
@@ -504,18 +506,12 @@ export default function GestionEquipePage() {
     try {
       const progressionId = notification.metadata?.progression_id;
       
-      const { data, error } = await supabase.rpc('valider_soumission', {
+      const { data, error } = await supabase.rpc('chef_valider_soumission', {
         p_progression_id: progressionId,
-        p_commentaire: null,
+        p_score: null
       });
 
       if (error) throw error;
-
-      if (!data.success) {
-        alert(data.error);
-        return;
-      }
-
       // Marquer comme lue
       await supabase
         .from('notification')
@@ -546,17 +542,12 @@ export default function GestionEquipePage() {
     try {
       const progressionId = notificationSelectionnee.metadata?.progression_id;
       
-      const { data, error } = await supabase.rpc('rejeter_soumission', {
+      const { data, error } = await supabase.rpc('chef_refuser_soumission', {
         p_progression_id: progressionId,
-        p_commentaire: commentaireRejet,
+        p_raison: commentaireRejet,
       });
 
       if (error) throw error;
-
-      if (!data.success) {
-        alert(data.error);
-        return;
-      }
 
       // Marquer comme lue
       await supabase
@@ -678,9 +669,17 @@ export default function GestionEquipePage() {
 
         {/* Membres */}
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border-2 border-slate-200 dark:border-slate-800 mb-8">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">
-            📋 Membres de l'équipe
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+              📋 Membres de l'équipe
+            </h2>
+            <button
+              onClick={() => setShowObserverModal(true)}
+              className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
+            >
+              🔍 Observer feuilles
+            </button>
+          </div>
 
           {membres.length === 0 ? (
             <div className="text-center py-12 text-slate-500">
@@ -836,6 +835,14 @@ export default function GestionEquipePage() {
         />
       )}
 
+
+      {/* Modal Observer Feuilles */}
+      {showObserverModal && equipeId && (
+        <ModalObserverFeuilles
+          equipeId={equipeId}
+          onClose={() => setShowObserverModal(false)}
+        />
+      )}
       {/* Modal Rejet */}
       {showRejetModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

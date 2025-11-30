@@ -43,14 +43,10 @@ function BadgeProgressionCard({ niveau }: { niveau: ProgressionNiveau }) {
     <div className="relative group">
       {/* Carte avec fond progressif */}
       <div 
-        className={`relative overflow-hidden rounded-2xl border-2 transition-all duration-300 ${
-          estComplete 
-            ? 'border-yellow-400 shadow-2xl shadow-yellow-500/50' 
-            : 'border-slate-300 dark:border-slate-700'
-        }`}
+        className="relative overflow-hidden rounded-2xl border-2 transition-all duration-300 border-slate-300 dark:border-slate-700"
         style={{
           background: estComplete
-            ? `linear-gradient(135deg, ${color.from} 0%, ${color.to} 100%)`
+            ? '#f1f5f9' // Fond gris clair neutre quand validé
             : `linear-gradient(135deg, ${color.from} ${progression * 100}%, #e2e8f0 ${progression * 100}%)`
         }}
       >
@@ -69,16 +65,13 @@ function BadgeProgressionCard({ niveau }: { niveau: ProgressionNiveau }) {
         <div className="relative p-6 flex flex-col items-center">
           {/* Emoji avec opacité progressive */}
           <div 
-            className={`text-6xl mb-3 transition-all duration-500 ${
-              estComplete ? 'scale-110' : ''
-            }`}
+            className="text-6xl mb-3 transition-all duration-500"
             style={{ 
               opacity: emojiOpacity,
-              filter: estComplete ? 'drop-shadow(0 0 20px rgba(255,255,255,0.8))' : 'none'
+              filter: 'none'
             }}
           >
             {emoji}
-            {estComplete && <span className="ml-2 text-4xl">✨</span>}
           </div>
           
           {/* Nom du niveau */}
@@ -99,18 +92,7 @@ function BadgeProgressionCard({ niveau }: { niveau: ProgressionNiveau }) {
             {niveau.pourcentage}%
           </div>
           
-          {/* Badge obtenu */}
-          {estComplete && (
-            <div className="mt-2 px-3 py-1 bg-white/20 backdrop-blur-sm rounded-full text-white text-xs font-bold">
-              ✓ Obtenu
-            </div>
-          )}
         </div>
-        
-        {/* Animation pulse si complété */}
-        {estComplete && (
-          <div className="absolute inset-0 rounded-2xl animate-pulse bg-yellow-400/10" />
-        )}
       </div>
     </div>
   );
@@ -193,7 +175,7 @@ function ProgressionSection() {
   return (
     <div className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-800 rounded-2xl p-8 border-2 border-slate-200 dark:border-slate-700 shadow-xl">
       <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100 mb-6 flex items-center gap-3">
-        🏆 Votre Collection
+        🏆 Votre Progression
       </h2>
       
       {/* Grille de badges */}
@@ -202,8 +184,6 @@ function ProgressionSection() {
           <BadgeProgressionCard key={niveau.niveau_id} niveau={niveau} />
         ))}
       </div>
-      
-      
     </div>
   );
 }
@@ -282,7 +262,7 @@ export default function HomePage() {
 
         {/* Footer info */}
         <div className="text-center text-sm text-slate-500 dark:text-slate-400 pt-8">
-     
+          <p>Système d'apprentissage collaboratif avec équipes et validation</p>
         </div>
       </div>
     </main>
