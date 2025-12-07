@@ -20,20 +20,17 @@ type ProgressionData = {
 };
 
 function BadgeProgressionCard({ niveau }: { niveau: ProgressionNiveau }) {
-  const progression = niveau.pourcentage / 100; // 0 à 1
-  const emoji = niveau.badge.split(' ')[0]; // Extraire l'emoji
+  const progression = niveau.pourcentage / 100;
+  const emoji = niveau.badge.split(' ')[0];
+  const emojiOpacity = 0.15 + (progression * 0.85);
   
-  // Calculer l'opacité de l'emoji selon la progression
-  const emojiOpacity = 0.15 + (progression * 0.85); // De 0.15 à 1.0
-  
-  // Couleur selon le niveau
   const colors = {
-    1: { from: '#a855f7', to: '#7e22ce' }, // Violet (Élémentaire)
-    2: { from: '#eab308', to: '#ca8a04' }, // Jaune (Collège)
-    3: { from: '#f97316', to: '#ea580c' }, // Orange (Lycée)
-    4: { from: '#3b82f6', to: '#1d4ed8' }, // Bleu (Licence)
-    5: { from: '#ec4899', to: '#be185d' }, // Rose (Master)
-    6: { from: '#ef4444', to: '#b91c1c' }, // Rouge (Doctorat)
+    1: { from: '#a855f7', to: '#7e22ce' },
+    2: { from: '#ffd93d', to: '#ffb700' },
+    3: { from: '#f97316', to: '#ea580c' },
+    4: { from: '#4db7ff', to: '#0084d4' },
+    5: { from: '#ec4899', to: '#be185d' },
+    6: { from: '#ef4444', to: '#b91c1c' },
   };
   
   const color = colors[niveau.niveau_ordre as keyof typeof colors] || colors[1];
@@ -41,57 +38,30 @@ function BadgeProgressionCard({ niveau }: { niveau: ProgressionNiveau }) {
   
   return (
     <div className="relative group">
-      {/* Carte avec fond progressif */}
       <div 
-        className="relative overflow-hidden rounded-2xl border-2 transition-all duration-300 border-slate-300 dark:border-slate-700"
+        className="relative overflow-hidden rounded-xl border-2 transition-all duration-300"
         style={{
           background: estComplete
-            ? '#f1f5f9' // Fond gris clair neutre quand validé
-            : `linear-gradient(135deg, ${color.from} ${progression * 100}%, #e2e8f0 ${progression * 100}%)`
+            ? '#2a2840'
+            : `linear-gradient(135deg, ${color.from} ${progression * 100}%, #2a2840 ${progression * 100}%)`,
+          borderColor: progression > 0 ? color.from : '#4db7ff33'
         }}
       >
-        {/* Grille de pixels en fond (effet visuel) */}
-        <div 
-          className="absolute inset-0 opacity-20"
-          style={{
-            backgroundImage: `
-              repeating-linear-gradient(0deg, transparent, transparent 10px, rgba(0,0,0,0.1) 10px, rgba(0,0,0,0.1) 11px),
-              repeating-linear-gradient(90deg, transparent, transparent 10px, rgba(0,0,0,0.1) 10px, rgba(0,0,0,0.1) 11px)
-            `
-          }}
-        />
-        
-        {/* Contenu */}
-        <div className="relative p-6 flex flex-col items-center">
-          {/* Emoji avec opacité progressive */}
+        <div className="relative p-4 flex flex-col items-center">
           <div 
-            className="text-6xl mb-3 transition-all duration-500"
-            style={{ 
-              opacity: emojiOpacity,
-              filter: 'none'
-            }}
+            className="text-4xl mb-2 transition-all duration-500"
+            style={{ opacity: emojiOpacity }}
           >
             {emoji}
           </div>
           
-          {/* Nom du niveau */}
-          <div className={`text-sm font-bold mb-2 transition-colors ${
-            progression > 0.3 
-              ? 'text-white' 
-              : 'text-slate-700 dark:text-slate-300'
-          }`}>
+          <div className="text-xs font-mono font-bold mb-1 text-slate-300">
             {niveau.niveau_titre}
           </div>
           
-          {/* Pourcentage */}
-          <div className={`text-2xl font-extrabold mb-1 ${
-            progression > 0.3 
-              ? 'text-white' 
-              : 'text-slate-900 dark:text-slate-100'
-          }`}>
+          <div className="text-xl font-mono font-extrabold text-white">
             {niveau.pourcentage}%
           </div>
-          
         </div>
       </div>
     </div>
@@ -109,27 +79,16 @@ function ProgressionSection() {
   async function loadProgression() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        console.log('❌ Pas de session');
-        return;
-      }
-
-      console.log('✅ Session OK, appel RPC...');
+      if (!session) return;
       
       const { data: result, error } = await supabase.rpc('get_progression_utilisateur', {
         p_user_id: session.user.id
       });
 
-      if (error) {
-        console.error('❌ Erreur RPC:', error);
-        throw error;
-      }
-      
-      console.log('✅ Données reçues:', result);
-      
+      if (error) throw error;
       setData(result);
     } catch (error) {
-      console.error('❌ Erreur chargement progression:', error);
+      console.error('Erreur chargement progression:', error);
     } finally {
       setLoading(false);
     }
@@ -137,50 +96,31 @@ function ProgressionSection() {
 
   if (loading) {
     return (
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 border-2 border-slate-200 dark:border-slate-800">
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-4 border-teal-500 border-t-transparent"></div>
+      <div className="bg-[#18162a] rounded-2xl p-6 border border-[#4db7ff33]">
+        <div className="flex items-center justify-center py-8">
+          <div className="animate-spin rounded-full h-10 w-10 border-4 border-[#4db7ff] border-t-transparent"></div>
         </div>
       </div>
     );
   }
 
-  if (!data?.progression_niveaux || data.progression_niveaux.length === 0) {
-    // Créer des badges par défaut avec 0%
-    const defaultNiveaux: ProgressionNiveau[] = [
-      { niveau_id: '1', niveau_titre: 'Élémentaire', niveau_ordre: 1, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🐛 Asticot' },
-      { niveau_id: '2', niveau_titre: 'Collège', niveau_ordre: 2, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🐝 Abeille' },
-      { niveau_id: '3', niveau_titre: 'Lycée', niveau_ordre: 3, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🐻 Ours' },
-      { niveau_id: '4', niveau_titre: 'Licence', niveau_ordre: 4, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🐘 Éléphant' },
-      { niveau_id: '5', niveau_titre: 'Master', niveau_ordre: 5, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🦄 Licorne' },
-      { niveau_id: '6', niveau_titre: 'Doctorat', niveau_ordre: 6, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🐉 Dragon' },
-    ];
-    
-    return (
-      <div className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-800 rounded-2xl p-8 border-2 border-slate-200 dark:border-slate-700 shadow-xl">
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100 mb-6 flex items-center gap-3">
-          🏆 Collections
-        </h2>
-        
-        {/* Grille de badges */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          {defaultNiveaux.map((niveau) => (
-            <BadgeProgressionCard key={niveau.niveau_id} niveau={niveau} />
-          ))}
-        </div>
-      </div>
-    );
-  }
+  const niveaux = data?.progression_niveaux?.length ? data.progression_niveaux : [
+    { niveau_id: '1', niveau_titre: 'élémentaire', niveau_ordre: 1, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🐛 Asticot' },
+    { niveau_id: '2', niveau_titre: 'collège', niveau_ordre: 2, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🐝 Abeille' },
+    { niveau_id: '3', niveau_titre: 'lycée', niveau_ordre: 3, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🐻 Ours' },
+    { niveau_id: '4', niveau_titre: 'licence', niveau_ordre: 4, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🐘 Éléphant' },
+    { niveau_id: '5', niveau_titre: 'master', niveau_ordre: 5, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🦄 Licorne' },
+    { niveau_id: '6', niveau_titre: 'doctorat', niveau_ordre: 6, total_feuilles: 0, feuilles_validees: 0, pourcentage: 0, badge: '🐉 Dragon' },
+  ];
 
   return (
-    <div className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-800 rounded-2xl p-8 border-2 border-slate-200 dark:border-slate-700 shadow-xl">
-      <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100 mb-6 flex items-center gap-3">
-        🏆 Votre Progression
+    <div className="bg-[#18162a] rounded-2xl p-6 border border-[#4db7ff33]">
+      <h2 className="text-lg font-mono font-bold text-white mb-4 flex items-center gap-2">
+        🏆 Collection des Badges
       </h2>
       
-      {/* Grille de badges */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {data.progression_niveaux.map((niveau) => (
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+        {niveaux.map((niveau) => (
           <BadgeProgressionCard key={niveau.niveau_id} niveau={niveau} />
         ))}
       </div>
@@ -190,78 +130,121 @@ function ProgressionSection() {
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Bloc Progression avec Badges */}
-        <div className="mb-8">
-          <ProgressionSection />
-        </div>
+    <main className="min-h-screen bg-[#18162a] p-6">
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Lora:wght@400;600;700&display=swap');
+        
+        body {
+          font-family: 'Lora', serif;
+        }
+        
+        h1, h2, h3, h4, h5, h6 {
+          font-family: 'IBM Plex Mono', monospace;
+        }
+      `}</style>
 
-        {/* Grille de navigation */}
-        <div className="grid md:grid-cols-2 gap-4">
+      <div className="max-w-7xl mx-auto space-y-6">
+        
+        {/* Section Progression (réduite) */}
+        <ProgressionSection />
+
+        {/* Grille de navigation principale */}
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          
           {/* Bibliothèque */}
           <Link
             href="/library"
-            className="group p-6 rounded-2xl shadow-lg bg-gradient-to-br from-slate-900 to-slate-800 dark:from-slate-800 dark:to-slate-900 text-white hover:shadow-xl hover:scale-105 transition-all duration-200"
+            className="group relative overflow-hidden p-8 rounded-2xl border-2 border-[#4db7ff33] bg-gradient-to-br from-[#1f1d35] to-[#18162a] hover:border-[#4db7ff] transition-all duration-300 hover:scale-105"
           >
-            <div className="text-4xl mb-3">📚</div>
-            <h2 className="text-xl font-bold mb-2">Bibliothèque</h2>
-            <p className="text-slate-300 text-sm">
-              Accédez aux feuilles d'entraînement et suivez votre parcours
-            </p>
+            <div className="relative z-10">
+              <div className="text-5xl mb-4">📚</div>
+              <h2 className="text-2xl font-mono font-bold text-white mb-2">Bibliothèque</h2>
+              <p className="text-slate-400 text-sm font-serif">
+                Accédez aux feuilles d'entraînement et suivez votre parcours
+              </p>
+            </div>
+            <div className="absolute inset-0 bg-gradient-to-br from-[#4db7ff22] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+          </Link>
+
+          {/* Mes Sessions */}
+          <Link
+            href="/library/sessions"
+            className="group relative overflow-hidden p-8 rounded-2xl border-2 border-[#ffd93d33] bg-gradient-to-br from-[#2d2517] to-[#18162a] hover:border-[#ffd93d] transition-all duration-300 hover:scale-105"
+          >
+            <div className="relative z-10">
+              <div className="text-5xl mb-4">📝</div>
+              <h2 className="text-2xl font-mono font-bold text-white mb-2">Mes Sessions</h2>
+              <p className="text-slate-400 text-sm font-serif">
+                Enregistrez vos entraînements quotidiens et suivez votre historique
+              </p>
+            </div>
+            <div className="absolute inset-0 bg-gradient-to-br from-[#ffd93d22] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           </Link>
 
           {/* Progression */}
           <Link
             href="/progression"
-            className="group p-6 rounded-2xl shadow-lg bg-gradient-to-br from-purple-600 to-purple-700 dark:from-purple-700 dark:to-purple-800 text-white hover:shadow-xl hover:scale-105 transition-all duration-200"
+            className="group relative overflow-hidden p-8 rounded-2xl border-2 border-[#a855f733] bg-gradient-to-br from-[#251d35] to-[#18162a] hover:border-[#a855f7] transition-all duration-300 hover:scale-105"
           >
-            <div className="text-4xl mb-3">📊</div>
-            <h2 className="text-xl font-bold mb-2">Progression</h2>
-            <p className="text-purple-100 text-sm">
-              Consultez vos statistiques et votre évolution
-            </p>
+            <div className="relative z-10">
+              <div className="text-5xl mb-4">📊</div>
+              <h2 className="text-2xl font-mono font-bold text-white mb-2">Progression</h2>
+              <p className="text-slate-400 text-sm font-serif">
+                Consultez vos statistiques et votre évolution
+              </p>
+            </div>
+            <div className="absolute inset-0 bg-gradient-to-br from-[#a855f722] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           </Link>
 
           {/* Classement */}
           <Link
             href="/classement"
-            className="group p-6 rounded-2xl shadow-lg bg-gradient-to-br from-blue-600 to-indigo-600 dark:from-blue-700 dark:to-indigo-700 text-white hover:shadow-xl hover:scale-105 transition-all duration-200"
+            className="group relative overflow-hidden p-8 rounded-2xl border-2 border-[#4db7ff33] bg-gradient-to-br from-[#1d2535] to-[#18162a] hover:border-[#4db7ff] transition-all duration-300 hover:scale-105"
           >
-            <div className="text-4xl mb-3">🏆</div>
-            <h2 className="text-xl font-bold mb-2">Classement</h2>
-            <p className="text-blue-100 text-sm">
-              Comparez vos performances et créez votre équipe
-            </p>
+            <div className="relative z-10">
+              <div className="text-5xl mb-4">🏆</div>
+              <h2 className="text-2xl font-mono font-bold text-white mb-2">Classement</h2>
+              <p className="text-slate-400 text-sm font-serif">
+                Comparez vos performances et créez votre équipe
+              </p>
+            </div>
+            <div className="absolute inset-0 bg-gradient-to-br from-[#4db7ff22] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           </Link>
 
           {/* Personnel */}
           <Link
             href="/personnel"
-            className="group p-6 rounded-2xl shadow-lg bg-gradient-to-br from-green-600 to-emerald-600 dark:from-green-700 dark:to-emerald-700 text-white hover:shadow-xl hover:scale-105 transition-all duration-200"
+            className="group relative overflow-hidden p-8 rounded-2xl border-2 border-[#10b98133] bg-gradient-to-br from-[#1d2d25] to-[#18162a] hover:border-[#10b981] transition-all duration-300 hover:scale-105"
           >
-            <div className="text-4xl mb-3">👤</div>
-            <h2 className="text-xl font-bold mb-2">Personnel</h2>
-            <p className="text-green-100 text-sm">
-              Gérez votre équipe et vos notifications
-            </p>
+            <div className="relative z-10">
+              <div className="text-5xl mb-4">👤</div>
+              <h2 className="text-2xl font-mono font-bold text-white mb-2">Personnel</h2>
+              <p className="text-slate-400 text-sm font-serif">
+                Gérez votre équipe et vos notifications
+              </p>
+            </div>
+            <div className="absolute inset-0 bg-gradient-to-br from-[#10b98122] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           </Link>
 
           {/* Administration */}
           <Link
             href="/admin"
-            className="group p-6 rounded-2xl shadow-lg bg-gradient-to-br from-teal-600 to-teal-700 dark:from-teal-700 dark:to-teal-800 text-white hover:shadow-xl hover:scale-105 transition-all duration-200 md:col-span-2"
+            className="group relative overflow-hidden p-8 rounded-2xl border-2 border-[#14b8a633] bg-gradient-to-br from-[#1d2d2d] to-[#18162a] hover:border-[#14b8a6] transition-all duration-300 hover:scale-105"
           >
-            <div className="text-4xl mb-3">⚙️</div>
-            <h2 className="text-xl font-bold mb-2">Administration</h2>
-            <p className="text-teal-100 text-sm">
-              Gérez les niveaux, sujets, chapitres et feuilles d'entraînement
-            </p>
+            <div className="relative z-10">
+              <div className="text-5xl mb-4">⚙️</div>
+              <h2 className="text-2xl font-mono font-bold text-white mb-2">Administration</h2>
+              <p className="text-slate-400 text-sm font-serif">
+                Gérez les niveaux, sujets, chapitres et feuilles d'entraînement
+              </p>
+            </div>
+            <div className="absolute inset-0 bg-gradient-to-br from-[#14b8a622] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           </Link>
+
         </div>
 
-        {/* Footer info */}
-        <div className="text-center text-sm text-slate-500 dark:text-slate-400 pt-8">
+        {/* Footer */}
+        <div className="text-center text-sm text-slate-500 font-mono pt-4">
           <p>Système d'apprentissage collaboratif avec équipes et validation</p>
         </div>
       </div>

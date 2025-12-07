@@ -35,6 +35,7 @@ type FeuilleEntrainement = {
   titre: string;
   description: string | null;
   pdf_url: string;
+  type: 'mecanique' | 'chaotique' | null;
 };
 
 type NiveauWithData = Niveau & {
@@ -640,6 +641,31 @@ function FeuilleItem({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const [updatingType, setUpdatingType] = useState(false);
+
+  const handleTypeChange = async (newType: 'mecanique' | 'chaotique') => {
+    try {
+      setUpdatingType(true);
+      
+      const { error } = await supabase
+        .from('feuille_entrainement')
+        .update({ type: newType })
+        .eq('id', feuille.id);
+
+      if (error) throw error;
+
+      // Mettre à jour localement
+      feuille.type = newType;
+      
+      console.log(`✅ Type mis à jour: ${newType}`);
+    } catch (error) {
+      console.error('Erreur mise à jour type:', error);
+      alert('Erreur lors de la mise à jour du type');
+    } finally {
+      setUpdatingType(false);
+    }
+  };
+
   return (
     <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
       <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -655,11 +681,30 @@ function FeuilleItem({
             className="text-xs text-teal-600 dark:text-teal-400 hover:underline truncate block"
             onClick={(e) => e.stopPropagation()}
           >
-            <IconFile className="inline w-3 h-3 mr-1" />
-            Voir PDF
+            <IconFile />
+            <span className="ml-1">Voir PDF</span>
           </a>
         </div>
+
+        {/* Sélecteur de type */}
+        <div className="flex items-center gap-2 ml-4">
+          <select
+            value={feuille.type || 'chaotique'}
+            onChange={(e) => handleTypeChange(e.target.value as 'mecanique' | 'chaotique')}
+            disabled={updatingType}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg border-2 transition-colors ${
+              feuille.type === 'mecanique'
+                ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
+                : 'bg-purple-50 dark:bg-purple-900/30 border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300'
+            } ${updatingType ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <option value="mecanique">🔧 Mécanique</option>
+            <option value="chaotique">🎲 Chaotique</option>
+          </select>
+        </div>
       </div>
+      
       <ItemActions
         onMoveUp={() => onMove('up')}
         onMoveDown={() => onMove('down')}

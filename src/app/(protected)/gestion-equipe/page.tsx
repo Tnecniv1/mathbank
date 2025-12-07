@@ -97,6 +97,13 @@ const IconX = () => (
   </svg>
 );
 
+const IconEye = () => (
+  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="2"/>
+    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/>
+  </svg>
+);
+
 const Loader = () => (
   <svg className="w-8 h-8 animate-spin" viewBox="0 0 24 24" fill="none">
     <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
@@ -104,6 +111,7 @@ const Loader = () => (
   </svg>
 );
 
+/* ---------- Modal Gestion Feuilles ---------- */
 /* ---------- Modal Gestion Feuilles ---------- */
 function ModalGestionFeuilles({
   membre,
@@ -114,297 +122,404 @@ function ModalGestionFeuilles({
   onClose: () => void;
   onSave: () => void;
 }) {
-  const [feuilles, setFeuilles] = useState<Feuille[]>([]);
-  const [feuillesAutorisees, setFeuillesAutorisees] = useState<Set<string>>(new Set());
-  const [progressions, setProgressions] = useState<Map<string, Progression>>(new Map());
+  // États
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  
+  // Feuilles disponibles par type
+  const [feuillesMecaniques, setFeuillesMecaniques] = useState<any[]>([]);
+  const [feuillesChaotiques, setFeuillesChaotiques] = useState<any[]>([]);
+  
+  // Feuilles actuellement autorisées
+  const [feuilleMecaAutorisee, setFeuilleMecaAutorisee] = useState<any>(null);
+  const [feuilleChaosAutorisee, setFeuilleChaosAutorisee] = useState<any>(null);
+  
+  // Sélections pour ajout
+  const [selectedMeca, setSelectedMeca] = useState<string>('');
+  const [selectedChaos, setSelectedChaos] = useState<string>('');
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (membre) {
+      loadData();
+    }
+  }, [membre]);
 
   async function loadData() {
     try {
-      // Charger toutes les feuilles avec niveau, sujet, chapitre
-      const { data: feuillesData } = await supabase
+      setLoading(true);
+
+      // 1. Charger toutes les feuilles avec leur type ET ordre de niveau
+      const { data: toutesLesFeuilles } = await supabase
         .from('feuille_entrainement')
         .select(`
-          id, ordre, titre,
+          id,
+          ordre,
+          titre,
+          type,
           chapitre!inner(
-            id, titre, 
             sujet!inner(
-              id, titre,
-              niveau!inner(id, titre, ordre)
+              niveau!inner(titre, ordre)
             )
           )
         `)
         .order('ordre');
 
-      if (feuillesData) {
-        const feuillesFormatees = feuillesData.map((f: any) => ({
-          id: f.id,
-          ordre: f.ordre,
-          titre: f.titre,
-          chapitre_id: f.chapitre.id,
-          chapitre_titre: f.chapitre.titre,
-          sujet_id: f.chapitre.sujet.id,
-          sujet_titre: f.chapitre.sujet.titre,
-          niveau_id: f.chapitre.sujet.niveau.id,
-          niveau_titre: f.chapitre.sujet.niveau.titre,
-        }));
-        setFeuilles(feuillesFormatees);
+      // 1.bis Charger les feuilles VALIDÉES (est_termine = true) par ce membre
+      const { data: feuillesValidees } = await supabase
+        .from('progression_feuille')
+        .select('feuille_id')
+        .eq('user_id', membre.user_id)
+        .eq('est_termine', true);
+
+      const idsValidees = new Set(feuillesValidees?.map(p => p.feuille_id) || []);
+
+      // Après la ligne 165 (après .order('ordre'))
+      console.log('🔍 TOUTES les feuilles chaotiques lycée:', 
+        toutesLesFeuilles
+          ?.filter((f: any) => f.type === 'chaotique' && f.chapitre?.sujet?.niveau?.titre === 'lycée')
+          .map((f: any) => ({ 
+            id: f.id, 
+            titre: f.titre,
+            est_validee: idsValidees.has(f.id)
+          }))
+      );
+
+      if (toutesLesFeuilles) {
+        const mecaniques: any[] = [];
+        const chaotiques: any[] = [];
+
+        toutesLesFeuilles.forEach((f: any) => {
+          // FILTRER : Ne pas afficher les feuilles déjà validées
+          if (idsValidees.has(f.id)) {
+            return; // Skip cette feuille
+          }
+
+          const feuille = {
+            id: f.id,
+            ordre: f.ordre,
+            titre: f.titre,
+            type: f.type,
+            niveau_titre: f.chapitre?.sujet?.niveau?.titre || 'N/A',
+            niveau_ordre: f.chapitre?.sujet?.niveau?.ordre || 999,
+          };
+
+          if (f.type === 'mecanique') {
+            mecaniques.push(feuille);
+          } else if (f.type === 'chaotique') {
+            chaotiques.push(feuille);
+          }
+        });
+
+        // Trier par niveau puis par ordre
+        mecaniques.sort((a, b) => a.niveau_ordre - b.niveau_ordre || a.ordre - b.ordre);
+        chaotiques.sort((a, b) => a.niveau_ordre - b.niveau_ordre || a.ordre - b.ordre);
+
+        setFeuillesMecaniques(mecaniques);
+        console.log('🔍 Feuilles mécaniques finales:', mecaniques.length, mecaniques.map(f => f.titre));
+        console.log('🔍 Feuilles chaotiques finales:', chaotiques.length, chaotiques.map(f => f.titre));
+
+        setFeuillesChaotiques(chaotiques);
       }
 
-      // Charger feuilles autorisées
+      // 2. Charger les feuilles actuellement autorisées
       const { data: autorisees } = await supabase
         .from('feuilles_autorisees')
-        .select('feuille_id')
+        .select(`
+          feuille_id,
+          feuille_entrainement!inner(titre, type)
+        `)
         .eq('membre_id', membre.membre_id);
 
       if (autorisees) {
-        setFeuillesAutorisees(new Set(autorisees.map(a => a.feuille_id)));
-      }
+        autorisees.forEach((a: any) => {
+          const detail = {
+            feuille_id: a.feuille_id,
+            type: a.feuille_entrainement.type,
+            titre: a.feuille_entrainement.titre,
+          };
 
-      // Charger progressions
-      const { data: progsData } = await supabase
-        .from('progression_feuille')
-        .select('feuille_id, statut, score')
-        .eq('user_id', membre.user_id);
-
-      if (progsData) {
-        const progMap = new Map();
-        progsData.forEach(p => progMap.set(p.feuille_id, p));
-        setProgressions(progMap);
+          if (detail.type === 'mecanique') {
+            setFeuilleMecaAutorisee(detail);
+          } else if (detail.type === 'chaotique') {
+            setFeuilleChaosAutorisee(detail);
+          }
+        });
       }
 
       setLoading(false);
     } catch (error) {
-      console.error(error);
-      alert('Erreur lors du chargement');
+      console.error('Erreur chargement:', error);
+      alert('Erreur lors du chargement des données');
       setLoading(false);
     }
   }
 
-  function toggleFeuille(feuilleId: string) {
-    const newSet = new Set(feuillesAutorisees);
-    if (newSet.has(feuilleId)) {
-      newSet.delete(feuilleId);
-    } else {
-      newSet.add(feuilleId);
+  async function handleAutoriser(type: 'mecanique' | 'chaotique') {
+    const feuilleId = type === 'mecanique' ? selectedMeca : selectedChaos;
+    
+    if (!feuilleId) {
+      alert('Veuillez sélectionner une feuille');
+      return;
     }
-    setFeuillesAutorisees(newSet);
-  }
 
-  function toggleAll(cocher: boolean) {
-    if (cocher) {
-      setFeuillesAutorisees(new Set(feuilles.map(f => f.id)));
-    } else {
-      setFeuillesAutorisees(new Set());
-    }
-  }
-
-  async function handleSave() {
     try {
       setSaving(true);
 
       const { data, error } = await supabase.rpc('gerer_feuilles_membre', {
         p_membre_id: membre.membre_id,
-        p_feuilles_ids: Array.from(feuillesAutorisees),
+        p_feuilles_a_ajouter: [feuilleId],
+        p_feuilles_a_retirer: [],
       });
 
       if (error) throw error;
 
-      if (!data.success) {
-        alert(data.error);
+      if (data && !data.success) {
+        alert(data.error || 'Erreur lors de l\'autorisation');
+        setSaving(false);
         return;
       }
 
-      alert(`✅ ${data.count} feuille(s) autorisée(s)`);
+      alert('✓ Feuille autorisée avec succès');
+      await loadData();
+      
+      if (type === 'mecanique') {
+        setSelectedMeca('');
+      } else {
+        setSelectedChaos('');
+      }
+      
       onSave();
-      onClose();
     } catch (error: any) {
-      console.error(error);
-      alert('Erreur lors de l\'enregistrement');
+      console.error('Erreur autorisation:', error);
+      alert('Erreur : ' + (error.message || 'Impossible d\'autoriser la feuille'));
     } finally {
       setSaving(false);
     }
   }
 
-  // Grouper feuilles par niveau, puis sujet, puis chapitre
-  const feuillesHierarchie = feuilles.reduce((acc, f) => {
-    if (!acc[f.niveau_titre]) {
-      acc[f.niveau_titre] = {};
+  async function handleRetirer(type: 'mecanique' | 'chaotique') {
+    const feuille = type === 'mecanique' ? feuilleMecaAutorisee : feuilleChaosAutorisee;
+    
+    if (!feuille) return;
+    if (!confirm(`Retirer "${feuille.titre}" ?`)) return;
+
+    try {
+      setSaving(true);
+
+      const { data, error } = await supabase.rpc('gerer_feuilles_membre', {
+        p_membre_id: membre.membre_id,
+        p_feuilles_a_ajouter: [],
+        p_feuilles_a_retirer: [feuille.feuille_id],
+      });
+
+      if (error) throw error;
+
+      alert('✓ Feuille retirée');
+      await loadData();
+      onSave();
+    } catch (error: any) {
+      console.error('Erreur retrait:', error);
+      alert('Erreur : ' + (error.message || 'Impossible de retirer la feuille'));
+    } finally {
+      setSaving(false);
     }
-    if (!acc[f.niveau_titre][f.sujet_titre]) {
-      acc[f.niveau_titre][f.sujet_titre] = {};
-    }
-    if (!acc[f.niveau_titre][f.sujet_titre][f.chapitre_titre]) {
-      acc[f.niveau_titre][f.sujet_titre][f.chapitre_titre] = [];
-    }
-    acc[f.niveau_titre][f.sujet_titre][f.chapitre_titre].push(f);
-    return acc;
-  }, {} as Record<string, Record<string, Record<string, Feuille[]>>>);
+  }
+
+  // Fonction pour grouper les feuilles par niveau
+  function grouperParNiveau(feuilles: any[]) {
+    const niveauxMap = new Map<string, any[]>();
+    
+    feuilles.forEach(f => {
+      if (!niveauxMap.has(f.niveau_titre)) {
+        niveauxMap.set(f.niveau_titre, []);
+      }
+      niveauxMap.get(f.niveau_titre)!.push(f);
+    });
+
+    return Array.from(niveauxMap.entries());
+  }
 
   if (loading) {
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div className="bg-white dark:bg-slate-900 rounded-2xl p-8">
+        <div className="bg-white rounded-2xl p-8">
           <Loader />
         </div>
       </div>
     );
   }
 
+  const niveauxMecaniques = grouperParNiveau(feuillesMecaniques);
+  const niveauxChaotiques = grouperParNiveau(feuillesChaotiques);
+
+  console.log('Feuilles chaotiques:', JSON.stringify(feuillesChaotiques.map(f => ({
+    titre: f.titre, 
+    niveau: f.niveau_titre,
+    id: f.id
+  })), null, 2));
+
+  console.log('Niveaux chaotiques groupés:', JSON.stringify(niveauxChaotiques.map(([niveau, feuilles]) => 
+    ({
+      niveau: niveau,
+      nb_feuilles: feuilles.length
+    })
+  ), null, 2));
+
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-teal-500 to-teal-600 dark:from-teal-600 dark:to-teal-700 p-6">
-          <h2 className="text-2xl font-bold text-white">Gérer les feuilles</h2>
-          <p className="text-teal-100 mt-1">{membre.membre_nom}</p>
+      <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+        
+        <div className="p-6 border-b-2 border-gray-300">
+          <div className="flex items-center justify-between">
+            <h2 className="text-2xl font-bold text-gray-900">
+              Gérer les feuilles - {membre.membre_nom}
+            </h2>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center transition-colors">
+              <IconX />
+            </button>
+          </div>
+          <p className="text-sm text-gray-600 mt-2">
+            Maximum : 1 feuille mécanique + 1 feuille chaotique
+          </p>
         </div>
 
-        {/* Contenu */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Actions rapides */}
-          <div className="flex gap-3">
-            <button
-              onClick={() => toggleAll(true)}
-              className="px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors text-sm font-medium"
-            >
-              ✓ Tout cocher
-            </button>
-            <button
-              onClick={() => toggleAll(false)}
-              className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-sm font-medium"
-            >
-              Tout décocher
-            </button>
-            <div className="ml-auto text-sm text-slate-600 dark:text-slate-400">
-              {feuillesAutorisees.size} feuille(s) cochée(s)
-            </div>
+        <div className="p-6 space-y-6">
+          
+          {/* Section Mécanique */}
+          <div className="border-2 border-blue-200 rounded-xl p-4 bg-gradient-to-br from-blue-50 to-blue-100/50/20/10">
+            <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
+              🔧 Feuille Mécanique <span className="text-sm font-normal">(1 maximum)</span>
+            </h3>
+
+            {feuilleMecaAutorisee ? (
+              <div className="mb-4 p-3 bg-green-100/30 border-2 border-green-300 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-green-900">✅ Actuellement autorisée :</div>
+                    <div className="font-bold text-green-800 mt-1">{feuilleMecaAutorisee.titre}</div>
+                  </div>
+                  <button onClick={() => handleRetirer('mecanique')} disabled={saving} className="px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:bg-slate-300 text-gray-900 text-sm font-medium rounded-lg transition-colors">
+                    Retirer
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mb-4 p-3 bg-gray-100 border-2 border-gray-300 rounded-lg">
+                <div className="text-sm text-gray-600">Aucune feuille mécanique autorisée</div>
+              </div>
+            )}
+
+            {!feuilleMecaAutorisee && (
+              <div>
+                <label className="block text-sm font-medium text-blue-900 mb-2">Choisir une feuille à autoriser :</label>
+                <div className="flex gap-2">
+                  <select 
+                    value={selectedMeca} 
+                    onChange={(e) => setSelectedMeca(e.target.value)} 
+                    disabled={saving} 
+                    className="flex-1 px-3 py-2 border-2 border-blue-300 rounded-lg bg-white text-gray-900 disabled:opacity-50"
+                  >
+                    <option value="">-- Sélectionner une feuille --</option>
+                    {niveauxMecaniques.map(([niveau, feuilles]) => (
+                      <optgroup key={niveau} label={niveau}>
+                        {feuilles.map((f: any) => (
+                          <option key={f.id} value={f.id}>
+                            #{f.ordre} - {f.titre}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <button onClick={() => handleAutoriser('mecanique')} disabled={!selectedMeca || saving} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-gray-900 font-medium rounded-lg transition-colors">
+                    {saving ? 'Chargement...' : 'Autoriser'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Hiérarchie : Niveau → Sujet → Chapitre → Feuilles */}
-          {Object.entries(feuillesHierarchie).map(([niveau, sujets]) => (
-            <div key={niveau} className="space-y-5">
-              {/* Titre du NIVEAU */}
-              <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white bg-gradient-to-r from-teal-500 to-teal-600 text-transparent bg-clip-text">
-                📚 {niveau}
-              </h2>
+          {/* Section Chaotique */}
+          <div className="border-2 border-purple-200 rounded-xl p-4 bg-gradient-to-br from-purple-50 to-purple-100/50/20/10">
+            <h3 className="text-lg font-bold text-purple-900 mb-4 flex items-center gap-2">
+              🎲 Feuille Chaotique <span className="text-sm font-normal">(1 maximum)</span>
+            </h3>
 
-              {/* SUJETS */}
-              {Object.entries(sujets).map(([sujet, chapitres]) => (
-                <div key={sujet} className="ml-4 space-y-4">
-                  {/* Titre du SUJET */}
-                  <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 border-l-4 border-teal-500 pl-3">
-                    {sujet}
-                  </h3>
-
-                  {/* CHAPITRES */}
-                  {Object.entries(chapitres).map(([chapitre, feuillesChapitre]) => (
-                    <div key={chapitre} className="ml-8 space-y-2">
-                      {/* Titre du CHAPITRE */}
-                      <h4 className="text-md font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                        {chapitre}
-                      </h4>
-
-                      {/* FEUILLES */}
-                      <div className="ml-6 space-y-2">
-                        {feuillesChapitre.map(feuille => {
-                          const estAutorisee = feuillesAutorisees.has(feuille.id);
-                          const progression = progressions.get(feuille.id);
-                          const estValidee = progression?.statut === 'validee';
-                          const estEnAttente = progression?.statut === 'en_attente';
-
-                          return (
-                            <label
-                              key={feuille.id}
-                              className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                                estAutorisee
-                                  ? 'border-teal-400 bg-teal-50 dark:bg-teal-900/20'
-                                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={estAutorisee}
-                                onChange={() => toggleFeuille(feuille.id)}
-                                className="w-5 h-5 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                              />
-
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium text-slate-900 dark:text-slate-100">
-                                    [{feuille.ordre}] {feuille.titre}
-                                  </span>
-                                  {/* Badges statut */}
-                                  {estValidee && (
-                                    <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-medium rounded">
-                                      🟣 Validée {progression.score ? `(${progression.score}/20)` : ''}
-                                    </span>
-                                  )}
-                                  {estEnAttente && (
-                                    <span className="px-2 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-xs font-medium rounded">
-                                      🟠 En attente
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Pastille */}
-                              <div className="w-3 h-3 rounded-full" style={{
-                                backgroundColor: estValidee ? '#9333ea' : estAutorisee ? '#f97316' : '#1e293b'
-                              }} />
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
+            {feuilleChaosAutorisee ? (
+              <div className="mb-4 p-3 bg-green-100/30 border-2 border-green-300 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-green-900">✅ Actuellement autorisée :</div>
+                    <div className="font-bold text-green-800 mt-1">{feuilleChaosAutorisee.titre}</div>
+                  </div>
+                  <button onClick={() => handleRetirer('chaotique')} disabled={saving} className="px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:bg-slate-300 text-gray-900 text-sm font-medium rounded-lg transition-colors">
+                    Retirer
+                  </button>
                 </div>
-              ))}
-            </div>
-          ))}
+              </div>
+            ) : (
+              <div className="mb-4 p-3 bg-gray-100 border-2 border-gray-300 rounded-lg">
+                <div className="text-sm text-gray-600">Aucune feuille chaotique autorisée</div>
+              </div>
+            )}
+
+            {!feuilleChaosAutorisee && (
+              <div>
+                <label className="block text-sm font-medium text-purple-900 mb-2">Choisir une feuille à autoriser :</label>
+                <div className="flex gap-2">
+                  <select 
+                    value={selectedChaos} 
+                    onChange={(e) => setSelectedChaos(e.target.value)} 
+                    disabled={saving} 
+                    className="flex-1 px-3 py-2 border-2 border-purple-300 rounded-lg bg-white text-gray-900 disabled:opacity-50"
+                  >
+                    <option value="">-- Sélectionner une feuille --</option>
+                    {niveauxChaotiques.map(([niveau, feuilles]) => (
+                      <optgroup key={niveau} label={niveau}>
+                        {feuilles.map((f: any) => (
+                          <option key={f.id} value={f.id}>
+                            #{f.ordre} - {f.titre}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <button onClick={() => handleAutoriser('chaotique')} disabled={!selectedChaos || saving} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-gray-900 font-medium rounded-lg transition-colors">
+                    {saving ? 'Chargement...' : 'Autoriser'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Footer */}
-        <div className="border-t border-slate-200 dark:border-slate-700 p-6 flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
-          >
-            Annuler
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex-1 px-4 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-semibold rounded-xl transition-all disabled:opacity-50"
-          >
-            {saving ? 'Enregistrement...' : '💾 Enregistrer'}
+        <div className="p-6 border-t-2 border-gray-300">
+          <button onClick={onClose} className="w-full px-4 py-2 bg-gray-100 hover:bg-slate-300 text-gray-800 font-medium rounded-lg transition-colors">
+            Fermer
           </button>
         </div>
       </div>
     </div>
   );
 }
-/* ---------- Page Gestion Équipe ---------- */
+
+/* ---------- Page principale ---------- */
 export default function GestionEquipePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [equipeId, setEquipeId] = useState<string | null>(null);
   const [equipe, setEquipe] = useState<Equipe | null>(null);
   const [membres, setMembres] = useState<Membre[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [membreSelectionne, setMembreSelectionne] = useState<Membre | null>(null);
+  const [notifsNonLues, setNotifsNonLues] = useState(0);
+
   const [showModalGestion, setShowModalGestion] = useState(false);
-  const [equipeId, setEquipeId] = useState<string | null>(null);
+  const [membreSelectionne, setMembreSelectionne] = useState<Membre | null>(null);
   const [showObserverModal, setShowObserverModal] = useState(false);
-  
-  // États pour validation/rejet
-  const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
+
   const [showRejetModal, setShowRejetModal] = useState(false);
+  const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
   const [commentaireRejet, setCommentaireRejet] = useState('');
 
   useEffect(() => {
@@ -422,9 +537,11 @@ export default function GestionEquipePage() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session || !session.user) {
-        router.push('/auth');
+        router.push('/connexion');
         return;
       }
+
+      setUserId(session.user.id);
 
       // Charger l'équipe spécifique
       const { data: equipeData, error: equipeError } = await supabase
@@ -436,7 +553,7 @@ export default function GestionEquipePage() {
 
       if (equipeError || !equipeData) {
         alert('Équipe introuvable ou vous n\'êtes pas le chef');
-        router.push('/personnel');
+        router.push('/classement');
         return;
       }
 
@@ -451,46 +568,24 @@ export default function GestionEquipePage() {
 
       setMembres(membresData || []);
 
-      // Charger notifications filtrées pour cette équipe
-      // 1. Charger toutes les notifications du chef
-      const { data: allNotifsData } = await supabase
+      // Charger les notifications
+      const { data: notifsData } = await supabase
         .from('notification')
         .select('*')
         .eq('user_id', session.user.id)
-        .in('type', ['demande_equipe', 'soumission_feuille'])
-        .order('created_at', { ascending: false });
+        .eq('lu', false)
+        .order('created_at', { ascending: false })
+        .limit(10);
 
-      // 2. Filtrer pour ne garder que celles de cette équipe
-      const membreIds = (membresData || []).map(m => m.user_id);
-      
-      // Pour les soumissions, charger les progressions des membres
-      const { data: progressionsData } = await supabase
-        .from('progression_feuille')
-        .select('id, user_id')
-        .in('user_id', membreIds);
-      
-      const progressionIds = (progressionsData || []).map(p => p.id);
-      
-      const notifsFiltrees = (allNotifsData || []).filter(notif => {
-        // Filtrer les notifications lues
-        if (notif.lu) return false;
-        
-        // Pour les demandes : vérifier equipe_id dans metadata
-        if (notif.type === 'demande_equipe') {
-          return notif.metadata?.equipe_id === equipeData.id;
-        }
-        // Pour les soumissions : vérifier que la progression appartient à un membre
-        if (notif.type === 'soumission_feuille') {
-          return progressionIds.includes(notif.metadata?.progression_id);
-        }
-        return false;
-      });
-
-      setNotifications(notifsFiltrees);
+      if (notifsData) {
+        setNotifications(notifsData);
+        setNotifsNonLues(notifsData.filter(n => !n.lu).length);
+      }
 
       setLoading(false);
     } catch (error) {
       console.error(error);
+      alert('Erreur lors du chargement');
       setLoading(false);
     }
   }
@@ -500,189 +595,116 @@ export default function GestionEquipePage() {
     setShowModalGestion(true);
   }
 
-  async function handleValiderSoumission(notification: Notification) {
+  function handleObserverProgression(membre: Membre) {
+    // Redirection vers /progression avec le user_id du membre en query param
+    router.push(`/progression/observer/${membre.user_id}`);
+  }
+
+  async function handleValiderSoumission(notif: Notification) {
     if (!confirm('Valider cette soumission ?')) return;
 
     try {
-      const progressionId = notification.metadata?.progression_id;
-      
-      const { data, error } = await supabase.rpc('chef_valider_soumission', {
-        p_progression_id: progressionId,
-        p_score: null
+      const { error } = await supabase.rpc('valider_soumission_feuille', {
+        p_notification_id: notif.id,
+        p_user_id: notif.metadata.user_id,
+        p_feuille_id: notif.metadata.feuille_id,
+        p_score: notif.metadata.score,
       });
 
       if (error) throw error;
-      // Marquer comme lue
-      await supabase
-        .from('notification')
-        .update({ lu: true })
-        .eq('id', notification.id);
 
-      alert('✅ Soumission validée !');
+      alert('✓ Soumission validée');
       if (equipeId) loadData(equipeId);
-    } catch (error: any) {
+    } catch (error) {
       console.error(error);
       alert('Erreur lors de la validation');
     }
   }
 
-  function handleOuvrirRejet(notification: Notification) {
-    setNotificationSelectionnee(notification);
-    setCommentaireRejet('');
+  function handleOuvrirRejet(notif: Notification) {
+    setNotificationSelectionnee(notif);
     setShowRejetModal(true);
   }
 
   async function handleRejeterSoumission() {
-    if (!notificationSelectionnee) return;
-    if (!commentaireRejet.trim()) {
-      alert('Veuillez entrer un commentaire');
-      return;
-    }
+    if (!notificationSelectionnee || !commentaireRejet.trim()) return;
 
     try {
-      const progressionId = notificationSelectionnee.metadata?.progression_id;
-      
-      const { data, error } = await supabase.rpc('chef_refuser_soumission', {
-        p_progression_id: progressionId,
-        p_raison: commentaireRejet,
+      const { error } = await supabase.rpc('rejeter_soumission_feuille', {
+        p_notification_id: notificationSelectionnee.id,
+        p_user_id: notificationSelectionnee.metadata.user_id,
+        p_feuille_id: notificationSelectionnee.metadata.feuille_id,
+        p_commentaire: commentaireRejet.trim(),
       });
 
       if (error) throw error;
 
-      // Marquer comme lue
-      await supabase
-        .from('notification')
-        .update({ lu: true })
-        .eq('id', notificationSelectionnee.id);
-
-      alert('Soumission rejetée');
+      alert('✓ Soumission rejetée');
       setShowRejetModal(false);
       setNotificationSelectionnee(null);
       setCommentaireRejet('');
       if (equipeId) loadData(equipeId);
-    } catch (error: any) {
+    } catch (error) {
       console.error(error);
-      alert('Erreur');
+      alert('Erreur lors du rejet');
     }
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
-        <div className="flex items-center gap-3 text-teal-500">
-          <Loader />
-          <span className="text-lg">Chargement...</span>
-        </div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <Loader />
       </div>
     );
   }
 
-  if (!equipe) {
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-slate-600 dark:text-slate-400 mb-4">
-            Vous n'êtes pas chef d'une équipe
-          </p>
-          <button
-            onClick={() => router.push('/personnel')}
-            className="px-4 py-2 bg-teal-500 text-white rounded-lg"
-          >
-            Retour
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const notifsNonLues = notifications.filter(n => !n.lu).length;
-  const soumissionsEnAttente = membres.reduce((sum, m) => sum + (m.nb_soumissions_attente || 0), 0);
+  if (!equipe) return null;
 
   return (
-    <main className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <div className="max-w-7xl mx-auto px-6 py-8">
+    <main className="min-h-screen bg-white p-4 md:p-8">
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Lora:wght@400;500;600;700&display=swap');
+        h1, h2, h3, h4, h5, h6, .font-mono { font-family: 'IBM Plex Mono', monospace; }
+        body { font-family: 'Lora', serif; }
+        p, span, div { font-family: 'Lora', serif; }
+      `}</style>
+      <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
-        <div className="mb-8">
-          <button
-            onClick={() => router.push('/personnel')}
-            className="text-sm text-slate-600 dark:text-slate-400 hover:text-teal-600 dark:hover:text-teal-400 mb-4"
-          >
-            ← Retour à Personnel
-          </button>
-          
-          <div className="flex items-center gap-4">
-            <div
-              className="w-16 h-16 rounded-full flex items-center justify-center text-3xl"
-              style={{ backgroundColor: equipe.couleur }}
-            >
-              👥
-            </div>
+        <div className="bg-white rounded-2xl p-6 border-2 border-gray-300">
+          <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">
-                {equipe.nom}
+              <h1 className="text-3xl font-bold text-gray-900">
+                Gestion de l'équipe
               </h1>
-              <p className="text-slate-600 dark:text-slate-400">
-                {membres.length} membre{membres.length > 1 ? 's' : ''}
+              <p className="text-gray-600 mt-2">
+                Équipe : <span className="font-semibold" style={{ color: equipe.couleur }}>{equipe.nom}</span>
               </p>
             </div>
+            <button
+              onClick={() => router.push('/classement')}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-100 text-gray-900 font-medium rounded-lg transition-colors"
+            >
+              ← Retour
+            </button>
           </div>
         </div>
 
-        {/* Stats rapides */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border-2 border-slate-200 dark:border-slate-800">
-            <div className="flex items-center gap-3">
-              <IconUser className="text-teal-600" />
-              <div>
-                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-                  {membres.length}
-                </div>
-                <div className="text-sm text-slate-600 dark:text-slate-400">Membres</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border-2 border-orange-200 dark:border-orange-800">
-            <div className="flex items-center gap-3">
-              <IconBell className="text-orange-600" />
-              <div>
-                <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-                  {soumissionsEnAttente}
-                </div>
-                <div className="text-sm text-slate-600 dark:text-slate-400">Soumissions en attente</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border-2 border-blue-200 dark:border-blue-800">
-            <div className="flex items-center gap-3">
-              <IconChart className="text-blue-600" />
-              <div>
-                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                  {notifsNonLues}
-                </div>
-                <div className="text-sm text-slate-600 dark:text-slate-400">Notifications non lues</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Membres */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border-2 border-slate-200 dark:border-slate-800 mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-              📋 Membres de l'équipe
+        {/* Liste des membres */}
+        <div className="bg-white rounded-2xl p-6 border-2 border-gray-300">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900">
+              👥 Membres de l'équipe ({membres.length})
             </h2>
             <button
               onClick={() => setShowObserverModal(true)}
-              className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
+              className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-gray-900 font-semibold rounded-lg transition-colors flex items-center gap-2"
             >
               🔍 Observer feuilles
             </button>
           </div>
 
           {membres.length === 0 ? (
-            <div className="text-center py-12 text-slate-500">
+            <div className="text-center py-12 text-gray-500">
               Aucun membre pour le moment
             </div>
           ) : (
@@ -690,18 +712,18 @@ export default function GestionEquipePage() {
               {membres.map(membre => (
                 <div
                   key={membre.membre_id}
-                  className="p-4 border-2 border-slate-200 dark:border-slate-700 rounded-xl hover:border-teal-400 dark:hover:border-teal-600 transition-all"
+                  className="p-4 border-2 border-gray-300 rounded-xl hover:border-teal-400 transition-all"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center text-white font-bold text-lg">
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center text-gray-900 font-bold text-lg">
                       {membre.membre_nom.charAt(0)}
                     </div>
 
                     <div className="flex-1">
-                      <div className="font-semibold text-slate-900 dark:text-slate-100">
+                      <div className="font-semibold text-gray-900">
                         {membre.membre_nom}
                       </div>
-                      <div className="text-sm text-slate-600 dark:text-slate-400 flex gap-4">
+                      <div className="text-sm text-gray-600 flex gap-4">
                         <span>
                           {membre.nb_feuilles_validees}/{membre.nb_feuilles_autorisees} feuilles validées
                         </span>
@@ -711,7 +733,7 @@ export default function GestionEquipePage() {
                       </div>
                       {membre.nb_soumissions_attente > 0 && (
                         <div className="mt-1">
-                          <span className="px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-xs font-medium rounded">
+                          <span className="px-2 py-1 bg-orange-100/30 text-orange-700 text-xs font-medium rounded">
                             🟠 {membre.nb_soumissions_attente} soumission{membre.nb_soumissions_attente > 1 ? 's' : ''} en attente
                           </span>
                         </div>
@@ -720,8 +742,15 @@ export default function GestionEquipePage() {
 
                     <div className="flex gap-2">
                       <button
+                        onClick={() => handleObserverProgression(membre)}
+                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-gray-900 font-medium rounded-lg transition-colors flex items-center gap-2"
+                      >
+                        <IconEye />
+                        Observer
+                      </button>
+                      <button
                         onClick={() => handleGererFeuilles(membre)}
-                        className="px-4 py-2 bg-teal-500 hover:bg-teal-600 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+                        className="px-4 py-2 bg-teal-500 hover:bg-teal-600 text-gray-900 font-medium rounded-lg transition-colors flex items-center gap-2"
                       >
                         <IconSettings />
                         Gérer les feuilles
@@ -735,13 +764,13 @@ export default function GestionEquipePage() {
         </div>
 
         {/* Notifications de cette équipe */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border-2 border-slate-200 dark:border-slate-800">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">
+        <div className="bg-white rounded-2xl p-6 border-2 border-gray-300">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">
             🔔 Notifications de l'équipe
           </h2>
           
           {notifications.length === 0 ? (
-            <div className="text-center py-8 text-slate-500 dark:text-slate-400">
+            <div className="text-center py-8 text-gray-500">
               Aucune notification pour cette équipe
             </div>
           ) : (
@@ -751,27 +780,27 @@ export default function GestionEquipePage() {
                   key={notif.id}
                   className={`p-4 rounded-xl border-2 transition-all ${
                     notif.lu
-                      ? 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50'
-                      : 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20'
+                      ? 'border-gray-300 bg-gray-50/50'
+                      : 'border-blue-200 bg-blue-50/20'
                   }`}
                 >
                   <div className="flex items-start justify-between mb-2">
-                    <h3 className="font-semibold text-slate-900 dark:text-slate-100">
+                    <h3 className="font-semibold text-gray-900">
                       {notif.type === 'demande_equipe' && '👤 '}
                       {notif.type === 'soumission_feuille' && '📝 '}
                       {notif.titre}
                     </h3>
                     {!notif.lu && (
-                      <span className="px-2 py-1 bg-blue-500 text-white text-xs font-bold rounded">
+                      <span className="px-2 py-1 bg-blue-500 text-gray-900 text-xs font-bold rounded">
                         NOUVEAU
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
+                  <p className="text-sm text-gray-600 mb-3">
                     {notif.message}
                   </p>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-500">
+                    <span className="text-xs text-gray-500">
                       {new Date(notif.created_at).toLocaleDateString('fr-FR', {
                         day: 'numeric',
                         month: 'long',
@@ -783,13 +812,13 @@ export default function GestionEquipePage() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleValiderSoumission(notif)}
-                          className="px-3 py-1.5 bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-900/50 text-green-600 dark:text-green-400 text-sm font-medium rounded-lg transition-colors"
+                          className="px-3 py-1.5 bg-green-100/30 hover:bg-green-200/50 text-green-600 text-sm font-medium rounded-lg transition-colors"
                         >
                           ✓ Valider
                         </button>
                         <button
                           onClick={() => handleOuvrirRejet(notif)}
-                          className="px-3 py-1.5 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg transition-colors"
+                          className="px-3 py-1.5 bg-red-100/30 hover:bg-red-200/50 text-red-600 text-sm font-medium rounded-lg transition-colors"
                         >
                           ✗ Rejeter
                         </button>
@@ -797,7 +826,7 @@ export default function GestionEquipePage() {
                     ) : (
                       <button
                         onClick={() => router.push('/personnel')}
-                        className="px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 text-sm font-medium rounded-lg transition-colors"
+                        className="px-3 py-1.5 bg-blue-100/30 hover:bg-blue-200/50 text-blue-600 text-sm font-medium rounded-lg transition-colors"
                       >
                         Gérer →
                       </button>
@@ -809,10 +838,10 @@ export default function GestionEquipePage() {
           )}
           
           {notifications.length > 0 && (
-            <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+            <div className="mt-4 pt-4 border-t border-gray-300">
               <button
                 onClick={() => router.push('/personnel')}
-                className="w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors"
+                className="w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 text-gray-900 font-medium rounded-lg transition-colors"
               >
                 Voir toutes les notifications ({notifsNonLues} non lues)
               </button>
@@ -830,7 +859,7 @@ export default function GestionEquipePage() {
             setMembreSelectionne(null);
           }}
           onSave={() => {
-            if (equipeId) loadData(equipeId); // Recharger après enregistrement
+            if (equipeId) loadData(equipeId);
           }}
         />
       )}
@@ -846,18 +875,18 @@ export default function GestionEquipePage() {
       {/* Modal Rejet */}
       {showRejetModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">
               Rejeter la soumission
             </h2>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+            <p className="text-sm text-gray-600 mb-4">
               Expliquez pourquoi cette soumission est rejetée :
             </p>
             <textarea
               value={commentaireRejet}
               onChange={(e) => setCommentaireRejet(e.target.value)}
               placeholder="Votre commentaire..."
-              className="w-full p-3 border-2 border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:border-red-500 focus:ring-2 focus:ring-red-200 dark:focus:ring-red-800 outline-none resize-none"
+              className="w-full p-3 border-2 border-gray-300 rounded-lg bg-white text-gray-900 focus:border-red-500 focus:ring-2 focus:ring-red-200 outline-none resize-none"
               rows={4}
             />
             <div className="flex gap-3 mt-4">
@@ -867,14 +896,14 @@ export default function GestionEquipePage() {
                   setNotificationSelectionnee(null);
                   setCommentaireRejet('');
                 }}
-                className="flex-1 px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-medium rounded-lg transition-colors"
+                className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-100 text-gray-900 font-medium rounded-lg transition-colors"
               >
                 Annuler
               </button>
               <button
                 onClick={handleRejeterSoumission}
                 disabled={!commentaireRejet.trim()}
-                className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-gray-900 font-medium rounded-lg transition-colors"
               >
                 Rejeter
               </button>

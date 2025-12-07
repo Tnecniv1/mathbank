@@ -139,60 +139,67 @@ export default function ClassementPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
-        <div className="text-slate-600 dark:text-slate-400">Chargement...</div>
+      <main className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-gray-600">Chargement...</div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 dark:bg-slate-950 py-8 px-6">
+    <div className="min-h-screen bg-[#18162a] p-6">
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Lora:wght@400;500;600;700&display=swap');
+        h1, h2, h3, h4, h5, h6, .font-mono { font-family: 'IBM Plex Mono', monospace; }
+        body { font-family: 'Lora', serif; background-color: #18162a; }
+        p, span, div { font-family: 'Lora', serif; }
+      `}</style>
+    <main className="bg-white rounded-2xl shadow-xl py-8 px-6">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100 mb-2">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">
               🏆 Classement
             </h1>
-            <p className="text-slate-600 dark:text-slate-400">
+            <p className="text-gray-600">
               Suivez les performances des équipes et des participants
             </p>
           </div>
 
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-6 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-semibold rounded-xl shadow-lg transition-all"
+            className="px-6 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-gray-900 font-semibold rounded-xl shadow-lg transition-all"
           >
             📝 Demander création d'équipe
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-6 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex gap-2 mb-6 border-b border-gray-300">
           <button
             onClick={() => setActiveTab('equipes')}
             className={`px-6 py-3 font-medium transition-colors relative ${
               activeTab === 'equipes'
-                ? 'text-blue-600 dark:text-blue-400'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                ? 'text-blue-600'
+                : 'text-gray-600 hover:text-gray-900'
             }`}
           >
             Équipes
             {activeTab === 'equipes' && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-400" />
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
             )}
           </button>
           <button
             onClick={() => setActiveTab('utilisateurs')}
             className={`px-6 py-3 font-medium transition-colors relative ${
               activeTab === 'utilisateurs'
-                ? 'text-blue-600 dark:text-blue-400'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                ? 'text-blue-600'
+                : 'text-gray-600 hover:text-gray-900'
             }`}
           >
             Individuel
             {activeTab === 'utilisateurs' && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-400" />
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
             )}
           </button>
         </div>
@@ -234,6 +241,7 @@ export default function ClassementPage() {
         )}
       </div>
     </main>
+    </div>
   );
 }
 
@@ -256,10 +264,10 @@ function ClassementEquipes({
 
   if (equipes.length === 0) {
     return (
-      <div className="text-center py-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
+      <div className="text-center py-12 bg-white rounded-2xl border border-gray-300">
         <div className="text-6xl mb-4">👥</div>
-        <p className="text-slate-600 dark:text-slate-400">Aucune équipe pour le moment</p>
-        <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">
+        <p className="text-gray-600">Aucune équipe pour le moment</p>
+        <p className="text-sm text-gray-500 mt-2">
           Créez la première équipe !
         </p>
       </div>
@@ -276,10 +284,10 @@ function ClassementEquipes({
         return (
           <div
             key={equipe.equipe_id}
-            className={`bg-white dark:bg-slate-900 rounded-xl border-2 p-6 transition-all ${
+            className={`bg-white rounded-xl border-2 p-6 transition-all ${
               estMonEquipe
-                ? 'border-blue-400 dark:border-blue-600 shadow-lg'
-                : 'border-slate-200 dark:border-slate-800'
+                ? 'border-blue-400 shadow-lg'
+                : 'border-gray-300'
             }`}
           >
             <div className="flex items-center justify-between">
@@ -296,26 +304,26 @@ function ClassementEquipes({
                 
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                    <h3 className="text-xl font-bold text-gray-900">
                       {equipe.equipe_nom}
                     </h3>
                     {estMonEquipe && (
-                      <span className="text-xs font-medium px-2 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full">
+                      <span className="text-xs font-medium px-2 py-1 bg-blue-100/50 text-blue-700 rounded-full">
                         Mon équipe
                       </span>
                     )}
                   </div>
                   {equipe.description && (
-                    <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                    <p className="text-sm text-gray-600 mt-1">
                       {equipe.description}
                     </p>
                   )}
                   <div className="flex items-center gap-3 mt-1">
-                    <p className="text-sm text-slate-500 dark:text-slate-500">
+                    <p className="text-sm text-gray-500">
                       {equipe.nb_membres} membre{equipe.nb_membres > 1 ? 's' : ''}
                     </p>
-                    <span className="text-slate-300 dark:text-slate-700">•</span>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                    <span className="text-slate-300">•</span>
+                    <p className="text-sm text-gray-600">
                       👑 Chef : <span className="font-medium">{equipe.chef_nom || 'Inconnu'}</span>
                     </p>
                   </div>
@@ -325,23 +333,23 @@ function ClassementEquipes({
               {/* Stats et action */}
               <div className="flex items-center gap-6">
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">
+                  <div className="text-3xl font-bold text-blue-600">
                     {equipe.score_total}
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">Points</div>
+                  <div className="text-xs text-gray-500">Points</div>
                 </div>
                 
                 <div className="text-center">
-                  <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                  <div className="text-lg font-semibold text-gray-900">
                     {equipe.nb_feuilles_validees}
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">Validées</div>
+                  <div className="text-xs text-gray-500">Validées</div>
                 </div>
 
                 {peutDemander && (
                   <button
                     onClick={() => onDemanderRejoindre(equipe)}
-                    className="px-4 py-2 bg-green-100 dark:bg-green-900/20 hover:bg-green-200 dark:hover:bg-green-900/30 text-green-700 dark:text-green-400 font-medium rounded-lg transition-colors"
+                    className="px-4 py-2 bg-green-100/20 hover:bg-green-200 text-green-700 font-medium rounded-lg transition-colors"
                   >
                     Rejoindre
                   </button>
@@ -372,9 +380,9 @@ function ClassementUtilisateurs({
 
   if (utilisateurs.length === 0) {
     return (
-      <div className="text-center py-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
+      <div className="text-center py-12 bg-white rounded-2xl border border-gray-300">
         <div className="text-6xl mb-4">👤</div>
-        <p className="text-slate-600 dark:text-slate-400">Aucun participant pour le moment</p>
+        <p className="text-gray-600">Aucun participant pour le moment</p>
       </div>
     );
   }
@@ -388,10 +396,10 @@ function ClassementUtilisateurs({
         return (
           <div
             key={user.user_id}
-            className={`bg-white dark:bg-slate-900 rounded-xl border-2 p-4 transition-all ${
+            className={`bg-white rounded-xl border-2 p-4 transition-all ${
               estMoi
-                ? 'border-blue-400 dark:border-blue-600 shadow-lg'
-                : 'border-slate-200 dark:border-slate-800'
+                ? 'border-blue-400 shadow-lg'
+                : 'border-gray-300'
             }`}
           >
             <div className="flex items-center justify-between">
@@ -403,17 +411,17 @@ function ClassementUtilisateurs({
                 
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold text-slate-900 dark:text-slate-100">
+                    <span className="font-semibold text-gray-900">
                       {user.full_name || 'Utilisateur'}
                     </span>
                     {estMoi && (
-                      <span className="text-xs font-medium px-2 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full">
+                      <span className="text-xs font-medium px-2 py-0.5 bg-blue-100/50 text-blue-700 rounded-full">
                         Vous
                       </span>
                     )}
                   </div>
                   {user.equipe_nom && (
-                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                    <p className="text-sm text-gray-500">
                       {user.equipe_nom}
                     </p>
                   )}
@@ -423,24 +431,24 @@ function ClassementUtilisateurs({
               {/* Stats */}
               <div className="flex gap-6 text-center">
                 <div>
-                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                  <div className="text-2xl font-bold text-blue-600">
                     {user.score_total}
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">Points</div>
+                  <div className="text-xs text-gray-500">Points</div>
                 </div>
                 
                 <div>
-                  <div className="font-semibold text-slate-900 dark:text-slate-100">
+                  <div className="font-semibold text-gray-900">
                     {user.nb_feuilles_validees}
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">Validées</div>
+                  <div className="text-xs text-gray-500">Validées</div>
                 </div>
 
                 <div>
-                  <div className="font-semibold text-slate-900 dark:text-slate-100">
+                  <div className="font-semibold text-gray-900">
                     {user.score_moyen}
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">Moy.</div>
+                  <div className="text-xs text-gray-500">Moy.</div>
                 </div>
               </div>
             </div>
@@ -458,11 +466,11 @@ function ModalCreateEquipe({ onClose, onCreate }: any) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-2">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">
           Demander la création d'une équipe
         </h2>
-        <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+        <p className="text-sm text-gray-600 mb-4">
           Votre demande sera examinée par un administrateur
         </p>
 
@@ -477,7 +485,7 @@ function ModalCreateEquipe({ onClose, onCreate }: any) {
               value={nom}
               onChange={(e) => setNom(e.target.value)}
               placeholder="Les Matheux"
-              className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
             />
           </div>
 
@@ -488,21 +496,21 @@ function ModalCreateEquipe({ onClose, onCreate }: any) {
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Pourquoi souhaitez-vous créer cette équipe ?"
               rows={3}
-              className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
             />
           </div>
 
           <div className="flex gap-3 pt-2">
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
+              className="flex-1 px-4 py-3 bg-white hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
             >
               Annuler
             </button>
             <button
               onClick={() => onCreate(nom, description)}
               disabled={!nom.trim()}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all"
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-gray-900 font-semibold rounded-xl disabled:opacity-50 transition-all"
             >
               📝 Envoyer la demande
             </button>
@@ -519,26 +527,26 @@ function ModalDemandeRejoindre({ equipe, onClose, onDemander }: any) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">
           Rejoindre {equipe.equipe_nom}
         </h2>
 
         <div className="space-y-4">
-          <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl">
+          <div className="p-4 bg-white rounded-xl">
             <div className="flex items-center gap-3 mb-2">
               <div className="w-3 h-8 rounded-full" style={{ backgroundColor: equipe.couleur }} />
               <div>
-                <div className="font-semibold text-slate-900 dark:text-slate-100">
+                <div className="font-semibold text-gray-900">
                   {equipe.equipe_nom}
                 </div>
-                <div className="text-sm text-slate-600 dark:text-slate-400">
+                <div className="text-sm text-gray-600">
                   {equipe.nb_membres} membre{equipe.nb_membres > 1 ? 's' : ''}
                 </div>
               </div>
             </div>
             {equipe.description && (
-              <p className="text-sm text-slate-600 dark:text-slate-400">
+              <p className="text-sm text-gray-600">
                 {equipe.description}
               </p>
             )}
@@ -553,20 +561,20 @@ function ModalDemandeRejoindre({ equipe, onClose, onDemander }: any) {
               onChange={(e) => setMessage(e.target.value)}
               placeholder="Bonjour, je souhaite rejoindre votre équipe..."
               rows={3}
-              className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
             />
           </div>
 
           <div className="flex gap-3">
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
+              className="flex-1 px-4 py-3 bg-white hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
             >
               Annuler
             </button>
             <button
               onClick={() => onDemander(equipe, message)}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-xl transition-all"
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-gray-900 font-semibold rounded-xl transition-all"
             >
               Envoyer la demande
             </button>

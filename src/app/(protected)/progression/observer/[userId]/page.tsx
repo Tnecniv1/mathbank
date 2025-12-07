@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useRouter, useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -59,6 +60,10 @@ const MAX_FEUILLES_PAR_LIGNE = 30;
 const COLONNES_AFFICHEES = 20;
 
 export default function TableauProgression() {
+  const router = useRouter();
+  const params = useParams();
+  const observedUserId = params.userId as string;
+
   const [niveaux, setNiveaux] = useState<Niveau[]>([]);
   const [niveauSelectionne, setNiveauSelectionne] = useState<string | null>(null);
   const [data, setData] = useState<TableauData | null>(null);
@@ -68,15 +73,75 @@ export default function TableauProgression() {
   const [error, setError] = useState<string | null>(null);
   const [fullscreenBlock, setFullscreenBlock] = useState<string | null>(null);
 
+  // États pour l'observation
+  const [membreObserveNom, setMembreObserveNom] = useState<string | null>(null);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+
   useEffect(() => {
-    loadNiveaux();
+    checkAuthorization();
   }, []);
+
+  useEffect(() => {
+    if (isAuthorized) {
+      loadNiveaux();
+    }
+  }, [isAuthorized]);
 
   useEffect(() => {
     if (niveauSelectionne) {
       loadTableauData(niveauSelectionne);
     }
   }, [niveauSelectionne]);
+
+  async function checkAuthorization() {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session || !session.user) {
+        router.push('/connexion');
+        return;
+      }
+
+      const chefUserId = session.user.id;
+
+      const { data: membreData, error: membreError } = await supabase
+        .from('membre_equipe')
+        .select('user_id, equipe_id')
+        .eq('user_id', observedUserId)
+        .single();
+
+      if (membreError || !membreData) {
+        setError('Membre introuvable');
+        setLoading(false);
+        return;
+      }
+
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('user_id', observedUserId)
+        .single();
+
+      const { data: equipeData } = await supabase
+        .from('equipe')
+        .select('chef_id')
+        .eq('id', membreData.equipe_id)
+        .eq('chef_id', chefUserId)
+        .single();
+
+      if (!equipeData) {
+        setError('Vous n\'êtes pas autorisé à observer ce membre');
+        setLoading(false);
+        return;
+      }
+
+      setMembreObserveNom(profileData?.full_name || 'Membre');
+      setIsAuthorized(true);
+    } catch (err: any) {
+      console.error('Erreur auth:', err);
+      setError('Erreur lors de la vérification des autorisations');
+      setLoading(false);
+    }
+  }
 
   async function loadNiveaux() {
     try {
@@ -109,7 +174,7 @@ export default function TableauProgression() {
         throw new Error('Vous devez être connecté');
       }
 
-      const userId = session.user.id;
+      const userId = observedUserId;
 
       const { data: rawData, error: queryError } = await supabase
         .rpc('get_tableau_progression', {
@@ -521,6 +586,33 @@ export default function TableauProgression() {
       `}</style>
       <div className="max-w-7xl mx-auto">
     <div className="space-y-3">
+      {/* Bandeau d'observation */}
+      {membreObserveNom && (
+        <div className="bg-blue-50 border-2 border-blue-400 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-lg">
+                👁️
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-blue-900">
+                  Mode Observation
+                </div>
+                <div className="text-lg font-bold text-blue-700">
+                  Vous observez : {membreObserveNom}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => router.back()}
+              className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors"
+            >
+              ← Retour à la gestion
+            </button>
+          </div>
+        </div>
+      )}
+
       {niveaux.length > 1 && (
         <div className="bg-white rounded-lg border border-gray-300 p-3 shadow-sm">
           <label className="block text-xs font-medium text-gray-700 mb-1.5">

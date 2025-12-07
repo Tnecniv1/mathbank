@@ -207,6 +207,13 @@ function FeuilleCard({
   const estValidee = progression?.statut === 'validee';
   const estBloquee = progression?.est_bloquee;
 
+  console.log('🔍 Feuille:', feuille.titre, {
+    statut: progression?.statut,
+    est_bloquee: progression?.est_bloquee,
+    estValidee,
+    estBloquee
+  });
+
   const handlePastilleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     
@@ -236,16 +243,16 @@ function FeuilleCard({
         disabled={estBloquee}
         className={`group relative flex items-center gap-4 w-full px-4 py-3 rounded-lg border-2 transition-all duration-200 ${
           estBloquee
-            ? 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 opacity-60 cursor-not-allowed'
+            ? 'border-gray-700 bg-white/50 opacity-60 cursor-not-allowed'
             : isAuthorized && !estValidee
-            ? 'border-green-400 dark:border-green-600 bg-green-50 dark:bg-green-900/20 hover:border-green-500 dark:hover:border-green-500 hover:shadow-lg'
-            : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-teal-500 dark:hover:border-teal-400 hover:shadow-md'
+            ? 'border-green-400 bg-green-50/20 hover:border-green-500 hover:shadow-lg'
+            : 'border-gray-300 bg-white border-2 border-blue-500/30 hover:border-blue-500 hover:shadow-md'
         }`}
       >
         {/* Badge de blocage */}
         {estBloquee && (
           <div className="absolute top-2 right-2 z-10">
-            <span className="px-2 py-1 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 text-xs font-medium rounded-full flex items-center gap-1">
+            <span className="px-2 py-1 bg-gray-50 text-gray-600 text-xs font-medium rounded-full flex items-center gap-1">
               <IconLock />
               Bloquée
             </span>
@@ -255,29 +262,29 @@ function FeuilleCard({
         {/* Badge feuille autorisée */}
         {isAuthorized && !estValidee && !estBloquee && (
           <div className="absolute top-2 right-2 z-10">
-            <span className="px-3 py-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white text-xs font-bold rounded-full flex items-center gap-1 shadow-md animate-pulse">
+            <span className="px-3 py-1 bg-gradient-to-r from-green-500 to-emerald-500 text-gray-900 text-xs font-bold rounded-full flex items-center gap-1 shadow-md animate-pulse">
               ✓ À faire
             </span>
           </div>
         )}
 
         {/* Numéro d'ordre avec pastille */}
-        <div className={`flex items-center justify-center w-10 h-10 rounded-full text-white font-bold text-lg shadow-md transition-transform ${
+        <div className={`flex items-center justify-center w-10 h-10 rounded-full text-gray-900 font-bold text-lg shadow-md transition-transform ${
           estBloquee 
-            ? 'bg-slate-400 dark:bg-slate-600'
-            : 'bg-gradient-to-br from-teal-500 to-teal-600 dark:from-teal-600 dark:to-teal-700 group-hover:scale-110'
+            ? 'bg-slate-400'
+            : 'bg-[#ffd93d] group-hover:scale-110'
         }`}>
           {feuille.ordre_dans_niveau}
         </div>
 
         {/* Contenu */}
         <div className="flex-1 text-left min-w-0">
-          <div className="font-medium text-slate-800 dark:text-slate-100 truncate">{feuille.titre}</div>
+          <div className="font-medium text-gray-900 truncate">{feuille.titre}</div>
           {feuille.description && (
-            <div className="text-sm text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">{feuille.description}</div>
+            <div className="text-sm text-gray-600 mt-0.5 line-clamp-1">{feuille.description}</div>
           )}
           {progression && progression.temps_total > 0 && (
-            <div className="text-xs text-teal-600 dark:text-teal-400 mt-1">
+            <div className="text-xs text-blue-500 mt-1">
               {progression.temps_total} min • {progression.score !== null ? `Score: ${progression.score}` : 'Pas de score'}
             </div>
           )}
@@ -286,8 +293,8 @@ function FeuilleCard({
         {/* Icône PDF */}
         <div className={`transition-colors ${
           estBloquee 
-            ? 'text-slate-400'
-            : 'text-slate-400 group-hover:text-teal-500'
+            ? 'text-gray-600'
+            : 'text-gray-600 group-hover:text-[#4db7ff]'
         }`}>
           <IconFile />
         </div>
@@ -298,18 +305,18 @@ function FeuilleCard({
           className="absolute -top-2 -right-2 cursor-pointer hover:scale-110 transition-transform"
         >
           {estValidee ? (
-            // 🟣 VIOLET = Validée
-            <div className="text-purple-600 dark:text-purple-400 drop-shadow-md">
+            /* 🟣 VIOLET = Validée */
+            <div className="text-[#ffd93d] drop-shadow-md">
               <IconCircleFilled />
             </div>
           ) : isAuthorized && !estBloquee ? (
-            // 🟠 ORANGE = Autorisée/Disponible
-            <div className="text-orange-500 dark:text-orange-400 drop-shadow-md">
+            /* 🟠 ORANGE = Autorisée/Disponible */
+            <div className="text-orange-500 drop-shadow-md">
               <IconCircleFilled />
             </div>
           ) : (
-            // ⚫ NOIR = Bloquée/Non autorisée
-            <div className="text-slate-800 dark:text-slate-400 hover:text-purple-400 dark:hover:text-purple-500 transition-colors">
+            /* ⚫ NOIR = Bloquée/Non autorisée */
+            <div className="text-gray-900 hover:text-[#ffd93d] transition-colors">
               <IconCircleEmpty />
             </div>
           )}
@@ -341,122 +348,78 @@ function ProgressionModal({
   onClose: () => void;
   onSave: () => void;
 }) {
-  const [sessions, setSessions] = useState<SessionTravail[]>(progression?.sessions || []);
-  const [showAddSession, setShowAddSession] = useState(false);
-  const [score, setScore] = useState(progression?.score?.toString() || '');
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [score, setScore] = useState(''); // Score saisi par le membre
   const [saving, setSaving] = useState(false);
 
-  // Formulaire de nouvelle session
-  const [newSession, setNewSession] = useState({
-    date: new Date().toISOString().split('T')[0],
-    heure: '00:00',
-    duree: '',
-    commentaire: '',
-  });
+  useEffect(() => {
+    loadSessions();
+  }, []);
 
-  const handleAddSession = async () => {
-    if (!newSession.duree || parseInt(newSession.duree) <= 0) {
-      alert('Veuillez entrer une durée valide');
-      return;
-    }
-
+  async function loadSessions() {
     try {
       const { data: { session: userSession } } = await supabase.auth.getSession();
-      if (!userSession || !userSession.user) {
-        alert('Vous devez être connecté');
-        return;
+      if (!userSession || !userSession.user) return;
+
+      // Charger les sessions depuis session_entrainement
+      const { data: sessionsData } = await supabase
+        .from('session_entrainement')
+        .select('*')
+        .eq('user_id', userSession.user.id)
+        .or(`feuille_mecanique_id.eq.${feuille.id},feuille_chaotique_id.eq.${feuille.id}`)
+        .order('date_session', { ascending: false });
+
+      if (sessionsData) {
+        // Filtrer pour ne garder que les données de cette feuille spécifique
+        const sessionsFiltered = sessionsData.map((s: any) => {
+          const isMecanique = s.feuille_mecanique_id === feuille.id;
+          return {
+            id: s.id,
+            numero: s.numero_session,
+            date: s.date_session,
+            heure: s.heure_session,
+            temps: isMecanique ? s.temps_mecanique : s.temps_chaotique,
+            type: isMecanique ? 'mecanique' : 'chaotique',
+          };
+        }).filter((s: any) => s.temps !== null && s.temps > 0);
+
+        setSessions(sessionsFiltered);
       }
 
-      // NOUVEAU : Vérifier qu'il n'y a pas déjà une feuille en cours
-      if (!progression) {
-        const { data: autreEnCours } = await supabase
-          .from('progression_feuille')
-          .select('id')
-          .eq('user_id', userSession.user.id)
-          .is('statut', null) // Feuilles pas encore soumises
-          .neq('feuille_id', feuille.id);
-
-        if (autreEnCours && autreEnCours.length > 0) {
-          alert('⚠️ Vous avez déjà une autre feuille en cours. Terminez-la avant d\'en commencer une nouvelle.');
-          return;
-        }
-      }
-
-      // Créer ou récupérer la progression
-      let progressionId = progression?.id;
-
-      if (!progressionId) {
-        // IMPORTANT : Ne pas créer la progression avec statut 'en_cours'
-        // Elle restera NULL jusqu'à la soumission
-        const { data: newProg, error: progError } = await supabase
-          .from('progression_feuille')
-          .insert({
-            user_id: userSession.user.id,
-            feuille_id: feuille.id,
-            est_termine: false,
-            en_cours: false, // Pas "en cours" tant que non soumise
-            statut: null, // Pas de statut tant que non soumise
-          })
-          .select()
-          .single();
-
-        if (progError) throw progError;
-        progressionId = newProg.id;
-      }
-
-      // Ajouter la session
-      const { data: sessionData, error: sessionError } = await supabase
-        .from('session_travail')
-        .insert({
-          progression_id: progressionId,
-          date: newSession.date,
-          heure: newSession.heure,
-          duree: parseInt(newSession.duree),
-          commentaire: newSession.commentaire || null,
-        })
-        .select()
-        .single();
-
-      if (sessionError) throw sessionError;
-
-      // Ajouter à la liste locale
-      setSessions([...sessions, sessionData]);
-
-      // Réinitialiser le formulaire
-      setNewSession({
-        date: new Date().toISOString().split('T')[0],
-        heure: '00:00',
-        duree: '',
-        commentaire: '',
-      });
-      setShowAddSession(false);
-
-      alert('✅ Session ajoutée !');
-      onSave();
-    } catch (error: any) {
-      console.error(error);
-      alert('Erreur lors de l\'ajout de la session');
+      setLoading(false);
+    } catch (error) {
+      console.error('Erreur chargement sessions:', error);
+      setLoading(false);
     }
-  };
+  }
 
   const handleValider = async () => {
     try {
       setSaving(true);
       
-      // Vérifier qu'on a des sessions ET un score
+      // Vérifier qu'on a des sessions
       if (sessions.length === 0) {
-        alert('Ajoutez au moins une session de travail');
+        alert('❌ Vous devez d\'abord enregistrer des sessions d\'entraînement sur cette feuille.\n\nRendez-vous sur "Mes Sessions" pour ajouter vos sessions quotidiennes.');
+        setSaving(false);
         return;
       }
 
-      if (!score || parseInt(score) < 0 || parseInt(score) > 20) {
-        alert('Veuillez entrer un score valide entre 0 et 20');
+      // Vérifier que le score est saisi
+      const scoreValue = parseInt(score);
+      if (!score || isNaN(scoreValue) || scoreValue < 0 || scoreValue > 100) {
+        alert('❌ Veuillez entrer un score valide entre 0 et 100');
+        setSaving(false);
         return;
       }
+
+      // Calculer le temps total
+      const tempsTotal = sessions.reduce((acc, s) => acc + (s.temps || 0), 0);
 
       const { data: { session: userSession } } = await supabase.auth.getSession();
       if (!userSession || !userSession.user) {
         alert('Vous devez être connecté');
+        setSaving(false);
         return;
       }
 
@@ -473,92 +436,53 @@ function ProgressionModal({
         // → Soumettre pour validation par le chef
         // ========================================
         
-        // Créer ou récupérer la progression
-        let progressionId = progression?.id;
+        // Mettre à jour la progression avec le score et temps calculés
+        const { error: updateError } = await supabase
+          .from('progression_feuille')
+          .update({
+            score: scoreValue,
+            temps_total: tempsTotal,
+            est_termine: true,
+          })
+          .eq('id', progression!.id);
 
-        if (!progressionId) {
-          const { data: newProg, error: progError } = await supabase
-            .from('progression_feuille')
-            .insert({
-              user_id: userSession.user.id,
-              feuille_id: feuille.id,
-              est_termine: false,
-              en_cours: true, // Maintenant oui, car on soumet
-              statut: 'en_cours',
-              score: parseInt(score),
-            })
-            .select()
-            .single();
-
-          if (progError) throw progError;
-          progressionId = newProg.id;
-        } else {
-          // Mettre à jour le score et le statut
-          const { error: updateError } = await supabase
-            .from('progression_feuille')
-            .update({
-              score: parseInt(score),
-              en_cours: true,
-              statut: 'en_cours',
-            })
-            .eq('id', progressionId);
-
-          if (updateError) throw updateError;
-        }
+        if (updateError) throw updateError;
 
         // Appeler la fonction de soumission
         const { data, error } = await supabase.rpc('soumettre_feuille', {
-          p_progression_id: progressionId
+          p_progression_id: progression!.id
         });
 
         if (error) throw error;
 
         if (!data.success) {
           alert(data.error);
+          setSaving(false);
           return;
         }
 
-        alert('✅ Feuille soumise au chef pour validation !');
+        alert(`✅ Feuille soumise au chef pour validation !\n\n📊 Score : ${scoreValue}/100\n⏱️ Temps total : ${tempsTotal} min`);
       } else {
         // ========================================
         // CAS 2 : PAS DANS UNE ÉQUIPE
-        // → Validation automatique (comme avant)
+        // → Validation automatique
         // ========================================
         
-        let progressionId = progression?.id;
+        const { error } = await supabase
+          .from('progression_feuille')
+          .update({
+            est_termine: true,
+            en_cours: false,
+            statut: 'validee',
+            score: scoreValue,
+            temps_total: tempsTotal,
+            validee_at: new Date().toISOString()
+          })
+          .eq('id', progression!.id);
 
-        if (!progressionId) {
-          const { data: newProg, error: progError } = await supabase
-            .from('progression_feuille')
-            .insert({
-              user_id: userSession.user.id,
-              feuille_id: feuille.id,
-              est_termine: true,
-              en_cours: false,
-              statut: 'validee',
-              score: parseInt(score),
-              validee_at: new Date().toISOString()
-            })
-            .select()
-            .single();
+        if (error) throw error;
 
-          if (progError) throw progError;
-        } else {
-          const { error } = await supabase
-            .from('progression_feuille')
-            .update({
-              est_termine: true,
-              en_cours: false,
-              statut: 'validee',
-              score: parseInt(score),
-              validee_at: new Date().toISOString()
-            })
-            .eq('id', progressionId);
-
-          if (error) throw error;
-        }
-
-        alert('✅ Feuille terminée !');
+        alert(`✅ Feuille terminée !\n\n📊 Score : ${scoreValue}/100\n⏱️ Temps total : ${tempsTotal} min`);
       }
 
       onClose();
@@ -571,36 +495,26 @@ function ProgressionModal({
     }
   };
 
-  const handleDeleteSession = async (sessionId: string) => {
-    if (!confirm('Supprimer cette session ?')) return;
-
-    try {
-      const { error } = await supabase
-        .from('session_travail')
-        .delete()
-        .eq('id', sessionId);
-
-      if (error) throw error;
-
-      setSessions(sessions.filter((s) => s.id !== sessionId));
-      alert('Session supprimée');
-      onSave();
-    } catch (error: any) {
-      console.error(error);
-      alert('Erreur lors de la suppression');
-    }
-  };
-
-  const tempsTotal = sessions.reduce((acc, s) => acc + s.duree, 0);
+  const tempsTotal = sessions.reduce((acc, s) => acc + (s.temps || 0), 0);
   const estValidee = progression?.statut === 'validee';
-  const estEnProgression = progression && !estValidee;
+  const estEnAttente = progression?.statut === 'en_attente';
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-2xl p-8">
+          <Loader />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="sticky top-0 bg-gradient-to-r from-teal-500 to-teal-600 dark:from-teal-600 dark:to-teal-700 p-6 rounded-t-2xl">
-          <h2 className="text-2xl font-bold text-white">{feuille.titre}</h2>
+        <div className="sticky top-0 bg-gradient-to-r from-[#4db7ff] to-[#4db7ff][#4db7ff] p-6 rounded-t-2xl">
+          <h2 className="text-2xl font-[\'IBM_Plex_Mono\'] font-bold text-gray-900">{feuille.titre}</h2>
           {feuille.description && (
             <p className="text-teal-100 mt-1">{feuille.description}</p>
           )}
@@ -609,14 +523,14 @@ function ProgressionModal({
         <div className="p-6 space-y-6">
           {/* Afficher le commentaire du chef si présent */}
           {progression?.commentaire_chef && (
-            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl">
+            <div className="p-4 bg-blue-50/20 border-2 border-blue-200 rounded-xl">
               <div className="flex items-start gap-3">
                 <div className="text-2xl">💬</div>
                 <div className="flex-1">
-                  <div className="font-semibold text-blue-900 dark:text-blue-100 mb-1">
+                  <div className="font-semibold text-[#4db7ff] mb-1">
                     Commentaire du chef :
                   </div>
-                  <p className="text-blue-800 dark:text-blue-200">
+                  <p className="text-[#4db7ff]">
                     {progression.commentaire_chef}
                   </p>
                 </div>
@@ -624,238 +538,214 @@ function ProgressionModal({
             </div>
           )}
 
+          {/* Afficher si en attente */}
+          {estEnAttente && (
+            <div className="p-4 bg-orange-50/20 border-2 border-[#ffd93d]/30 rounded-xl text-center">
+              <div className="text-3xl mb-2">⏳</div>
+              <div className="font-semibold text-[#ffd93d]">
+                Feuille en attente de validation
+              </div>
+              <p className="text-sm text-orange-700 mt-2">
+                Votre chef d'équipe doit valider votre soumission avant que vous puissiez continuer.
+              </p>
+            </div>
+          )}
+
           {/* Afficher si validée avec score */}
           {estValidee && progression?.score !== null && (
-            <div className="p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl text-center">
+            <div className="p-4 bg-green-50/20 border-2 border-green-200 rounded-xl text-center">
               <div className="text-3xl mb-2">✅</div>
-              <div className="font-semibold text-green-900 dark:text-green-100">
+              <div className="font-semibold text-green-900">
                 Feuille validée !
               </div>
-              <div className="text-2xl font-bold text-green-700 dark:text-green-300 mt-2">
-                {progression.score}/20
+              <div className="text-2xl font-[\'IBM_Plex_Mono\'] font-bold text-green-700 mt-2">
+                {progression.score}/100
               </div>
             </div>
           )}
 
           {/* Statistiques */}
           <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl text-center">
-              <div className="text-2xl font-bold text-teal-600 dark:text-teal-400">
+            <div className="p-4 bg-white rounded-xl text-center">
+              <div className="text-2xl font-[\'IBM_Plex_Mono\'] font-bold text-blue-500">
                 {sessions.length}
               </div>
-              <div className="text-sm text-slate-600 dark:text-slate-400">Session{sessions.length > 1 ? 's' : ''}</div>
+              <div className="text-sm text-gray-600">Session{sessions.length > 1 ? 's' : ''}</div>
             </div>
-            <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl text-center">
-              <div className="text-2xl font-bold text-teal-600 dark:text-teal-400">
+            <div className="p-4 bg-white rounded-xl text-center">
+              <div className="text-2xl font-[\'IBM_Plex_Mono\'] font-bold text-blue-500">
                 {tempsTotal} min
               </div>
-              <div className="text-sm text-slate-600 dark:text-slate-400">Temps total</div>
+              <div className="text-sm text-gray-600">Temps total</div>
             </div>
           </div>
 
           {/* Liste des sessions */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-slate-900 dark:text-slate-100">Sessions de travail</h3>
-              {!estValidee && (
-                <button
-                  onClick={() => setShowAddSession(!showAddSession)}
-                  className="px-3 py-1 bg-teal-500 hover:bg-teal-600 text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  {showAddSession ? 'Annuler' : '+ Ajouter'}
-                </button>
-              )}
+              <h3 className="font-semibold text-gray-900">Historique des sessions</h3>
             </div>
 
-            {/* Formulaire d'ajout */}
-            {showAddSession && (
-              <div className="mb-4 p-4 bg-slate-100 dark:bg-slate-800 rounded-xl space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Date</label>
-                    <input
-                      type="date"
-                      value={newSession.date}
-                      onChange={(e) => setNewSession({ ...newSession, date: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Heure</label>
-                    <input
-                      type="time"
-                      value={newSession.heure}
-                      onChange={(e) => setNewSession({ ...newSession, heure: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Durée (minutes)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newSession.duree}
-                    onChange={(e) => setNewSession({ ...newSession, duree: e.target.value })}
-                    placeholder="60"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Commentaire (optionnel)</label>
-                  <textarea
-                    value={newSession.commentaire}
-                    onChange={(e) => setNewSession({ ...newSession, commentaire: e.target.value })}
-                    placeholder="Notes sur cette session..."
-                    rows={2}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
-                  />
-                </div>
-                <button
-                  onClick={handleAddSession}
-                  className="w-full px-4 py-2 bg-teal-500 hover:bg-teal-600 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  <IconCheck />
-                  Enregistrer la session
-                </button>
+            {sessions.length === 0 ? (
+              <div className="p-6 bg-white rounded-xl text-center">
+                <div className="text-4xl mb-3">📝</div>
+                <p className="text-gray-600 mb-3">
+                  Aucune session enregistrée pour cette feuille
+                </p>
+                <p className="text-sm text-gray-600">
+                  Rendez-vous sur <span className="font-semibold">"Mes Sessions"</span> pour enregistrer vos entraînements quotidiens
+                </p>
               </div>
-            )}
-
-            {/* Liste */}
-            {sessions.length > 0 ? (
+            ) : (
               <div className="space-y-2">
                 {sessions.map((session) => (
                   <div
                     key={session.id}
-                    className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg flex items-center justify-between"
+                    className="p-3 bg-white rounded-lg flex items-center justify-between"
                   >
                     <div className="flex-1">
-                      <div className="font-medium text-slate-900 dark:text-slate-100">
-                        {new Date(session.date).toLocaleDateString('fr-FR')} à {session.heure}
+                      <div className="font-medium text-gray-900">
+                        Session #{session.numero} - {new Date(session.date).toLocaleDateString('fr-FR')}
                       </div>
-                      <div className="text-sm text-slate-600 dark:text-slate-400">
-                        {session.duree} min {session.commentaire && `• ${session.commentaire}`}
+                      <div className="text-sm text-gray-600">
+                        {session.heure} • {session.temps} min
                       </div>
                     </div>
-                    {!estValidee && (
-                      <button
-                        onClick={() => handleDeleteSession(session.id)}
-                        className="px-3 py-1 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg transition-colors"
-                      >
-                        Supprimer
-                      </button>
-                    )}
                   </div>
                 ))}
-              </div>
-            ) : (
-              <div className="text-center py-6 text-slate-500 dark:text-slate-400 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-lg">
-                Aucune session enregistrée
               </div>
             )}
           </div>
 
-          {/* IMPORTANT : Score TOUJOURS visible (sauf si validée) */}
-          {!estValidee && (
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Score final (sur 20) <span className="text-red-500">*</span>
+          {/* Saisie du score (si pas encore validée/en attente) */}
+          {!estValidee && !estEnAttente && sessions.length > 0 && (
+            <div className="p-4 bg-teal-50/20 border-2 border-teal-200 rounded-xl">
+              <label className="block font-semibold text-teal-900 mb-2">
+                📊 Score de la feuille (sur 100)
               </label>
               <input
                 type="number"
                 min="0"
-                max="20"
-                step="0.5"
+                max="100"
                 value={score}
                 onChange={(e) => setScore(e.target.value)}
-                placeholder="18"
-                className="w-full px-4 py-3 rounded-lg border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-teal-500"
+                placeholder="Ex: 85"
+                className="w-full px-4 py-3 text-lg font-bold rounded-lg border-2 border-blue-500/70 bg-white text-gray-900 text-center"
               />
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Requis pour soumettre la feuille
+              <p className="text-xs text-teal-700[#4db7ff]/70 mt-2">
+                Entrez votre score global pour l'ensemble de la feuille
               </p>
             </div>
           )}
 
-          {/* Affichage du score si validée */}
-          {estValidee && progression?.score !== null && (
-            <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl text-center">
-              <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">Score final</div>
-              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">
-                {progression.score}/20
+          {/* Message d'info si pas de sessions */}
+          {sessions.length === 0 && (
+            <div className="p-4 bg-yellow-50/20 border-2 border-yellow-200 rounded-xl">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">ℹ️</div>
+                <div className="flex-1 text-sm">
+                  <p className="text-[#ffd93d] font-medium mb-1">
+                    Comment ça marche ?
+                  </p>
+                  <ol className="text-[#ffd93d] space-y-1 list-decimal list-inside">
+                    <li>Allez sur "Mes Sessions" depuis la page d'accueil</li>
+                    <li>Enregistrez vos sessions d'entraînement quotidiennes</li>
+                    <li>Revenez ici quand vous avez terminé la feuille</li>
+                    <li>Entrez votre score et cliquez sur "Soumettre"</li>
+                  </ol>
+                </div>
               </div>
             </div>
           )}
+        </div>
 
-          {/* Actions */}
-          <div className="flex gap-3">
+        {/* Footer */}
+        <div className="sticky bottom-0 bg-white border-t border-slate-200 p-6 flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 bg-gray-50 hover:bg-[#3d3b58] text-gray-900 font-medium rounded-lg transition-colors"
+          >
+            Fermer
+          </button>
+          {!estValidee && !estEnAttente && progression && (
             <button
-              onClick={onClose}
-              className="flex-1 px-4 py-3 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
+              onClick={handleValider}
+              disabled={saving || sessions.length === 0}
+              className="flex-1 px-4 py-2 bg-blue-500 hover:bg-blue-500 disabled:bg-slate-300 disabled:cursor-not-allowed text-gray-900 font-medium rounded-lg transition-colors"
             >
-              Fermer
+              {saving ? 'Envoi...' : 'Soumettre pour validation'}
             </button>
-            
-            {/* Bouton de soumission visible seulement si sessions + score */}
-            {!estValidee && (
-              <button
-                onClick={handleValider}
-                disabled={saving || sessions.length === 0 || !score}
-                className="flex-1 px-4 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-semibold rounded-xl shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                title={
-                  sessions.length === 0 
-                    ? "Ajoutez au moins une session"
-                    : !score 
-                    ? "Entrez un score"
-                    : ""
-                }
-              >
-                {saving ? 'Soumission...' : 'Valider et soumettre'}
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
     </div>
   );
-} // En cours, en attente, ou rejetée
+}
+
 
 /* ---------- Composant Chapitre ---------- */
 function ChapitreSection({ chapitre, progressions, onOpenPdf, onProgressionUpdate }: { chapitre: Chapitre; progressions: Map<string, Progression>; onOpenPdf: (url: string) => void; onProgressionUpdate: () => void }) {
+  const [isOpen, setIsOpen] = useState(false);
+  
   return (
-    <div className="mb-8">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="w-1 h-8 bg-gradient-to-b from-teal-500 to-teal-600 rounded-full"></div>
-        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">{chapitre.titre}</h3>
-      </div>
-
-      {chapitre.feuilles.length > 0 ? (
-        <div className="space-y-3 ml-6">
-          {chapitre.feuilles.map((feuille) => (
-            <FeuilleCard 
-              key={feuille.id} 
-              feuille={feuille} 
-              progression={progressions.get(feuille.id) || null}
-              onOpen={() => onOpenPdf(feuille.pdf_url)} 
-              onUpdateProgression={onProgressionUpdate}
-            />
-          ))}
+    <div className="mb-4">
+      {/* Header cliquable du chapitre */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between gap-3 p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors border border-gray-200"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full"></div>
+          <h3 className="text-lg font-bold text-gray-900">{chapitre.titre}</h3>
+          <span className="text-sm text-gray-500">
+            ({chapitre.feuilles.length} feuille{chapitre.feuilles.length > 1 ? 's' : ''})
+          </span>
         </div>
-      ) : (
-        <div className="text-center py-8 text-slate-400 dark:text-slate-500 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-lg">
-          Aucune feuille d'entraînement pour ce chapitre
+        
+        {/* Icône chevron */}
+        <svg 
+          className={`w-5 h-5 text-gray-600 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+          fill="none" 
+          viewBox="0 0 24 24" 
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {/* Contenu dépliable */}
+      {isOpen && (
+        <div className="mt-3 ml-6">
+          {chapitre.feuilles.length > 0 ? (
+            <div className="space-y-3">
+              {chapitre.feuilles.map((feuille) => (
+                <FeuilleCard 
+                  key={feuille.id} 
+                  feuille={feuille} 
+                  progression={progressions.get(feuille.id) || null}
+                  onOpen={() => onOpenPdf(feuille.pdf_url)} 
+                  onUpdateProgression={onProgressionUpdate}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-600 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+              Aucune feuille d'entraînement pour ce chapitre
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
+
 /* ---------- Composant Sujet ---------- */
 function SujetSection({ sujet, progressions, onOpenPdf, onProgressionUpdate }: { sujet: Sujet; progressions: Map<string, Progression>; onOpenPdf: (url: string) => void; onProgressionUpdate: () => void }) {
   return (
     <div className="mb-12">
       {/* En-tête du sujet */}
-      <div className="inline-block mb-6 px-6 py-3 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 dark:from-blue-600 dark:to-indigo-700 text-white font-bold text-xl shadow-lg">
+      <div className="inline-block mb-6 px-6 py-3 rounded-full bg-gradient-to-r from-[#4db7ff] to-[#0084d4] text-gray-900 font-bold text-xl shadow-lg">
         {sujet.titre}
       </div>
 
@@ -867,7 +757,7 @@ function SujetSection({ sujet, progressions, onOpenPdf, onProgressionUpdate }: {
           ))}
         </div>
       ) : (
-        <div className="text-center py-12 text-slate-400 dark:text-slate-500 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-lg">
+        <div className="text-center py-12 text-gray-600 border-2 border-dashed border-gray-300 rounded-lg">
           Aucun chapitre pour ce sujet
         </div>
       )}
@@ -1068,10 +958,10 @@ export default function LibraryPage() {
   /* ---------- États de chargement / erreur ---------- */
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
-        <div className="flex items-center gap-3 text-teal-500">
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="flex items-center gap-3 text-[#4db7ff]">
           <Loader />
-          <span className="text-lg text-slate-800 dark:text-slate-100">Chargement du parcours…</span>
+          <span className="text-lg text-gray-900">Chargement du parcours…</span>
         </div>
       </div>
     );
@@ -1079,13 +969,13 @@ export default function LibraryPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6">
-        <div className="bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-600/40 rounded-xl p-6 max-w-md">
-          <h2 className="text-red-600 dark:text-red-300 font-semibold mb-2">Erreur</h2>
-          <p className="text-slate-800 dark:text-white">{error}</p>
+      <div className="min-h-screen bg-white flex items-center justify-center p-6">
+        <div className="bg-red-100/30 border border-red-300/40 rounded-xl p-6 max-w-md">
+          <h2 className="text-red-600 font-semibold mb-2">Erreur</h2>
+          <p className="text-gray-900">{error}</p>
           <button
             onClick={() => location.reload()}
-            className="mt-4 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 transition-colors text-white"
+            className="mt-4 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 transition-colors text-gray-900"
           >
             Réessayer
           </button>
@@ -1096,27 +986,33 @@ export default function LibraryPage() {
 
   /* ---------- Rendu principal ---------- */
   return (
-    <main className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors">
+    <main className="min-h-screen bg-white text-gray-900 transition-colors">
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Lora:wght@400;500;600;700&display=swap');
+        h1, h2, h3, h4, h5, h6, .font-mono { font-family: 'IBM Plex Mono', monospace; }
+        body { font-family: 'Lora', serif; }
+        p, span, div { font-family: 'Lora', serif; }
+      `}</style>
       <div className="max-w-4xl mx-auto px-6 py-8">
         {/* Header */}
         <header className="mb-10">
           <div>
-            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">
-              <span className="text-slate-800 dark:text-white">Parcours de </span>
-              <span className="text-teal-600 dark:text-teal-400">Mathématiques</span>
+            <h1 className="text-3xl md:text-4xl font-[\'IBM_Plex_Mono\'] font-extrabold tracking-tight">
+              <span className="text-gray-900">Parcours de </span>
+              <span className="text-blue-500">Mathématiques</span>
             </h1>
-            <p className="text-slate-500 dark:text-slate-400 mt-2">Suis le chemin d'apprentissage étape par étape</p>
+            <p className="text-gray-600 mt-2">Suis le chemin d'apprentissage étape par étape</p>
           </div>
         </header>
 
         {/* Sélecteur de niveau (si plusieurs niveaux disponibles) */}
         {niveaux.length > 1 && (
           <div className="mb-8">
-            <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Niveau</label>
+            <label className="block text-sm font-medium mb-2 text-slate-700">Niveau</label>
             <select
               value={niveauSelectionne || ''}
               onChange={(e) => setNiveauSelectionne(e.target.value)}
-              className="w-full max-w-xs px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="w-full max-w-xs px-4 py-2 rounded-lg border-2 border-blue-500/30 bg-white border-2 border-blue-500/30 text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#4db7ff]"
             >
               {niveaux.map((niveau) => (
                 <option key={niveau.id} value={niveau.id}>
@@ -1144,10 +1040,10 @@ export default function LibraryPage() {
           if (feuillesEnCours.length === 0) return null;
 
           return (
-            <div className="mb-8 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 rounded-2xl p-6 border-2 border-orange-200 dark:border-orange-800">
-              <h2 className="text-2xl font-bold text-orange-900 dark:text-orange-100 mb-4 flex items-center gap-2">
+            <div className="mb-8 bg-gradient-to-r from-[#ffd93d]/10 to-[#4db7ff]/10 rounded-2xl p-6 border-2 border-[#ffd93d]/30">
+              <h2 className="text-2xl font-[\'IBM_Plex_Mono\'] font-bold text-[#ffd93d] mb-4 flex items-center gap-2">
                 🔥 En Progression
-                <span className="text-sm font-normal text-orange-600 dark:text-orange-400">
+                <span className="text-sm font-normal text-[#ffd93d]/70">
                   ({feuillesEnCours.length})
                 </span>
               </h2>
@@ -1168,7 +1064,7 @@ export default function LibraryPage() {
 
         {/* Contenu du parcours */}
         {!parcours || !parcours.sujets || parcours.sujets.length === 0 ? (
-          <div className="text-center text-slate-500 dark:text-slate-400 py-20 bg-slate-100 dark:bg-slate-800/40 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700">
+          <div className="text-center text-gray-600 py-20 bg-white bg-white/50 rounded-xl border-2 border-dashed border-gray-300">
             <p className="text-lg mb-2">Aucun contenu disponible pour le moment</p>
             <p className="text-sm">Le parcours sera bientôt enrichi avec des exercices</p>
           </div>

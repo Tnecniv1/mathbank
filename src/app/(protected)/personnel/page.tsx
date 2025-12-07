@@ -523,16 +523,22 @@ export default function PersonnelPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
-        <div className="text-slate-600 dark:text-slate-400">Chargement...</div>
+      <main className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-gray-600">Chargement...</div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 dark:bg-slate-950 py-8 px-6">
+    <main className="min-h-screen bg-white py-8 px-6">
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Lora:wght@400;500;600;700&display=swap');
+        h1, h2, h3, h4, h5, h6, .font-mono { font-family: 'IBM Plex Mono', monospace; }
+        body { font-family: 'Lora', serif; }
+        p, span, div { font-family: 'Lora', serif; }
+      `}</style>
       <div className="max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100 mb-8">
+        <h1 className="text-3xl font-bold text-gray-900 mb-8">
           👤 Mon Espace Personnel
         </h1>
 
@@ -541,14 +547,14 @@ export default function PersonnelPage() {
           <div className="space-y-6">
             {/* Informations personnelles */}
             {userInfo && (
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+              <div className="bg-white rounded-2xl border border-gray-300 p-6">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                  <h2 className="text-xl font-bold text-gray-900">
                     ℹ️ Mes informations
                   </h2>
                   <button
                     onClick={() => setShowEditModal(true)}
-                    className="px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-sm font-medium rounded-lg transition-colors"
+                    className="px-3 py-1.5 bg-blue-100/30 hover:bg-blue-200/50 text-blue-700 text-sm font-medium rounded-lg transition-colors"
                   >
                     Modifier
                   </button>
@@ -556,55 +562,55 @@ export default function PersonnelPage() {
                 
                 <div className="space-y-3">
                   <div className="flex items-start gap-3">
-                    <span className="text-slate-500 dark:text-slate-400 text-sm w-32">Nom complet :</span>
-                    <span className="font-medium text-slate-900 dark:text-slate-100">
+                    <span className="text-gray-500 text-sm w-32">Nom complet :</span>
+                    <span className="font-medium text-gray-900">
                       {userInfo.first_name && userInfo.last_name 
                         ? `${userInfo.first_name} ${userInfo.last_name}`
-                        : <span className="italic text-slate-400">Non renseigné</span>
+                        : <span className="italic text-gray-500">Non renseigné</span>
                       }
                     </span>
                   </div>
                   
                   <div className="flex items-start gap-3">
-                    <span className="text-slate-500 dark:text-slate-400 text-sm w-32">Email :</span>
-                    <span className="font-medium text-slate-900 dark:text-slate-100">
+                    <span className="text-gray-500 text-sm w-32">Email :</span>
+                    <span className="font-medium text-gray-900">
                       {userInfo.email}
                     </span>
                   </div>
                   
                   <div className="flex items-start gap-3">
-                    <span className="text-slate-500 dark:text-slate-400 text-sm w-32">Naissance :</span>
-                    <span className="font-medium text-slate-900 dark:text-slate-100">
+                    <span className="text-gray-500 text-sm w-32">Naissance :</span>
+                    <span className="font-medium text-gray-900">
                       {userInfo.birth_date 
                         ? new Date(userInfo.birth_date).toLocaleDateString('fr-FR')
-                        : <span className="italic text-slate-400">Non renseignée</span>
+                        : <span className="italic text-gray-500">Non renseignée</span>
                       }
                     </span>
                   </div>
                   
                   <div className="flex items-start gap-3">
-                    <span className="text-slate-500 dark:text-slate-400 text-sm w-32">Adresse :</span>
-                    <span className="font-medium text-slate-900 dark:text-slate-100">
-                      {userInfo.address || <span className="italic text-slate-400">Non renseignée</span>}
+                    <span className="text-gray-500 text-sm w-32">Adresse :</span>
+                    <span className="font-medium text-gray-900">
+                      {userInfo.address || <span className="italic text-gray-500">Non renseignée</span>}
                     </span>
                   </div>
                   
                   <div className="flex items-start gap-3">
-                    <span className="text-slate-500 dark:text-slate-400 text-sm w-32">Ville :</span>
-                    <span className="font-medium text-slate-900 dark:text-slate-100">
+                    <span className="text-gray-500 text-sm w-32">Ville :</span>
+                    <span className="font-medium text-gray-900">
                       {userInfo.city 
                         ? `${userInfo.city}${userInfo.postal_code ? ` (${userInfo.postal_code})` : ''}`
-                        : <span className="italic text-slate-400">Non renseignée</span>
+                        : <span className="italic text-gray-500">Non renseignée</span>
                       }
                     </span>
                   </div>
                   
                   <div className="flex items-start gap-3">
-                    <span className="text-slate-500 dark:text-slate-400 text-sm w-32">Profil :</span>
-                    <span className="font-medium text-slate-900 dark:text-slate-100">
+                    <span className="text-gray-500 text-sm w-32">Profil :</span>
+                    <span className="font-medium text-gray-900">
                       {userInfo.role 
                         ? getRoleLabel(userInfo.role)
-                        : <span className="italic text-slate-400">Non renseigné</span>
+                        : <span className="italic text-gray-500">Non renseigné</span>
                       }
                     </span>
                   </div>
@@ -614,24 +620,24 @@ export default function PersonnelPage() {
 
             {/* Mon équipe (si membre) */}
             {monEquipe && !isChef && (
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
-                <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">
+              <div className="bg-white rounded-2xl border border-gray-300 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-4">
                   👥 Mon équipe
                 </h2>
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-3 h-12 rounded-full" style={{ backgroundColor: monEquipe.couleur }} />
                   <div>
-                    <div className="font-semibold text-slate-900 dark:text-slate-100">
+                    <div className="font-semibold text-gray-900">
                       {monEquipe.nom}
                     </div>
-                    <div className="text-sm text-slate-600 dark:text-slate-400">
+                    <div className="text-sm text-gray-600">
                       {monEquipe.nb_membres} membre{monEquipe.nb_membres > 1 ? 's' : ''}
                     </div>
                   </div>
                 </div>
                 <button
                   onClick={handleQuitterEquipe}
-                  className="w-full px-4 py-2 bg-red-100 dark:bg-red-900/20 hover:bg-red-200 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 font-medium rounded-lg transition-colors"
+                  className="w-full px-4 py-2 bg-red-100/20 hover:bg-red-200/30 text-red-600 font-medium rounded-lg transition-colors"
                 >
                   Quitter l'équipe
                 </button>
@@ -640,8 +646,8 @@ export default function PersonnelPage() {
 
             {/* Mes équipes (si chef) */}
             {isChef && (
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
-                <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">
+              <div className="bg-white rounded-2xl border border-gray-300 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-4">
                   👑 Mes équipes
                 </h2>
 
@@ -649,15 +655,15 @@ export default function PersonnelPage() {
                   <>
                     <div className="space-y-3">
                       {mesEquipes.map(equipe => (
-                        <div key={equipe.id} className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                        <div key={equipe.id} className="p-4 bg-gray-100 rounded-xl">
                           <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-3">
                               <div className="w-3 h-8 rounded-full" style={{ backgroundColor: equipe.couleur }} />
                               <div>
-                                <div className="font-semibold text-slate-900 dark:text-slate-100">
+                                <div className="font-semibold text-gray-900">
                                   {equipe.nom}
                                 </div>
-                                <div className="text-sm text-slate-600 dark:text-slate-400">
+                                <div className="text-sm text-gray-600">
                                   {equipe.nb_membres} membre{equipe.nb_membres > 1 ? 's' : ''}
                                 </div>
                               </div>
@@ -666,7 +672,7 @@ export default function PersonnelPage() {
                           <div className="flex gap-2">
                             <button
                               onClick={() => router.push(`/gestion-equipe?id=${equipe.id}`)}
-                              className="flex-1 px-3 py-1.5 bg-teal-100 dark:bg-teal-900/20 hover:bg-teal-200 dark:hover:bg-teal-900/30 text-teal-600 dark:text-teal-400 text-sm font-medium rounded-lg transition-colors"
+                              className="flex-1 px-3 py-1.5 bg-teal-100/20 hover:bg-teal-200/30 text-teal-600 text-sm font-medium rounded-lg transition-colors"
                             >
                               📝 Gérer
                             </button>
@@ -680,13 +686,13 @@ export default function PersonnelPage() {
                                 });
                                 setShowEditEquipeModal(true);
                               }}
-                              className="flex-1 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/20 hover:bg-blue-200 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-sm font-medium rounded-lg transition-colors"
+                              className="flex-1 px-3 py-1.5 bg-blue-100/20 hover:bg-blue-200/30 text-blue-600 text-sm font-medium rounded-lg transition-colors"
                             >
                               Modifier
                             </button>
                             <button
                               onClick={() => handleSupprimerEquipe(equipe.id)}
-                              className="flex-1 px-3 py-1.5 bg-red-100 dark:bg-red-900/20 hover:bg-red-200 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg transition-colors"
+                              className="flex-1 px-3 py-1.5 bg-red-100/20 hover:bg-red-200/30 text-red-600 text-sm font-medium rounded-lg transition-colors"
                             >
                               Supprimer
                             </button>
@@ -697,18 +703,18 @@ export default function PersonnelPage() {
 
                     {membres.length > 0 && (
                       <div className="mt-4">
-                        <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                        <h3 className="font-semibold text-gray-900 mb-2">
                           Membres
                         </h3>
                         <div className="space-y-2">
                           {membres.map(membre => (
-                            <div key={membre.user_id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-                              <span className="text-sm text-slate-900 dark:text-slate-100">
+                            <div key={membre.user_id} className="flex items-center justify-between p-3 bg-gray-50/50 rounded-lg">
+                              <span className="text-sm text-gray-900">
                                 {membre.full_name}
                               </span>
                               <button
                                 onClick={() => handleExcluireMembre(membre.user_id, mesEquipes[0].id)}
-                                className="px-3 py-1 bg-red-100 dark:bg-red-900/20 hover:bg-red-200 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 text-xs font-medium rounded-lg transition-colors"
+                                className="px-3 py-1 bg-red-100/20 hover:bg-red-200/30 text-red-600 text-xs font-medium rounded-lg transition-colors"
                               >
                                 Exclure
                               </button>
@@ -725,13 +731,13 @@ export default function PersonnelPage() {
 
           {/* Colonne droite : Notifications */}
           <div>
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
-              <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">
+            <div className="bg-white rounded-2xl border border-gray-300 p-6">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">
                 🔔 Notifications
               </h2>
 
               {notifications.length === 0 ? (
-                <div className="text-center py-8 text-slate-500 dark:text-slate-400">
+                <div className="text-center py-8 text-gray-500">
                   Aucune notification
                 </div>
               ) : (
@@ -842,16 +848,16 @@ function NotificationCard({
   return (
     <div className={`p-4 rounded-xl border ${
       notification.lu 
-        ? 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700' 
-        : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
+        ? 'bg-gray-50/50 border-gray-300' 
+        : 'bg-blue-50/20 border-blue-200'
     }`}>
       <div className="flex items-start gap-3">
         <div className="text-2xl">{getIcon()}</div>
         <div className="flex-1">
-          <div className="font-semibold text-slate-900 dark:text-slate-100">
+          <div className="font-semibold text-gray-900">
             {notification.titre}
           </div>
-          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+          <p className="text-sm text-gray-600 mt-1">
             {notification.message}
           </p>
 
@@ -859,13 +865,13 @@ function NotificationCard({
             <div className="flex gap-2 mt-3">
               <button
                 onClick={() => onAccepter(notification)}
-                className="flex-1 px-3 py-2 bg-green-100 dark:bg-green-900/20 hover:bg-green-200 dark:hover:bg-green-900/30 text-green-700 dark:text-green-400 text-sm font-medium rounded-lg transition-colors"
+                className="flex-1 px-3 py-2 bg-green-100/20 hover:bg-green-200/30 text-green-700 text-sm font-medium rounded-lg transition-colors"
               >
                 Accepter
               </button>
               <button
                 onClick={() => onRefuser(notification)}
-                className="flex-1 px-3 py-2 bg-red-100 dark:bg-red-900/20 hover:bg-red-200 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg transition-colors"
+                className="flex-1 px-3 py-2 bg-red-100/20 hover:bg-red-200/30 text-red-600 text-sm font-medium rounded-lg transition-colors"
               >
                 Refuser
               </button>
@@ -876,13 +882,13 @@ function NotificationCard({
             <div className="flex gap-2 mt-3">
               <button
                 onClick={() => onValider(notification)}
-                className="flex-1 px-3 py-2 bg-green-100 dark:bg-green-900/20 hover:bg-green-200 dark:hover:bg-green-900/30 text-green-700 dark:text-green-400 text-sm font-medium rounded-lg transition-colors"
+                className="flex-1 px-3 py-2 bg-green-100/20 hover:bg-green-200/30 text-green-700 text-sm font-medium rounded-lg transition-colors"
               >
                 Valider
               </button>
               <button
                 onClick={() => onRejeter(notification)}
-                className="flex-1 px-3 py-2 bg-orange-100 dark:bg-orange-900/20 hover:bg-orange-200 dark:hover:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-sm font-medium rounded-lg transition-colors"
+                className="flex-1 px-3 py-2 bg-orange-100/20 hover:bg-orange-200/30 text-orange-700 text-sm font-medium rounded-lg transition-colors"
               >
                 Rejeter
               </button>
@@ -892,7 +898,7 @@ function NotificationCard({
           {!notification.lu && !['demande_rejointe', 'soumission_feuille'].includes(notification.type) && (
             <button
               onClick={() => onMarquerLue(notification.id)}
-              className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+              className="mt-2 text-xs text-blue-600 hover:underline"
             >
               Marquer comme lu
             </button>
@@ -909,8 +915,8 @@ function ModalRejet({ onClose, onRejeter }: any) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">
           Rejeter la soumission
         </h2>
 
@@ -925,21 +931,21 @@ function ModalRejet({ onClose, onRejeter }: any) {
               onChange={(e) => setCommentaire(e.target.value)}
               placeholder="Expliquez ce qui doit être amélioré..."
               rows={4}
-              className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
             />
           </div>
 
           <div className="flex gap-3">
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
+              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
             >
               Annuler
             </button>
             <button
               onClick={() => onRejeter(commentaire)}
               disabled={!commentaire}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all"
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 text-gray-900 font-semibold rounded-xl disabled:opacity-50 transition-all"
             >
               Rejeter
             </button>
@@ -954,8 +960,8 @@ function ModalRejet({ onClose, onRejeter }: any) {
 function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-2xl w-full my-8">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-6">
+      <div className="bg-white rounded-2xl p-6 max-w-2xl w-full my-8">
+        <h2 className="text-2xl font-bold text-gray-900 mb-6">
           Modifier mes informations
         </h2>
 
@@ -967,7 +973,7 @@ function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
                 type="text"
                 value={data.first_name}
                 onChange={(e) => onChange({ ...data, first_name: e.target.value })}
-                className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
               />
             </div>
             <div>
@@ -976,7 +982,7 @@ function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
                 type="text"
                 value={data.last_name}
                 onChange={(e) => onChange({ ...data, last_name: e.target.value })}
-                className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
               />
             </div>
           </div>
@@ -987,7 +993,7 @@ function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
               type="date"
               value={data.birth_date}
               onChange={(e) => onChange({ ...data, birth_date: e.target.value })}
-              className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
             />
           </div>
 
@@ -997,7 +1003,7 @@ function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
               type="text"
               value={data.address}
               onChange={(e) => onChange({ ...data, address: e.target.value })}
-              className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
             />
           </div>
 
@@ -1008,7 +1014,7 @@ function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
                 type="text"
                 value={data.city}
                 onChange={(e) => onChange({ ...data, city: e.target.value })}
-                className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
               />
             </div>
             <div>
@@ -1017,7 +1023,7 @@ function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
                 type="text"
                 value={data.postal_code}
                 onChange={(e) => onChange({ ...data, postal_code: e.target.value })}
-                className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
               />
             </div>
           </div>
@@ -1028,8 +1034,8 @@ function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
               <label
                 className={`flex items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all ${
                   data.role === 'parent'
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-slate-300 dark:border-slate-700 hover:border-blue-300'
+                    ? 'border-blue-500 bg-blue-50/20'
+                    : 'border-gray-300 hover:border-blue-300'
                 }`}
               >
                 <input
@@ -1049,8 +1055,8 @@ function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
               <label
                 className={`flex items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all ${
                   data.role === 'student'
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-slate-300 dark:border-slate-700 hover:border-blue-300'
+                    ? 'border-blue-500 bg-blue-50/20'
+                    : 'border-gray-300 hover:border-blue-300'
                 }`}
               >
                 <input
@@ -1070,8 +1076,8 @@ function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
               <label
                 className={`flex items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all ${
                   data.role === 'teacher'
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-slate-300 dark:border-slate-700 hover:border-blue-300'
+                    ? 'border-blue-500 bg-blue-50/20'
+                    : 'border-gray-300 hover:border-blue-300'
                 }`}
               >
                 <input
@@ -1093,13 +1099,13 @@ function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
           <div className="flex gap-3 pt-4">
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
+              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
             >
               Annuler
             </button>
             <button
               onClick={onSave}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl transition-all"
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-gray-900 font-semibold rounded-xl transition-all"
             >
               Enregistrer
             </button>
@@ -1133,8 +1139,8 @@ function ModalEditEquipe({ equipe, data, onClose, onChange, onSave }: any) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-6">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+        <h2 className="text-2xl font-bold text-gray-900 mb-6">
           Modifier l'équipe
         </h2>
 
@@ -1149,7 +1155,7 @@ function ModalEditEquipe({ equipe, data, onClose, onChange, onSave }: any) {
               value={data.nom}
               onChange={(e) => onChange({ ...data, nom: e.target.value })}
               placeholder="Les Champions"
-              className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
             />
           </div>
 
@@ -1162,7 +1168,7 @@ function ModalEditEquipe({ equipe, data, onClose, onChange, onSave }: any) {
               onChange={(e) => onChange({ ...data, description: e.target.value })}
               placeholder="Une équipe de passionnés..."
               rows={3}
-              className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
             />
           </div>
 
@@ -1175,10 +1181,10 @@ function ModalEditEquipe({ equipe, data, onClose, onChange, onSave }: any) {
                 type="color"
                 value={data.couleur}
                 onChange={(e) => onChange({ ...data, couleur: e.target.value })}
-                className="w-16 h-12 rounded-lg border-2 border-slate-300 dark:border-slate-700 cursor-pointer"
+                className="w-16 h-12 rounded-lg border-2 border-gray-300 cursor-pointer"
               />
-              <div className="flex-1 px-4 py-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800">
-                <span className="font-mono text-sm text-slate-900 dark:text-slate-100">
+              <div className="flex-1 px-4 py-3 rounded-lg border border-gray-300 bg-white">
+                <span className="font-mono text-sm text-gray-900">
                   {data.couleur}
                 </span>
               </div>
@@ -1188,14 +1194,14 @@ function ModalEditEquipe({ equipe, data, onClose, onChange, onSave }: any) {
           <div className="flex gap-3 pt-4">
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
+              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
             >
               Annuler
             </button>
             <button
               onClick={onSave}
               disabled={!data.nom}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all"
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-gray-900 font-semibold rounded-xl disabled:opacity-50 transition-all"
             >
               Enregistrer
             </button>
@@ -1236,25 +1242,25 @@ function ModalValidationAvecFeuille({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">
           Valider la soumission
         </h2>
 
         <div className="space-y-4">
           {/* Sélection de la prochaine feuille */}
           <div>
-            <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">
+            <label className="block text-sm font-medium mb-2 text-gray-700">
               Prochaine feuille autorisée <span className="text-red-500">*</span>
             </label>
             {loading ? (
-              <div className="text-sm text-slate-500">Chargement...</div>
+              <div className="text-sm text-gray-500">Chargement...</div>
             ) : (
               <select
                 required
                 value={feuilleSelectionnee}
                 onChange={(e) => setFeuilleSelectionnee(e.target.value)}
-                className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
               >
                 <option value="">-- Choisir une feuille --</option>
                 {feuilles.map(f => (
@@ -1264,14 +1270,14 @@ function ModalValidationAvecFeuille({
                 ))}
               </select>
             )}
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            <p className="text-xs text-gray-500 mt-1">
               Cette feuille sera la seule accessible par le membre
             </p>
           </div>
 
           {/* Commentaire optionnel */}
           <div>
-            <label className="block text-sm font-medium mb-1 text-slate-700 dark:text-slate-300">
+            <label className="block text-sm font-medium mb-1 text-gray-700">
               Commentaire (optionnel)
             </label>
             <textarea
@@ -1279,21 +1285,21 @@ function ModalValidationAvecFeuille({
               onChange={(e) => setCommentaire(e.target.value)}
               placeholder="Bon travail ! Continue comme ça."
               rows={3}
-              className="w-full border border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
             />
           </div>
 
           <div className="flex gap-3 pt-4">
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
+              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
             >
               Annuler
             </button>
             <button
               onClick={() => onValider(feuilleSelectionnee, commentaire)}
               disabled={!feuilleSelectionnee}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all"
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-gray-900 font-semibold rounded-xl disabled:opacity-50 transition-all"
             >
               Valider
             </button>
@@ -1335,31 +1341,31 @@ function ModalAcceptationAvecFeuille({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-lg w-full">
+      <div className="bg-white rounded-2xl p-6 max-w-lg w-full">
         {/* Header avec icône */}
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+          <div className="w-12 h-12 rounded-full bg-green-100/30 flex items-center justify-center">
             <span className="text-2xl">👤</span>
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+            <h2 className="text-2xl font-bold text-gray-900">
               Accepter le nouveau membre
             </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
+            <p className="text-sm text-gray-500">
               Définir son parcours d'apprentissage
             </p>
           </div>
         </div>
 
         {/* Explication */}
-        <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+        <div className="mb-6 p-4 bg-blue-50/20 rounded-xl border border-blue-200">
           <div className="flex gap-3">
             <div className="text-xl">💡</div>
             <div className="flex-1">
-              <p className="text-sm text-blue-900 dark:text-blue-100 font-medium mb-1">
+              <p className="text-sm text-blue-900 font-medium mb-1">
                 Pourquoi choisir une feuille de départ ?
               </p>
-              <p className="text-xs text-blue-800 dark:text-blue-200">
+              <p className="text-xs text-blue-800">
                 Pour un apprentissage structuré, seule la feuille que vous choisissez sera accessible. 
                 Le membre devra la compléter avant de passer à la suivante.
               </p>
@@ -1370,17 +1376,17 @@ function ModalAcceptationAvecFeuille({
         <div className="space-y-4">
           {/* Sélection de la feuille de départ */}
           <div>
-            <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">
+            <label className="block text-sm font-medium mb-2 text-gray-700">
               📋 Sélectionner la première feuille <span className="text-red-500">*</span>
             </label>
             {loading ? (
-              <div className="text-sm text-slate-500 p-3">Chargement des feuilles...</div>
+              <div className="text-sm text-gray-500 p-3">Chargement des feuilles...</div>
             ) : (
               <select
                 required
                 value={feuilleSelectionnee}
                 onChange={(e) => setFeuilleSelectionnee(e.target.value)}
-                className="w-full border-2 border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium focus:border-green-500 focus:ring-2 focus:ring-green-200 dark:focus:ring-green-900 transition-all"
+                className="w-full border-2 border-gray-300 rounded-xl p-3 bg-white text-gray-900 font-medium focus:border-green-500 focus:ring-2 focus:ring-green-200 transition-all"
               >
                 <option value="">-- Choisir une feuille de départ --</option>
                 {feuilles.map(f => (
@@ -1394,14 +1400,14 @@ function ModalAcceptationAvecFeuille({
 
           {/* Aperçu de la sélection */}
           {feuilleChoisie && (
-            <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border-2 border-green-200 dark:border-green-800">
+            <div className="p-4 bg-green-50/20 rounded-xl border-2 border-green-200">
               <div className="flex items-start gap-3">
                 <div className="text-2xl">✅</div>
                 <div className="flex-1">
-                  <p className="font-semibold text-green-900 dark:text-green-100 mb-1">
+                  <p className="font-semibold text-green-900 mb-1">
                     Feuille sélectionnée : {feuilleChoisie.titre}
                   </p>
-                  <p className="text-sm text-green-800 dark:text-green-200">
+                  <p className="text-sm text-green-800">
                     Le membre pourra uniquement travailler sur cette feuille. 
                     Une fois validée, vous choisirez la suivante.
                   </p>
@@ -1414,14 +1420,14 @@ function ModalAcceptationAvecFeuille({
           <div className="flex gap-3 pt-4">
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-semibold rounded-xl transition-colors"
+              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
             >
               Annuler
             </button>
             <button
               onClick={() => onAccepter(feuilleSelectionnee)}
               disabled={!feuilleSelectionnee}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-gray-900 font-semibold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
             >
               {feuilleSelectionnee ? '✓ Accepter et commencer' : 'Choisir une feuille'}
             </button>
