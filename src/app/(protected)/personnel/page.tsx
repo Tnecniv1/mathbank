@@ -64,7 +64,6 @@ export default function PersonnelPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEditEquipeModal, setShowEditEquipeModal] = useState(false);
   const [showValidationModal, setShowValidationModal] = useState(false);
-  const [showAcceptationModal, setShowAcceptationModal] = useState(false); // NOUVEAU
   const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
   const [equipeSelectionnee, setEquipeSelectionnee] = useState<MonEquipe | null>(null);
   
@@ -95,15 +94,17 @@ export default function PersonnelPage() {
     try {
       setLoading(true);
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session || !session.user) {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session || !session.user) {
+        console.warn('Session invalide, redirection vers auth...');
+        await supabase.auth.signOut();
         router.push('/auth');
         return;
       }
 
       setUserId(session.user.id);
 
-      // Charger les données
       await loadUserInfo(session.user);
       await loadNotifications(session.user.id);
       await loadMonEquipe(session.user.id);
@@ -111,6 +112,8 @@ export default function PersonnelPage() {
 
     } catch (error: any) {
       console.error('Erreur chargement:', error);
+      await supabase.auth.signOut();
+      router.push('/auth');
     } finally {
       setLoading(false);
     }
@@ -243,7 +246,7 @@ export default function PersonnelPage() {
   async function loadMesEquipes(userId: string) {
     const { data, error } = await supabase
       .from('equipe')
-      .select('*')
+      .select('id, nom, couleur')
       .eq('chef_id', userId);
 
     if (error) throw error;
@@ -298,26 +301,8 @@ export default function PersonnelPage() {
       const demandeId = notification.metadata?.demande_id;
       if (!demandeId) return;
 
-      // NOUVEAU : Demander au chef de choisir la feuille de départ
-      // Pour simplifier, on ouvre un modal pour sélectionner la feuille
-      setNotificationSelectionnee(notification);
-      setShowAcceptationModal(true);
-    } catch (error: any) {
-      console.error(error);
-      alert('Erreur');
-    }
-  }
-
-  // NOUVELLE FONCTION : Accepter avec feuille de départ
-  async function handleAccepterAvecFeuille(feuilleDepart: string) {
-    if (!notificationSelectionnee) return;
-
-    try {
-      const demandeId = notificationSelectionnee.metadata?.demande_id;
-      
       const { data, error } = await supabase.rpc('accepter_demande', {
         p_demande_id: demandeId,
-        p_feuille_depart_id: feuilleDepart,
       });
 
       if (error) throw error;
@@ -327,10 +312,8 @@ export default function PersonnelPage() {
         return;
       }
 
-      alert('✅ Demande acceptée et feuille de départ définie !');
-      marquerCommeLue(notificationSelectionnee.id);
-      setShowAcceptationModal(false);
-      setNotificationSelectionnee(null);
+      alert('✅ Demande acceptée !');
+      marquerCommeLue(notification.id);
       loadData();
     } catch (error: any) {
       console.error(error);
@@ -363,13 +346,11 @@ export default function PersonnelPage() {
     }
   }
 
-  // MODIFICATION : Ouvrir le modal de validation avec sélection de feuille
   async function handleValiderSoumission(notification: Notification) {
     setNotificationSelectionnee(notification);
     setShowValidationModal(true);
   }
 
-  // NOUVEAU : Valider avec choix de la prochaine feuille
   async function handleValiderAvecFeuille(
     prochaineFeuilleId: string,
     commentaire?: string
@@ -449,28 +430,7 @@ export default function PersonnelPage() {
         return;
       }
 
-      alert('Membre exclu');
-      loadData();
-    } catch (error: any) {
-      console.error(error);
-      alert('Erreur');
-    }
-  }
-
-  async function handleQuitterEquipe() {
-    if (!confirm('Êtes-vous sûr de vouloir quitter cette équipe ?')) return;
-
-    try {
-      const { data, error } = await supabase.rpc('quitter_equipe');
-
-      if (error) throw error;
-
-      if (!data.success) {
-        alert(data.error);
-        return;
-      }
-
-      alert('Vous avez quitté l\'équipe');
+      alert('✅ Membre exclu');
       loadData();
     } catch (error: any) {
       console.error(error);
@@ -479,7 +439,9 @@ export default function PersonnelPage() {
   }
 
   async function handleSupprimerEquipe(equipeId: string) {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer cette équipe ? Cette action est irréversible.')) return;
+    if (!confirm('⚠️ ATTENTION : Supprimer cette équipe supprimera également tous ses membres et leurs progressions. Êtes-vous sûr ?')) {
+      return;
+    }
 
     try {
       const { data, error } = await supabase.rpc('supprimer_equipe', {
@@ -493,11 +455,11 @@ export default function PersonnelPage() {
         return;
       }
 
-      alert('Équipe supprimée');
+      alert('✅ Équipe supprimée');
       loadData();
     } catch (error: any) {
       console.error(error);
-      alert('Erreur');
+      alert('Erreur lors de la suppression');
     }
   }
 
@@ -512,707 +474,543 @@ export default function PersonnelPage() {
     );
   }
 
-  const getRoleLabel = (role: string) => {
-    switch (role) {
-      case 'student': return '🎓 Étudiant';
-      case 'teacher': return '👨‍🏫 Professeur';
-      case 'parent': return '👨‍👩‍👧‍👦 Parent';
-      default: return role;
-    }
-  };
-
   if (loading) {
     return (
-      <main className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-gray-600">Chargement...</div>
-      </main>
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="text-white text-xl">Chargement...</div>
+      </div>
     );
   }
 
+  const notifsNonLues = notifications.filter(n => !n.lu).length;
+
   return (
-    <main className="min-h-screen bg-white py-8 px-6">
-      <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Lora:wght@400;500;600;700&display=swap');
-        h1, h2, h3, h4, h5, h6, .font-mono { font-family: 'IBM Plex Mono', monospace; }
-        body { font-family: 'Lora', serif; }
-        p, span, div { font-family: 'Lora', serif; }
-      `}</style>
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-900 mb-8">
-          👤 Mon Espace Personnel
-        </h1>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-8 px-4">
+      <div className="max-w-5xl mx-auto space-y-6">
+        {/* En-tête */}
+        <div className="bg-white rounded-2xl p-6 border-2 border-gray-300 shadow-xl">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            👤 Mon Espace Personnel
+          </h1>
+          <p className="text-gray-600">
+            Gérez vos informations, équipes et notifications
+          </p>
+        </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Colonne gauche : Infos et équipe */}
-          <div className="space-y-6">
-            {/* Informations personnelles */}
-            {userInfo && (
-              <div className="bg-white rounded-2xl border border-gray-300 p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-bold text-gray-900">
-                    ℹ️ Mes informations
-                  </h2>
-                  <button
-                    onClick={() => setShowEditModal(true)}
-                    className="px-3 py-1.5 bg-blue-100/30 hover:bg-blue-200/50 text-blue-700 text-sm font-medium rounded-lg transition-colors"
-                  >
-                    Modifier
-                  </button>
-                </div>
-                
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3">
-                    <span className="text-gray-500 text-sm w-32">Nom complet :</span>
-                    <span className="font-medium text-gray-900">
-                      {userInfo.first_name && userInfo.last_name 
-                        ? `${userInfo.first_name} ${userInfo.last_name}`
-                        : <span className="italic text-gray-500">Non renseigné</span>
-                      }
-                    </span>
-                  </div>
-                  
-                  <div className="flex items-start gap-3">
-                    <span className="text-gray-500 text-sm w-32">Email :</span>
-                    <span className="font-medium text-gray-900">
-                      {userInfo.email}
-                    </span>
-                  </div>
-                  
-                  <div className="flex items-start gap-3">
-                    <span className="text-gray-500 text-sm w-32">Naissance :</span>
-                    <span className="font-medium text-gray-900">
-                      {userInfo.birth_date 
-                        ? new Date(userInfo.birth_date).toLocaleDateString('fr-FR')
-                        : <span className="italic text-gray-500">Non renseignée</span>
-                      }
-                    </span>
-                  </div>
-                  
-                  <div className="flex items-start gap-3">
-                    <span className="text-gray-500 text-sm w-32">Adresse :</span>
-                    <span className="font-medium text-gray-900">
-                      {userInfo.address || <span className="italic text-gray-500">Non renseignée</span>}
-                    </span>
-                  </div>
-                  
-                  <div className="flex items-start gap-3">
-                    <span className="text-gray-500 text-sm w-32">Ville :</span>
-                    <span className="font-medium text-gray-900">
-                      {userInfo.city 
-                        ? `${userInfo.city}${userInfo.postal_code ? ` (${userInfo.postal_code})` : ''}`
-                        : <span className="italic text-gray-500">Non renseignée</span>
-                      }
-                    </span>
-                  </div>
-                  
-                  <div className="flex items-start gap-3">
-                    <span className="text-gray-500 text-sm w-32">Profil :</span>
-                    <span className="font-medium text-gray-900">
-                      {userInfo.role 
-                        ? getRoleLabel(userInfo.role)
-                        : <span className="italic text-gray-500">Non renseigné</span>
-                      }
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
+        {/* Informations personnelles */}
+        <div className="bg-white rounded-2xl p-6 border-2 border-gray-300 shadow-xl">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold text-gray-900">
+              📋 Mes Informations
+            </h2>
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors shadow-md"
+            >
+              ✏️ Modifier
+            </button>
+          </div>
 
-            {/* Mon équipe (si membre) */}
-            {monEquipe && !isChef && (
-              <div className="bg-white rounded-2xl border border-gray-300 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4">
-                  👥 Mon équipe
-                </h2>
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-3 h-12 rounded-full" style={{ backgroundColor: monEquipe.couleur }} />
-                  <div>
-                    <div className="font-semibold text-gray-900">
-                      {monEquipe.nom}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      {monEquipe.nb_membres} membre{monEquipe.nb_membres > 1 ? 's' : ''}
-                    </div>
+          {userInfo ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <InfoItem label="Email" value={userInfo.email} />
+              <InfoItem label="Prénom" value={userInfo.first_name} />
+              <InfoItem label="Nom" value={userInfo.last_name} />
+              <InfoItem label="Date de naissance" value={userInfo.birth_date} />
+              <InfoItem label="Adresse" value={userInfo.address} />
+              <InfoItem label="Ville" value={userInfo.city} />
+              <InfoItem label="Code postal" value={userInfo.postal_code} />
+              <InfoItem label="Rôle" value={userInfo.role} />
+            </div>
+          ) : (
+            <div className="text-gray-500">Aucune information disponible</div>
+          )}
+        </div>
+
+        {/* Mon équipe */}
+        {monEquipe && (
+          <div className="bg-white rounded-2xl p-6 border-2 border-gray-300 shadow-xl">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">
+              👥 Mon Équipe
+            </h2>
+            <div
+              className="p-4 rounded-xl border-2 transition-colors"
+              style={{ borderColor: monEquipe.couleur }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xl font-bold text-gray-900">
+                    {monEquipe.nom}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {monEquipe.nb_membres} membre{monEquipe.nb_membres > 1 ? 's' : ''}
                   </div>
                 </div>
                 <button
-                  onClick={handleQuitterEquipe}
-                  className="w-full px-4 py-2 bg-red-100/20 hover:bg-red-200/30 text-red-600 font-medium rounded-lg transition-colors"
+                  onClick={() => router.push('/entrainement')}
+                  className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-lg transition-all shadow-lg"
                 >
-                  Quitter l'équipe
+                  Accéder à l'entraînement →
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Mes équipes (si chef) - GRILLE 3x3 */}
+        {isChef && mesEquipes.length > 0 && (
+          <div className="bg-white rounded-2xl p-6 border-2 border-gray-300 shadow-xl">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">
+              🏆 Mes Équipes (Chef)
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {mesEquipes.map(equipe => (
+                <div
+                  key={equipe.id}
+                  className="p-4 rounded-xl border-2 transition-all hover:shadow-lg hover:scale-105"
+                  style={{ borderColor: equipe.couleur }}
+                >
+                  {/* Nom et nombre de membres */}
+                  <div className="mb-3">
+                    <div className="text-lg font-bold text-gray-900 mb-1">
+                      {equipe.nom}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {equipe.nb_membres} membre{equipe.nb_membres > 1 ? 's' : ''}
+                    </div>
+                  </div>
+
+                  {/* Boutons empilés verticalement */}
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => router.push(`/gestion-equipe?id=${equipe.id}`)}
+                      className="w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors shadow-md"
+                    >
+                      Gérer l'équipe
+                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setEquipeSelectionnee(equipe);
+                          setEditEquipeData({
+                            nom: equipe.nom,
+                            description: '',
+                            couleur: equipe.couleur,
+                          });
+                          setShowEditEquipeModal(true);
+                        }}
+                        className="flex-1 px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium rounded-lg transition-colors"
+                      >
+                        ✏️ Modifier
+                      </button>
+                      <button
+                        onClick={() => handleSupprimerEquipe(equipe.id)}
+                        className="flex-1 px-3 py-2 bg-red-100 hover:bg-red-200 text-red-600 font-medium rounded-lg transition-colors"
+                      >
+                        🗑️ Supprimer
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Notifications - GRILLE 3x3 avec SCROLL */}
+        <div className="bg-white rounded-2xl p-6 border-2 border-gray-300 shadow-xl">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-gray-900">
+              🔔 Notifications
+            </h2>
+            {notifsNonLues > 0 && (
+              <span className="px-3 py-1 bg-blue-500 text-white text-sm font-bold rounded-full shadow-md">
+                {notifsNonLues} nouvelle{notifsNonLues > 1 ? 's' : ''}
+              </span>
             )}
+          </div>
 
-            {/* Mes équipes (si chef) */}
-            {isChef && (
-              <div className="bg-white rounded-2xl border border-gray-300 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4">
-                  👑 Mes équipes
-                </h2>
-
-                {mesEquipes.length > 0 && (
-                  <>
-                    <div className="space-y-3">
-                      {mesEquipes.map(equipe => (
-                        <div key={equipe.id} className="p-4 bg-gray-100 rounded-xl">
-                          <div className="flex items-center justify-between mb-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-3 h-8 rounded-full" style={{ backgroundColor: equipe.couleur }} />
-                              <div>
-                                <div className="font-semibold text-gray-900">
-                                  {equipe.nom}
-                                </div>
-                                <div className="text-sm text-gray-600">
-                                  {equipe.nb_membres} membre{equipe.nb_membres > 1 ? 's' : ''}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => router.push(`/gestion-equipe?id=${equipe.id}`)}
-                              className="flex-1 px-3 py-1.5 bg-teal-100/20 hover:bg-teal-200/30 text-teal-600 text-sm font-medium rounded-lg transition-colors"
-                            >
-                              📝 Gérer
-                            </button>
-                            <button
-                              onClick={() => {
-                                setEquipeSelectionnee(equipe);
-                                setEditEquipeData({
-                                  nom: equipe.nom,
-                                  description: '',
-                                  couleur: equipe.couleur,
-                                });
-                                setShowEditEquipeModal(true);
-                              }}
-                              className="flex-1 px-3 py-1.5 bg-blue-100/20 hover:bg-blue-200/30 text-blue-600 text-sm font-medium rounded-lg transition-colors"
-                            >
-                              Modifier
-                            </button>
-                            <button
-                              onClick={() => handleSupprimerEquipe(equipe.id)}
-                              className="flex-1 px-3 py-1.5 bg-red-100/20 hover:bg-red-200/30 text-red-600 text-sm font-medium rounded-lg transition-colors"
-                            >
-                              Supprimer
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+          {notifications.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              Aucune notification pour le moment
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-2">
+              {notifications.map(notif => {
+                const isDemandeEnAttente = notif.type === 'demande_rejointe' && !notif.lu;
+                const isSoumissionEnAttente = notif.type === 'soumission_feuille' && !notif.lu;
+                
+                return (
+                  <div
+                    key={notif.id}
+                    className={`p-4 rounded-xl border-2 transition-all hover:scale-105 flex flex-col ${
+                      notif.lu
+                        ? 'border-gray-300 bg-gray-50/50'
+                        : 'border-blue-200 bg-blue-50/20 shadow-md'
+                    }`}
+                  >
+                    {/* Header avec badge */}
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-semibold text-gray-900 text-sm">
+                        {notif.type === 'demande_rejointe' && '👤 '}
+                        {notif.type === 'soumission_feuille' && '📝 '}
+                        {notif.type === 'demande_acceptee' && '✅ '}
+                        {notif.type === 'demande_refusee' && '❌ '}
+                        {notif.titre}
+                      </h3>
+                      {!notif.lu && (
+                        <span className="px-2 py-1 bg-blue-500 text-white text-xs font-bold rounded shadow-sm whitespace-nowrap ml-2">
+                          NOUVEAU
+                        </span>
+                      )}
                     </div>
 
-                    {membres.length > 0 && (
-                      <div className="mt-4">
-                        <h3 className="font-semibold text-gray-900 mb-2">
-                          Membres
-                        </h3>
-                        <div className="space-y-2">
-                          {membres.map(membre => (
-                            <div key={membre.user_id} className="flex items-center justify-between p-3 bg-gray-50/50 rounded-lg">
-                              <span className="text-sm text-gray-900">
-                                {membre.full_name}
-                              </span>
-                              <button
-                                onClick={() => handleExcluireMembre(membre.user_id, mesEquipes[0].id)}
-                                className="px-3 py-1 bg-red-100/20 hover:bg-red-200/30 text-red-600 text-xs font-medium rounded-lg transition-colors"
-                              >
-                                Exclure
-                              </button>
-                            </div>
-                          ))}
-                        </div>
+                    {/* Message */}
+                    <p className="text-sm text-gray-600 mb-3 flex-1">
+                      {notif.message}
+                    </p>
+
+                    {/* Date */}
+                    <span className="text-xs text-gray-500 mb-3 block">
+                      {new Date(notif.created_at).toLocaleDateString('fr-FR', {
+                        day: 'numeric',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </span>
+                    
+                    {/* Boutons d'action empilés */}
+                    {isDemandeEnAttente && (
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => handleAccepterDemande(notif)}
+                          className="w-full px-3 py-2 bg-green-100/30 hover:bg-green-200/50 text-green-600 text-sm font-medium rounded-lg transition-colors"
+                        >
+                          ✓ Accepter
+                        </button>
+                        <button
+                          onClick={() => handleRefuserDemande(notif)}
+                          className="w-full px-3 py-2 bg-red-100/30 hover:bg-red-200/50 text-red-600 text-sm font-medium rounded-lg transition-colors"
+                        >
+                          ✗ Refuser
+                        </button>
                       </div>
                     )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
 
-          {/* Colonne droite : Notifications */}
-          <div>
-            <div className="bg-white rounded-2xl border border-gray-300 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">
-                🔔 Notifications
-              </h2>
-
-              {notifications.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  Aucune notification
-                </div>
-              ) : (
-                <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                  {notifications.map(notif => (
-                    <NotificationCard
-                      key={notif.id}
-                      notification={notif}
-                      onAccepter={handleAccepterDemande}
-                      onRefuser={handleRefuserDemande}
-                      onValider={handleValiderSoumission}
-                      onRejeter={(notif) => {
-                        setNotificationSelectionnee(notif);
-                        setShowRejetModal(true);
-                      }}
-                      onMarquerLue={marquerCommeLue}
-                    />
-                  ))}
-                </div>
-              )}
+                    {isSoumissionEnAttente && (
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => handleValiderSoumission(notif)}
+                          className="w-full px-3 py-2 bg-green-100/30 hover:bg-green-200/50 text-green-600 text-sm font-medium rounded-lg transition-colors"
+                        >
+                          ✓ Valider
+                        </button>
+                        <button
+                          onClick={() => {
+                            setNotificationSelectionnee(notif);
+                            setShowRejetModal(true);
+                          }}
+                          className="w-full px-3 py-2 bg-red-100/30 hover:bg-red-200/50 text-red-600 text-sm font-medium rounded-lg transition-colors"
+                        >
+                          ✗ Rejeter
+                        </button>
+                      </div>
+                    )}
+                    
+                    {notif.lu && (
+                      <span className="text-xs text-gray-400 italic text-center">
+                        Notification traitée
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          </div>
+          )}
         </div>
-
-        {/* Modals */}
-        {showRejetModal && (
-          <ModalRejet
-            onClose={() => {
-              setShowRejetModal(false);
-              setNotificationSelectionnee(null);
-            }}
-            onRejeter={handleRejeterSoumission}
-          />
-        )}
-
-        {showEditModal && (
-          <ModalEditInfo
-            data={editData}
-            onClose={() => setShowEditModal(false)}
-            onChange={setEditData}
-            onSave={handleSaveUserInfo}
-          />
-        )}
-
-        {showEditEquipeModal && equipeSelectionnee && (
-          <ModalEditEquipe
-            equipe={equipeSelectionnee}
-            data={editEquipeData}
-            onClose={() => {
-              setShowEditEquipeModal(false);
-              setEquipeSelectionnee(null);
-            }}
-            onChange={setEditEquipeData}
-            onSave={handleSaveEquipe}
-          />
-        )}
-
-        {/* NOUVEAU : Modal de validation avec sélection de feuille */}
-        {showValidationModal && notificationSelectionnee && (
-          <ModalValidationAvecFeuille
-            notification={notificationSelectionnee}
-            onClose={() => {
-              setShowValidationModal(false);
-              setNotificationSelectionnee(null);
-            }}
-            onValider={handleValiderAvecFeuille}
-          />
-        )}
-
-        {/* NOUVEAU : Modal d'acceptation avec sélection de feuille de départ */}
-        {showAcceptationModal && notificationSelectionnee && (
-          <ModalAcceptationAvecFeuille
-            notification={notificationSelectionnee}
-            onClose={() => {
-              setShowAcceptationModal(false);
-              setNotificationSelectionnee(null);
-            }}
-            onAccepter={handleAccepterAvecFeuille}
-          />
-        )}
       </div>
-    </main>
+
+      {/* Modals */}
+      {showEditModal && (
+        <ModalEditUserInfo
+          data={editData}
+          onChange={setEditData}
+          onClose={() => setShowEditModal(false)}
+          onSave={handleSaveUserInfo}
+        />
+      )}
+
+      {showEditEquipeModal && equipeSelectionnee && (
+        <ModalEditEquipe
+          data={editEquipeData}
+          onChange={setEditEquipeData}
+          onClose={() => {
+            setShowEditEquipeModal(false);
+            setEquipeSelectionnee(null);
+          }}
+          onSave={handleSaveEquipe}
+        />
+      )}
+
+      {showValidationModal && notificationSelectionnee && (
+        <ModalValidationAvecFeuille
+          notification={notificationSelectionnee}
+          onClose={() => {
+            setShowValidationModal(false);
+            setNotificationSelectionnee(null);
+          }}
+          onValider={handleValiderAvecFeuille}
+        />
+      )}
+
+      {showRejetModal && notificationSelectionnee && (
+        <ModalRejet
+          onClose={() => {
+            setShowRejetModal(false);
+            setNotificationSelectionnee(null);
+          }}
+          onRejeter={handleRejeterSoumission}
+        />
+      )}
+    </div>
   );
 }
 
-/* ---------- COMPOSANT : Carte de notification ---------- */
-function NotificationCard({ 
-  notification, 
-  onAccepter, 
-  onRefuser, 
-  onValider, 
-  onRejeter,
-  onMarquerLue
-}: any) {
-  const getIcon = () => {
-    switch (notification.type) {
-      case 'demande_rejointe': return '🆕';
-      case 'soumission_feuille': return '📝';
-      case 'demande_acceptee': return '✅';
-      case 'demande_refusee': return '❌';
-      case 'feuille_validee': return '✅';
-      case 'feuille_rejetee': return '❌';
-      case 'exclusion_equipe': return '⚠️';
-      default: return '📧';
-    }
-  };
+/* ---------- COMPOSANTS AUXILIAIRES ---------- */
 
+function InfoItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className={`p-4 rounded-xl border ${
-      notification.lu 
-        ? 'bg-gray-50/50 border-gray-300' 
-        : 'bg-blue-50/20 border-blue-200'
-    }`}>
-      <div className="flex items-start gap-3">
-        <div className="text-2xl">{getIcon()}</div>
-        <div className="flex-1">
-          <div className="font-semibold text-gray-900">
-            {notification.titre}
-          </div>
-          <p className="text-sm text-gray-600 mt-1">
-            {notification.message}
-          </p>
-
-          {notification.type === 'demande_rejointe' && !notification.lu && (
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={() => onAccepter(notification)}
-                className="flex-1 px-3 py-2 bg-green-100/20 hover:bg-green-200/30 text-green-700 text-sm font-medium rounded-lg transition-colors"
-              >
-                Accepter
-              </button>
-              <button
-                onClick={() => onRefuser(notification)}
-                className="flex-1 px-3 py-2 bg-red-100/20 hover:bg-red-200/30 text-red-600 text-sm font-medium rounded-lg transition-colors"
-              >
-                Refuser
-              </button>
-            </div>
-          )}
-
-          {notification.type === 'soumission_feuille' && !notification.lu && (
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={() => onValider(notification)}
-                className="flex-1 px-3 py-2 bg-green-100/20 hover:bg-green-200/30 text-green-700 text-sm font-medium rounded-lg transition-colors"
-              >
-                Valider
-              </button>
-              <button
-                onClick={() => onRejeter(notification)}
-                className="flex-1 px-3 py-2 bg-orange-100/20 hover:bg-orange-200/30 text-orange-700 text-sm font-medium rounded-lg transition-colors"
-              >
-                Rejeter
-              </button>
-            </div>
-          )}
-
-          {!notification.lu && !['demande_rejointe', 'soumission_feuille'].includes(notification.type) && (
-            <button
-              onClick={() => onMarquerLue(notification.id)}
-              className="mt-2 text-xs text-blue-600 hover:underline"
-            >
-              Marquer comme lu
-            </button>
-          )}
-        </div>
+    <div>
+      <div className="text-sm font-medium text-gray-500 mb-1">{label}</div>
+      <div className="text-gray-900 font-medium">
+        {value || <span className="text-gray-400 italic">Non renseigné</span>}
       </div>
     </div>
   );
 }
 
-/* ---------- MODAL : Rejeter une soumission ---------- */
-function ModalRejet({ onClose, onRejeter }: any) {
-  const [commentaire, setCommentaire] = useState('');
+/* ---------- MODALS ---------- */
 
+function ModalEditUserInfo({
+  data,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  data: UserInfo;
+  onChange: (data: UserInfo) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+      <div className="bg-white rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">
-          Rejeter la soumission
-        </h2>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Commentaire <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              required
-              value={commentaire}
-              onChange={(e) => setCommentaire(e.target.value)}
-              placeholder="Expliquez ce qui doit être amélioré..."
-              rows={4}
-              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
-            />
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              onClick={onClose}
-              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
-            >
-              Annuler
-            </button>
-            <button
-              onClick={() => onRejeter(commentaire)}
-              disabled={!commentaire}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 text-gray-900 font-semibold rounded-xl disabled:opacity-50 transition-all"
-            >
-              Rejeter
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------- MODAL : Modifier les informations ---------- */
-function ModalEditInfo({ data, onClose, onChange, onSave }: any) {
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl p-6 max-w-2xl w-full my-8">
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">
           Modifier mes informations
         </h2>
 
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Prénom</label>
-              <input
-                type="text"
-                value={data.first_name}
-                onChange={(e) => onChange({ ...data, first_name: e.target.value })}
-                className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Nom</label>
-              <input
-                type="text"
-                value={data.last_name}
-                onChange={(e) => onChange({ ...data, last_name: e.target.value })}
-                className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
-              />
-            </div>
-          </div>
+          <InputField
+            label="Prénom"
+            value={data.first_name}
+            onChange={(v) => onChange({ ...data, first_name: v })}
+          />
+          <InputField
+            label="Nom"
+            value={data.last_name}
+            onChange={(v) => onChange({ ...data, last_name: v })}
+          />
+          <InputField
+            label="Date de naissance"
+            type="date"
+            value={data.birth_date}
+            onChange={(v) => onChange({ ...data, birth_date: v })}
+          />
+          <InputField
+            label="Adresse"
+            value={data.address}
+            onChange={(v) => onChange({ ...data, address: v })}
+          />
+          <InputField
+            label="Ville"
+            value={data.city}
+            onChange={(v) => onChange({ ...data, city: v })}
+          />
+          <InputField
+            label="Code postal"
+            value={data.postal_code}
+            onChange={(v) => onChange({ ...data, postal_code: v })}
+          />
+          <InputField
+            label="Rôle"
+            value={data.role}
+            onChange={(v) => onChange({ ...data, role: v })}
+            placeholder="Élève, Étudiant, Professionnel..."
+          />
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Date de naissance</label>
-            <input
-              type="date"
-              value={data.birth_date}
-              onChange={(e) => onChange({ ...data, birth_date: e.target.value })}
-              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Adresse</label>
-            <input
-              type="text"
-              value={data.address}
-              onChange={(e) => onChange({ ...data, address: e.target.value })}
-              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Ville</label>
-              <input
-                type="text"
-                value={data.city}
-                onChange={(e) => onChange({ ...data, city: e.target.value })}
-                className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Code postal</label>
-              <input
-                type="text"
-                value={data.postal_code}
-                onChange={(e) => onChange({ ...data, postal_code: e.target.value })}
-                className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Profil</label>
-            <div className="grid grid-cols-3 gap-3">
-              <label
-                className={`flex items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all ${
-                  data.role === 'parent'
-                    ? 'border-blue-500 bg-blue-50/20'
-                    : 'border-gray-300 hover:border-blue-300'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="role"
-                  value="parent"
-                  checked={data.role === 'parent'}
-                  onChange={(e) => onChange({ ...data, role: e.target.value })}
-                  className="sr-only"
-                />
-                <div className="text-center">
-                  <div className="text-2xl mb-1">👨‍👩‍👧‍👦</div>
-                  <div className="text-sm font-medium">Parent</div>
-                </div>
-              </label>
-
-              <label
-                className={`flex items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all ${
-                  data.role === 'student'
-                    ? 'border-blue-500 bg-blue-50/20'
-                    : 'border-gray-300 hover:border-blue-300'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="role"
-                  value="student"
-                  checked={data.role === 'student'}
-                  onChange={(e) => onChange({ ...data, role: e.target.value })}
-                  className="sr-only"
-                />
-                <div className="text-center">
-                  <div className="text-2xl mb-1">🎓</div>
-                  <div className="text-sm font-medium">Étudiant</div>
-                </div>
-              </label>
-
-              <label
-                className={`flex items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all ${
-                  data.role === 'teacher'
-                    ? 'border-blue-500 bg-blue-50/20'
-                    : 'border-gray-300 hover:border-blue-300'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="role"
-                  value="teacher"
-                  checked={data.role === 'teacher'}
-                  onChange={(e) => onChange({ ...data, role: e.target.value })}
-                  className="sr-only"
-                />
-                <div className="text-center">
-                  <div className="text-2xl mb-1">👨‍🏫</div>
-                  <div className="text-sm font-medium">Professeur</div>
-                </div>
-              </label>
-            </div>
-          </div>
-
-          <div className="flex gap-3 pt-4">
-            <button
-              onClick={onClose}
-              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
-            >
-              Annuler
-            </button>
-            <button
-              onClick={onSave}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-gray-900 font-semibold rounded-xl transition-all"
-            >
-              Enregistrer
-            </button>
-          </div>
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-900 font-semibold rounded-xl transition-colors"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={onSave}
+            className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl transition-all shadow-lg"
+          >
+            Enregistrer
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-/* ---------- MODAL : Modifier une équipe ---------- */
-function ModalEditEquipe({ equipe, data, onClose, onChange, onSave }: any) {
-  React.useEffect(() => {
-    async function loadEquipeDetails() {
-      const { data: equipeData } = await supabase
-        .from('equipe')
-        .select('description')
-        .eq('id', equipe.id)
-        .single();
-
-      if (equipeData) {
-        onChange({
-          nom: equipe.nom,
-          description: equipeData.description || '',
-          couleur: equipe.couleur,
-        });
-      }
-    }
-    loadEquipeDetails();
-  }, [equipe.id]);
-
+function ModalEditEquipe({
+  data,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  data: { nom: string; description: string; couleur: string };
+  onChange: (data: any) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">
           Modifier l'équipe
         </h2>
 
         <div className="space-y-4">
+          <InputField
+            label="Nom de l'équipe"
+            value={data.nom}
+            onChange={(v) => onChange({ ...data, nom: v })}
+          />
           <div>
-            <label className="block text-sm font-medium mb-1">
-              Nom de l'équipe <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              value={data.nom}
-              onChange={(e) => onChange({ ...data, nom: e.target.value })}
-              placeholder="Les Champions"
-              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Description (optionnel)
+            <label className="block text-sm font-medium mb-2 text-gray-700">
+              Description
             </label>
             <textarea
               value={data.description}
               onChange={(e) => onChange({ ...data, description: e.target.value })}
-              placeholder="Une équipe de passionnés..."
+              className="w-full border-2 border-gray-300 rounded-xl p-3 bg-white text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
               rows={3}
-              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
             />
           </div>
-
           <div>
-            <label className="block text-sm font-medium mb-1">
-              Couleur de l'équipe
+            <label className="block text-sm font-medium mb-2 text-gray-700">
+              Couleur
             </label>
-            <div className="flex items-center gap-3">
-              <input
-                type="color"
-                value={data.couleur}
-                onChange={(e) => onChange({ ...data, couleur: e.target.value })}
-                className="w-16 h-12 rounded-lg border-2 border-gray-300 cursor-pointer"
-              />
-              <div className="flex-1 px-4 py-3 rounded-lg border border-gray-300 bg-white">
-                <span className="font-mono text-sm text-gray-900">
-                  {data.couleur}
-                </span>
-              </div>
-            </div>
+            <input
+              type="color"
+              value={data.couleur}
+              onChange={(e) => onChange({ ...data, couleur: e.target.value })}
+              className="w-full h-12 rounded-xl cursor-pointer"
+            />
           </div>
+        </div>
 
-          <div className="flex gap-3 pt-4">
-            <button
-              onClick={onClose}
-              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
-            >
-              Annuler
-            </button>
-            <button
-              onClick={onSave}
-              disabled={!data.nom}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-gray-900 font-semibold rounded-xl disabled:opacity-50 transition-all"
-            >
-              Enregistrer
-            </button>
-          </div>
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-900 font-semibold rounded-xl transition-colors"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={onSave}
+            disabled={!data.nom}
+            className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all shadow-lg"
+          >
+            Enregistrer
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-/* ---------- MODAL : Validation avec sélection de feuille ---------- */
+function InputField({
+  label,
+  value,
+  onChange,
+  type = 'text',
+  placeholder = '',
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium mb-2 text-gray-700">
+        {label}
+      </label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full border-2 border-gray-300 rounded-xl p-3 bg-white text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+      />
+    </div>
+  );
+}
+
+function ModalRejet({
+  onClose,
+  onRejeter,
+}: {
+  onClose: () => void;
+  onRejeter: (commentaire: string) => void;
+}) {
+  const [commentaire, setCommentaire] = useState('');
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">
+          Rejeter la soumission
+        </h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Expliquez pourquoi cette soumission est rejetée :
+        </p>
+        <textarea
+          value={commentaire}
+          onChange={(e) => setCommentaire(e.target.value)}
+          placeholder="Votre commentaire..."
+          className="w-full p-3 border-2 border-gray-300 rounded-lg bg-white text-gray-900 focus:border-red-500 focus:ring-2 focus:ring-red-200 outline-none resize-none"
+          rows={4}
+        />
+        <div className="flex gap-3 mt-4">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium rounded-lg transition-colors"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={() => onRejeter(commentaire)}
+            disabled={!commentaire.trim()}
+            className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors shadow-md"
+          >
+            Rejeter
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalValidationAvecFeuille({ 
   notification, 
   onClose, 
@@ -1242,13 +1040,12 @@ function ModalValidationAvecFeuille({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">
           Valider la soumission
         </h2>
 
         <div className="space-y-4">
-          {/* Sélection de la prochaine feuille */}
           <div>
             <label className="block text-sm font-medium mb-2 text-gray-700">
               Prochaine feuille autorisée <span className="text-red-500">*</span>
@@ -1260,7 +1057,7 @@ function ModalValidationAvecFeuille({
                 required
                 value={feuilleSelectionnee}
                 onChange={(e) => setFeuilleSelectionnee(e.target.value)}
-                className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
+                className="w-full border-2 border-gray-300 rounded-xl p-3 bg-white text-gray-900 focus:border-green-500 focus:ring-2 focus:ring-green-200 transition-all"
               >
                 <option value="">-- Choisir une feuille --</option>
                 {feuilles.map(f => (
@@ -1275,7 +1072,6 @@ function ModalValidationAvecFeuille({
             </p>
           </div>
 
-          {/* Commentaire optionnel */}
           <div>
             <label className="block text-sm font-medium mb-1 text-gray-700">
               Commentaire (optionnel)
@@ -1285,151 +1081,23 @@ function ModalValidationAvecFeuille({
               onChange={(e) => setCommentaire(e.target.value)}
               placeholder="Bon travail ! Continue comme ça."
               rows={3}
-              className="w-full border border-gray-300 rounded-xl p-3 bg-white text-gray-900"
+              className="w-full border-2 border-gray-300 rounded-xl p-3 bg-white text-gray-900 focus:border-green-500 focus:ring-2 focus:ring-green-200 transition-all"
             />
           </div>
 
           <div className="flex gap-3 pt-4">
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
+              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-900 font-semibold rounded-xl transition-colors"
             >
               Annuler
             </button>
             <button
               onClick={() => onValider(feuilleSelectionnee, commentaire)}
               disabled={!feuilleSelectionnee}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-gray-900 font-semibold rounded-xl disabled:opacity-50 transition-all"
+              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all shadow-lg"
             >
               Valider
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------- MODAL : Acceptation avec sélection de feuille de départ ---------- */
-function ModalAcceptationAvecFeuille({
-  notification,
-  onClose,
-  onAccepter,
-}: {
-  notification: Notification;
-  onClose: () => void;
-  onAccepter: (feuilleDepart: string) => void;
-}) {
-  const [feuilles, setFeuilles] = useState<Feuille[]>([]);
-  const [feuilleSelectionnee, setFeuilleSelectionnee] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function loadFeuilles() {
-      const { data } = await supabase
-        .from('feuille_entrainement')
-        .select('id, titre, ordre')
-        .order('ordre');
-      
-      setFeuilles(data || []);
-      setLoading(false);
-    }
-    loadFeuilles();
-  }, []);
-
-  const feuilleChoisie = feuilles.find(f => f.id === feuilleSelectionnee);
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl p-6 max-w-lg w-full">
-        {/* Header avec icône */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-12 h-12 rounded-full bg-green-100/30 flex items-center justify-center">
-            <span className="text-2xl">👤</span>
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">
-              Accepter le nouveau membre
-            </h2>
-            <p className="text-sm text-gray-500">
-              Définir son parcours d'apprentissage
-            </p>
-          </div>
-        </div>
-
-        {/* Explication */}
-        <div className="mb-6 p-4 bg-blue-50/20 rounded-xl border border-blue-200">
-          <div className="flex gap-3">
-            <div className="text-xl">💡</div>
-            <div className="flex-1">
-              <p className="text-sm text-blue-900 font-medium mb-1">
-                Pourquoi choisir une feuille de départ ?
-              </p>
-              <p className="text-xs text-blue-800">
-                Pour un apprentissage structuré, seule la feuille que vous choisissez sera accessible. 
-                Le membre devra la compléter avant de passer à la suivante.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          {/* Sélection de la feuille de départ */}
-          <div>
-            <label className="block text-sm font-medium mb-2 text-gray-700">
-              📋 Sélectionner la première feuille <span className="text-red-500">*</span>
-            </label>
-            {loading ? (
-              <div className="text-sm text-gray-500 p-3">Chargement des feuilles...</div>
-            ) : (
-              <select
-                required
-                value={feuilleSelectionnee}
-                onChange={(e) => setFeuilleSelectionnee(e.target.value)}
-                className="w-full border-2 border-gray-300 rounded-xl p-3 bg-white text-gray-900 font-medium focus:border-green-500 focus:ring-2 focus:ring-green-200 transition-all"
-              >
-                <option value="">-- Choisir une feuille de départ --</option>
-                {feuilles.map(f => (
-                  <option key={f.id} value={f.id}>
-                    Feuille {f.ordre} : {f.titre}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          {/* Aperçu de la sélection */}
-          {feuilleChoisie && (
-            <div className="p-4 bg-green-50/20 rounded-xl border-2 border-green-200">
-              <div className="flex items-start gap-3">
-                <div className="text-2xl">✅</div>
-                <div className="flex-1">
-                  <p className="font-semibold text-green-900 mb-1">
-                    Feuille sélectionnée : {feuilleChoisie.titre}
-                  </p>
-                  <p className="text-sm text-green-800">
-                    Le membre pourra uniquement travailler sur cette feuille. 
-                    Une fois validée, vous choisirez la suivante.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex gap-3 pt-4">
-            <button
-              onClick={onClose}
-              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-100 text-gray-900 font-semibold rounded-xl transition-colors"
-            >
-              Annuler
-            </button>
-            <button
-              onClick={() => onAccepter(feuilleSelectionnee)}
-              disabled={!feuilleSelectionnee}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-gray-900 font-semibold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
-            >
-              {feuilleSelectionnee ? '✓ Accepter et commencer' : 'Choisir une feuille'}
             </button>
           </div>
         </div>
