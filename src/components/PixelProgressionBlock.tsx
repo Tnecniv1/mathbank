@@ -3,10 +3,35 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-type Badge = {
-  niveau_ordre: number;
-  niveau_titre: string;
-  badge: string;
+// Types
+type BadgeNiveau = {
+  code: string;
+  emoji: string;
+  nom: string;
+  titre: string;
+  palier: number;
+  obtenu: boolean;
+};
+
+type BadgeComportement = {
+  code: string;
+  emoji: string;
+  nom: string;
+  description: string;
+  palier: number;
+  obtenu: boolean;
+  heures_total?: number;
+};
+
+type BadgePerformance = {
+  code: string;
+  emoji: string;
+  nom: string;
+  description: string;
+  palier: number;
+  obtenu: boolean;
+  nb_feuilles?: number;
+  amelioration_pct?: number;
 };
 
 type ProgressionNiveau = {
@@ -19,14 +44,16 @@ type ProgressionNiveau = {
   badge: string;
 };
 
-type ProgressionData = {
-  badges_obtenus: Badge[];
+type BadgesData = {
+  badges_niveau: BadgeNiveau[];
+  badges_comportement: BadgeComportement[];
+  badges_performance: BadgePerformance[];
   progression_niveaux: ProgressionNiveau[];
 };
 
 export default function PixelProgressionBlock() {
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<ProgressionData | null>(null);
+  const [data, setData] = useState<BadgesData | null>(null);
   const [niveauSelectionne, setNiveauSelectionne] = useState<number>(1);
 
   useEffect(() => {
@@ -38,7 +65,7 @@ export default function PixelProgressionBlock() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const { data: result, error } = await supabase.rpc('get_progression_utilisateur', {
+      const { data: result, error } = await supabase.rpc('get_badges_utilisateur_complet', {
         p_user_id: session.user.id
       });
 
@@ -70,55 +97,109 @@ export default function PixelProgressionBlock() {
   if (!data) return null;
 
   const niveauActuel = data.progression_niveaux?.find(n => n.niveau_ordre === niveauSelectionne);
-  const allBadges = [
-    { ordre: 1, badge: '🐛 Asticot', titre: 'Élémentaire' },
-    { ordre: 2, badge: '🐝 Abeille', titre: 'Collège' },
-    { ordre: 3, badge: '🐻 Ours', titre: 'Lycée' },
-    { ordre: 4, badge: '🐘 Éléphant', titre: 'Licence' },
-    { ordre: 5, badge: '🦄 Licorne', titre: 'Master' },
-    { ordre: 6, badge: '🐉 Dragon', titre: 'Doctorat' },
-  ];
 
-  const badgesObtenus = new Set(data.badges_obtenus?.map(b => b.niveau_ordre) || []);
+  // Fonction pour afficher un badge avec palier
+  const renderBadge = (
+    badge: BadgeNiveau | BadgeComportement | BadgePerformance,
+    type: 'niveau' | 'comportement' | 'performance'
+  ) => {
+    const obtenu = badge.obtenu;
+    const hasPalier = badge.palier > 1;
+    
+    return (
+      <div
+        key={badge.code}
+        className={`flex flex-col items-center p-4 rounded-xl border-2 transition-all min-w-[140px] ${
+          obtenu
+            ? 'bg-gradient-to-br from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20 border-yellow-400 dark:border-yellow-600 shadow-lg'
+            : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 opacity-50'
+        }`}
+        title={('description' in badge) ? badge.description : ''}
+      >
+        <div className={`text-5xl mb-2 relative ${obtenu ? 'animate-bounce' : 'grayscale'}`}>
+          {badge.emoji}
+          {hasPalier && obtenu && (
+            <span className="absolute -top-1 -right-1 text-lg font-bold bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center">
+              {badge.palier}
+            </span>
+          )}
+        </div>
+        <div className={`text-xs font-semibold text-center ${obtenu ? 'text-yellow-900 dark:text-yellow-100' : 'text-slate-500'}`}>
+          {badge.nom}
+        </div>
+        {type === 'niveau' && 'titre' in badge && (
+          <div className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+            {badge.titre}
+          </div>
+        )}
+        {obtenu && (
+          <div className="mt-2 text-green-600 dark:text-green-400 text-sm font-bold">
+            ✓ Obtenu
+          </div>
+        )}
+        {/* Infos supplémentaires pour badges à palier */}
+        {obtenu && 'heures_total' in badge && badge.heures_total !== undefined && (
+          <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+            {Math.floor(badge.heures_total)}h
+          </div>
+        )}
+        {obtenu && 'nb_feuilles' in badge && badge.nb_feuilles !== undefined && (
+          <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+            {badge.nb_feuilles} feuilles
+          </div>
+        )}
+        {obtenu && 'amelioration_pct' in badge && badge.amelioration_pct !== undefined && (
+          <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+            +{Math.floor(badge.amelioration_pct)}%
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-800 rounded-2xl p-8 border-2 border-slate-200 dark:border-slate-700 shadow-xl">
       
-      {/* 1. Collection de Badges */}
+      {/* 1. Collection de Badges de Niveau */}
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
-          🏆 Collection de Badges
+          🏆 Badges de Niveau
         </h2>
+        <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+          Complétez 100% d'un niveau pour débloquer son badge
+        </p>
         <div className="flex gap-4 flex-wrap">
-          {allBadges.map(({ ordre, badge, titre }) => {
-            const obtenu = badgesObtenus.has(ordre);
-            return (
-              <div
-                key={ordre}
-                className={`flex flex-col items-center p-4 rounded-xl border-2 transition-all ${
-                  obtenu
-                    ? 'bg-gradient-to-br from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20 border-yellow-400 dark:border-yellow-600 shadow-lg'
-                    : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 opacity-50'
-                }`}
-              >
-                <div className={`text-5xl mb-2 ${obtenu ? 'animate-bounce' : 'grayscale'}`}>
-                  {badge.split(' ')[0]}
-                </div>
-                <div className={`text-xs font-semibold ${obtenu ? 'text-yellow-900 dark:text-yellow-100' : 'text-slate-500'}`}>
-                  {titre}
-                </div>
-                {obtenu && (
-                  <div className="mt-1 text-green-600 dark:text-green-400 text-sm font-bold">
-                    ✓ Obtenu
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {data.badges_niveau?.map((badge) => renderBadge(badge, 'niveau'))}
         </div>
       </div>
 
-      {/* 2. Sélection Niveau */}
+      {/* 2. Badges de Comportement */}
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
+          💎 Badges de Comportement
+        </h2>
+        <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+          Récompenses pour votre régularité et discipline
+        </p>
+        <div className="flex gap-4 flex-wrap">
+          {data.badges_comportement?.map((badge) => renderBadge(badge, 'comportement'))}
+        </div>
+      </div>
+
+      {/* 3. Badges de Performance */}
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
+          ⚡ Badges de Performance
+        </h2>
+        <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+          Récompenses pour vos exploits et progrès
+        </p>
+        <div className="flex gap-4 flex-wrap">
+          {data.badges_performance?.map((badge) => renderBadge(badge, 'performance'))}
+        </div>
+      </div>
+
+      {/* 4. Sélection Niveau */}
       <div className="mb-8">
         <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-3">
           📚 Sélectionnez un niveau
@@ -140,7 +221,7 @@ export default function PixelProgressionBlock() {
         </div>
       </div>
 
-      {/* 3. Pixel Géant */}
+      {/* 5. Pixel Géant */}
       {niveauActuel && (
         <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border-2 border-slate-300 dark:border-slate-700">
           <div className="flex items-center justify-between mb-4">
@@ -218,6 +299,18 @@ export default function PixelProgressionBlock() {
           </div>
         </div>
       )}
+
+      {/* Légende pour les badges à paliers */}
+      <div className="mt-8 p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl">
+        <h4 className="text-sm font-bold text-blue-900 dark:text-blue-100 mb-2">
+          💡 Badges à paliers
+        </h4>
+        <div className="text-xs text-blue-700 dark:text-blue-300 space-y-1">
+          <div>⚡ <strong>Concentration électrique</strong> : Palier +1 toutes les 50 heures</div>
+          <div>🎯 <strong>Précision absolue</strong> : Palier +1 toutes les 5 feuilles réussies du 1er coup</div>
+          <div>🚀 <strong>Fusée</strong> : Palier +1 pour chaque +30% d'amélioration</div>
+        </div>
+      </div>
     </div>
   );
 }

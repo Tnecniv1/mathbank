@@ -45,8 +45,10 @@ type TableauData = {
 
 type ScoreEvolution = {
   ordre: number;
-  score: number;
-  titre: string;
+  score_meca: number | null;
+  score_chaos: number | null;
+  titre_meca: string | null;
+  titre_chaos: string | null;
   date: string;
 };
 
@@ -283,6 +285,7 @@ export default function TableauProgression() {
         .select(`
           id,
           titre,
+          type,
           chapitre:chapitre!inner(
             sujet:sujet!inner(
               niveau_id
@@ -314,15 +317,23 @@ export default function TableauProgression() {
       }
 
       const feuillesMap = new Map(
-        feuillesData.map(f => [f.id, f.titre])
+        feuillesData.map(f => [f.id, { titre: f.titre, type: f.type }])
       );
 
-      const scores: ScoreEvolution[] = progressions.map((prog, index) => ({
-        ordre: index + 1,
-        score: prog.score || 0,
-        titre: feuillesMap.get(prog.feuille_id) || 'Feuille inconnue',
-        date: new Date(prog.validee_at).toLocaleDateString('fr-FR')
-      }));
+      // Créer un tableau avec toutes les dates et séparer méca/chaos
+      const scores: ScoreEvolution[] = progressions.map((prog, index) => {
+        const feuille = feuillesMap.get(prog.feuille_id);
+        const isMecanique = feuille?.type === 'mecanique';
+        
+        return {
+          ordre: index + 1,
+          score_meca: isMecanique ? (prog.score || 0) : null,
+          score_chaos: !isMecanique ? (prog.score || 0) : null,
+          titre_meca: isMecanique ? feuille.titre : null,
+          titre_chaos: !isMecanique ? feuille.titre : null,
+          date: new Date(prog.validee_at).toLocaleDateString('fr-FR')
+        };
+      });
 
       setScoresEvolution(scores);
     } catch (err: any) {
@@ -333,47 +344,27 @@ export default function TableauProgression() {
 
   async function loadConcentrationData(niveauId: string, userId: string) {
     try {
-      const { data: feuillesData } = await supabase
-        .from('feuille_entrainement')
-        .select(`
-          id,
-          chapitre:chapitre!inner(
-            sujet:sujet!inner(
-              niveau_id
-            )
-          )
-        `)
-        .eq('chapitre.sujet.niveau_id', niveauId);
-
-      if (!feuillesData || feuillesData.length === 0) {
-        setConcentrationData([]);
-        return;
-      }
-
-      const feuilleIds = feuillesData.map(f => f.id);
-
-      const { data: progressions } = await supabase
-        .from('progression_feuille')
-        .select('id')
-        .eq('user_id', userId)
-        .in('feuille_id', feuilleIds);
-
-      if (!progressions || progressions.length === 0) {
-        setConcentrationData([]);
-        return;
-      }
-
-      const progressionIds = progressions.map(p => p.id);
-
+      // Récupérer directement toutes les sessions de l'utilisateur
       const date21JoursAvant = new Date();
       date21JoursAvant.setDate(date21JoursAvant.getDate() - 21);
 
-      const { data: sessions } = await supabase
-        .from('session_travail')
-        .select('date, duree')
-        .in('progression_id', progressionIds)
-        .gte('date', date21JoursAvant.toISOString().split('T')[0])
-        .order('date', { ascending: true });
+      const { data: sessions, error } = await supabase
+        .from('session_entrainement')
+        .select('date_session, temps_mecanique, temps_chaotique')
+        .eq('user_id', userId)
+        .gte('date_session', date21JoursAvant.toISOString().split('T')[0])
+        .order('date_session', { ascending: true });
+
+      console.log('🔍 Debug concentration - userId:', userId);
+      console.log('🔍 Debug concentration - date21JoursAvant:', date21JoursAvant.toISOString().split('T')[0]);
+      console.log('🔍 Debug concentration - sessions récupérées:', sessions);
+      console.log('🔍 Debug concentration - error:', error);
+
+      if (error) {
+        console.error('Erreur récupération sessions:', error);
+        setConcentrationData([]);
+        return;
+      }
 
       const aujourd_hui = new Date();
       const concentrationMap = new Map<string, { duree: number; nbSessions: number }>();
@@ -386,12 +377,19 @@ export default function TableauProgression() {
       }
 
       sessions?.forEach(session => {
-        const existing = concentrationMap.get(session.date);
+        const existing = concentrationMap.get(session.date_session);
         if (existing) {
-          existing.duree += session.duree;
+          // Additionner les temps mécaniques et chaotiques
+          const dureeTotal = (session.temps_mecanique || 0) + (session.temps_chaotique || 0);
+          console.log('📊 Session:', session.date_session, '- Méca:', session.temps_mecanique, '- Chaos:', session.temps_chaotique, '- Total:', dureeTotal);
+          existing.duree += dureeTotal;
           existing.nbSessions += 1;
+        } else {
+          console.log('⚠️ Session ignorée (hors période):', session.date_session);
         }
       });
+
+      console.log('📈 Concentration Map finale:', Array.from(concentrationMap.entries()));
 
       const concentrationArray: ConcentrationData[] = [];
       for (let i = 20; i >= 0; i--) {
@@ -797,14 +795,29 @@ export default function TableauProgression() {
                         borderRadius: '8px',
                         fontSize: '11px'
                       }}
-                      formatter={(value: any) => [`${value}%`, 'Score']}
+                      formatter={(value: any, name: string) => {
+                        if (value === null) return ['', ''];
+                        return [`${value}%`, name === 'score_meca' ? 'Mécanique' : 'Chaotique'];
+                      }}
+                      labelFormatter={(value: any) => `Feuille #${value}`}
                       />
                     <Line
                       type="monotone"
-                      dataKey="score"
+                      dataKey="score_meca"
+                      stroke="#3b82f6"
+                      strokeWidth={2}
+                      dot={{ fill: '#3b82f6', r: 3 }}
+                      connectNulls
+                      name="Mécanique"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="score_chaos"
                       stroke="#a855f7"
                       strokeWidth={2}
                       dot={{ fill: '#a855f7', r: 3 }}
+                      connectNulls
+                      name="Chaotique"
                     />
                   </LineChart>
                 </ResponsiveContainer>
@@ -813,16 +826,31 @@ export default function TableauProgression() {
               <div className="bg-purple-50/20 px-3 py-1.5 border-t border-purple-200 flex-shrink-0">
                 <div className="flex justify-around text-center text-xs">
                   <div>
-                    <div className="font-bold text-purple-600">
-                      {Math.round(scoresEvolution.reduce((acc, s) => acc + s.score, 0) / scoresEvolution.length)}%
+                    <div className="font-bold text-blue-600">
+                      {Math.round(
+                        scoresEvolution.filter(s => s.score_meca !== null).reduce((acc, s) => acc + (s.score_meca || 0), 0) / 
+                        (scoresEvolution.filter(s => s.score_meca !== null).length || 1)
+                      )}%
                     </div>
-                    <div className="text-purple-700 text-[10px]">Moy.</div>
+                    <div className="text-blue-700 text-[10px]">Moy. Méca</div>
                   </div>
                   <div>
                     <div className="font-bold text-purple-600">
-                      {Math.max(...scoresEvolution.map(s => s.score))}%
+                      {Math.round(
+                        scoresEvolution.filter(s => s.score_chaos !== null).reduce((acc, s) => acc + (s.score_chaos || 0), 0) / 
+                        (scoresEvolution.filter(s => s.score_chaos !== null).length || 1)
+                      )}%
                     </div>
-                    <div className="text-purple-700 text-[10px]">Max</div>
+                    <div className="text-purple-700 text-[10px]">Moy. Chaos</div>
+                  </div>
+                  <div>
+                    <div className="font-bold text-green-600">
+                      {Math.max(
+                        ...scoresEvolution.map(s => s.score_meca || 0),
+                        ...scoresEvolution.map(s => s.score_chaos || 0)
+                      )}%
+                    </div>
+                    <div className="text-green-700 text-[10px]">Max</div>
                   </div>
                 </div>
               </div>
