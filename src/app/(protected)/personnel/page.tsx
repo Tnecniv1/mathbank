@@ -63,7 +63,7 @@ export default function PersonnelPage() {
   const [showRejetModal, setShowRejetModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEditEquipeModal, setShowEditEquipeModal] = useState(false);
-  const [showValidationModal, setShowValidationModal] = useState(false);
+  // ❌ SUPPRIMÉ : showValidationModal (validation directe maintenant)
   const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
   const [equipeSelectionnee, setEquipeSelectionnee] = useState<MonEquipe | null>(null);
   
@@ -347,23 +347,16 @@ export default function PersonnelPage() {
   }
 
   async function handleValiderSoumission(notification: Notification) {
-    setNotificationSelectionnee(notification);
-    setShowValidationModal(true);
-  }
-
-  async function handleValiderAvecFeuille(
-    prochaineFeuilleId: string,
-    commentaire?: string
-  ) {
-    if (!notificationSelectionnee) return;
+    if (!confirm('Êtes-vous sûr de vouloir valider cette soumission ?')) return;
 
     try {
-      const progressionId = notificationSelectionnee.metadata?.progression_id;
+      const progressionId = notification.metadata?.progression_id;
+      if (!progressionId) return;
       
       const { data, error } = await supabase.rpc('valider_soumission', {
         p_progression_id: progressionId,
-        p_commentaire: commentaire || null,
-        p_prochaine_feuille_id: prochaineFeuilleId,
+        p_commentaire: null,
+        p_prochaine_feuille_id: null, // ✅ Pas de feuille suivante obligatoire
       });
 
       if (error) throw error;
@@ -373,16 +366,16 @@ export default function PersonnelPage() {
         return;
       }
 
-      alert('✅ Soumission validée et prochaine feuille autorisée !');
-      marquerCommeLue(notificationSelectionnee.id);
-      setShowValidationModal(false);
-      setNotificationSelectionnee(null);
+      alert('✅ Soumission validée !');
+      marquerCommeLue(notification.id);
       loadData();
     } catch (error: any) {
       console.error(error);
       alert('Erreur lors de la validation');
     }
   }
+
+  // ❌ FONCTION SUPPRIMÉE : handleValiderAvecFeuille (plus nécessaire)
 
   async function handleRejeterSoumission(commentaire: string) {
     if (!notificationSelectionnee) return;
@@ -753,16 +746,7 @@ export default function PersonnelPage() {
         />
       )}
 
-      {showValidationModal && notificationSelectionnee && (
-        <ModalValidationAvecFeuille
-          notification={notificationSelectionnee}
-          onClose={() => {
-            setShowValidationModal(false);
-            setNotificationSelectionnee(null);
-          }}
-          onValider={handleValiderAvecFeuille}
-        />
-      )}
+      {/* ❌ MODAL SUPPRIMÉ : ModalValidationAvecFeuille (validation directe) */}
 
       {showRejetModal && notificationSelectionnee && (
         <ModalRejet
@@ -1011,97 +995,4 @@ function ModalRejet({
   );
 }
 
-function ModalValidationAvecFeuille({ 
-  notification, 
-  onClose, 
-  onValider 
-}: {
-  notification: Notification;
-  onClose: () => void;
-  onValider: (prochaineFeuilleId: string, commentaire?: string) => void;
-}) {
-  const [feuilles, setFeuilles] = useState<Feuille[]>([]);
-  const [feuilleSelectionnee, setFeuilleSelectionnee] = useState<string>('');
-  const [commentaire, setCommentaire] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function loadFeuilles() {
-      const { data } = await supabase
-        .from('feuille_entrainement')
-        .select('id, titre, ordre')
-        .order('ordre');
-      
-      setFeuilles(data || []);
-      setLoading(false);
-    }
-    loadFeuilles();
-  }, []);
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">
-          Valider la soumission
-        </h2>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2 text-gray-700">
-              Prochaine feuille autorisée <span className="text-red-500">*</span>
-            </label>
-            {loading ? (
-              <div className="text-sm text-gray-500">Chargement...</div>
-            ) : (
-              <select
-                required
-                value={feuilleSelectionnee}
-                onChange={(e) => setFeuilleSelectionnee(e.target.value)}
-                className="w-full border-2 border-gray-300 rounded-xl p-3 bg-white text-gray-900 focus:border-green-500 focus:ring-2 focus:ring-green-200 transition-all"
-              >
-                <option value="">-- Choisir une feuille --</option>
-                {feuilles.map(f => (
-                  <option key={f.id} value={f.id}>
-                    {f.ordre}. {f.titre}
-                  </option>
-                ))}
-              </select>
-            )}
-            <p className="text-xs text-gray-500 mt-1">
-              Cette feuille sera la seule accessible par le membre
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1 text-gray-700">
-              Commentaire (optionnel)
-            </label>
-            <textarea
-              value={commentaire}
-              onChange={(e) => setCommentaire(e.target.value)}
-              placeholder="Bon travail ! Continue comme ça."
-              rows={3}
-              className="w-full border-2 border-gray-300 rounded-xl p-3 bg-white text-gray-900 focus:border-green-500 focus:ring-2 focus:ring-green-200 transition-all"
-            />
-          </div>
-
-          <div className="flex gap-3 pt-4">
-            <button
-              onClick={onClose}
-              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-900 font-semibold rounded-xl transition-colors"
-            >
-              Annuler
-            </button>
-            <button
-              onClick={() => onValider(feuilleSelectionnee, commentaire)}
-              disabled={!feuilleSelectionnee}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-xl disabled:opacity-50 transition-all shadow-lg"
-            >
-              Valider
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// ❌ COMPOSANT SUPPRIMÉ : ModalValidationAvecFeuille (validation directe sans sélection de feuille)
