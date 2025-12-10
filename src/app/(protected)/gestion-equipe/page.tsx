@@ -221,7 +221,7 @@ function ModalGestionFeuilles({
         setFeuillesChaotiques(chaotiques);
       }
 
-      // 2. Charger les feuilles actuellement autorisées
+      // 2. Charger les feuilles actuellement autorisées (NON validées uniquement)
       const { data: autorisees } = await supabase
         .from('feuilles_autorisees')
         .select(`
@@ -231,7 +231,25 @@ function ModalGestionFeuilles({
         .eq('membre_id', membre.membre_id);
 
       if (autorisees) {
-        autorisees.forEach((a: any) => {
+        // Pour chaque feuille autorisée, vérifier si elle est validée
+        const autoriseesFiltrees = await Promise.all(
+          autorisees.map(async (a: any) => {
+            // Vérifier le statut de progression pour ce membre
+            const { data: progression } = await supabase
+              .from('progression_feuille')
+              .select('statut')
+              .eq('user_id', membre.user_id)
+              .eq('feuille_id', a.feuille_id)
+              .single();
+
+            // ✅ Garder uniquement si PAS validée
+            const estValidee = progression?.statut === 'validee';
+            return estValidee ? null : a;
+          })
+        );
+
+        // Filtrer les null et créer les détails
+        autoriseesFiltrees.filter(Boolean).forEach((a: any) => {
           const detail = {
             feuille_id: a.feuille_id,
             type: a.feuille_entrainement.type,

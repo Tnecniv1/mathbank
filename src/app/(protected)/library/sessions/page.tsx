@@ -66,13 +66,12 @@ export default function SessionsPage() {
   
   // Formulaire
   const [nextSessionNum, setNextSessionNum] = useState(1);
+  const [typeEntrainement, setTypeEntrainement] = useState<'mecanique' | 'chaotique'>('mecanique');
+  const [feuilleSelectionnee, setFeuilleSelectionnee] = useState('');
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     heure: new Date().toTimeString().slice(0, 5),
-    temps_meca: '',
-    score_meca: '',
-    temps_chaos: '',
-    score_chaos: '',
+    temps: '',
     objectifs: '',
   });
   
@@ -212,18 +211,28 @@ export default function SessionsPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
+    if (!feuilleSelectionnee) {
+      alert('Veuillez sélectionner une feuille');
+      return;
+    }
+
+    if (!formData.temps) {
+      alert('Veuillez saisir le temps');
+      return;
+    }
+
     try {
       setSaving(true);
 
       const { data, error } = await supabase.rpc('create_session_entrainement', {
         p_date_session: formData.date,
         p_heure_session: formData.heure,
-        p_feuille_mecanique_id: feuilleMeca?.feuille_id || null,
-        p_temps_mecanique: formData.temps_meca ? parseInt(formData.temps_meca) : null,
-        p_score_mecanique: formData.score_meca ? parseInt(formData.score_meca) : null,
-        p_feuille_chaotique_id: feuilleChaos?.feuille_id || null,
-        p_temps_chaotique: formData.temps_chaos ? parseInt(formData.temps_chaos) : null,
-        p_score_chaotique: formData.score_chaos ? parseInt(formData.score_chaos) : null,
+        p_feuille_mecanique_id: typeEntrainement === 'mecanique' ? feuilleSelectionnee : null,
+        p_temps_mecanique: typeEntrainement === 'mecanique' ? parseInt(formData.temps) : null,
+        p_score_mecanique: null, // ✅ Score retiré
+        p_feuille_chaotique_id: typeEntrainement === 'chaotique' ? feuilleSelectionnee : null,
+        p_temps_chaotique: typeEntrainement === 'chaotique' ? parseInt(formData.temps) : null,
+        p_score_chaotique: null, // ✅ Score retiré
         p_objectifs: formData.objectifs || null,
       });
 
@@ -236,13 +245,11 @@ export default function SessionsPage() {
       alert('✓ Session enregistrée avec succès !');
       
       // Réinitialiser le formulaire
+      setFeuilleSelectionnee('');
       setFormData({
         date: new Date().toISOString().split('T')[0],
         heure: new Date().toTimeString().slice(0, 5),
-        temps_meca: '',
-        score_meca: '',
-        temps_chaos: '',
-        score_chaos: '',
+        temps: '',
         objectifs: '',
       });
 
@@ -270,27 +277,24 @@ export default function SessionsPage() {
       'N° Session',
       'Date',
       'Heure',
-      'Feuille Mécanique',
-      'Temps Méca (min)',
-      'Score Méca',
-      'Feuille Chaotique',
-      'Temps Chaos (min)',
-      'Score Chaos',
+      'Type',
+      'Feuille',
+      'Temps (min)',
       'Objectifs'
     ];
 
-    const rows = sessions.map(s => [
-      s.numero_session,
-      s.date_session,
-      s.heure_session,
-      s.feuille_mecanique_titre || '-',
-      s.temps_mecanique || '-',
-      s.score_mecanique || '-',
-      s.feuille_chaotique_titre || '-',
-      s.temps_chaotique || '-',
-      s.score_chaotique || '-',
-      s.objectifs || '-'
-    ]);
+    const rows = sessions.map(s => {
+      const isMecanique = s.feuille_mecanique_titre !== null;
+      return [
+        s.numero_session,
+        s.date_session,
+        s.heure_session,
+        isMecanique ? 'Mécanique' : 'Chaotique',
+        isMecanique ? s.feuille_mecanique_titre : s.feuille_chaotique_titre,
+        isMecanique ? s.temps_mecanique : s.temps_chaotique,
+        s.objectifs || '-'
+      ];
+    });
 
     const csv = [
       headers.join(','),
@@ -401,96 +405,115 @@ export default function SessionsPage() {
                 </div>
               </div>
 
-              {/* Feuille Mécanique */}
-              {feuilleMeca && (
-                <div className="p-4 bg-blue-50/20 border-2 border-blue-200 rounded-xl">
-                  <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
-                    🔧 Feuille Mécanique : {feuilleMeca.titre}
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-blue-700 mb-2">
-                        ⏱️ Temps (minutes)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={formData.temps_meca}
-                        onChange={(e) => handleInputChange('temps_meca', e.target.value)}
-                        placeholder="Ex: 45"
-                        className="w-full px-4 py-2 border-2 border-blue-300 rounded-lg bg-white text-gray-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-blue-700 mb-2">
-                        📊 Score (0-100)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={formData.score_meca}
-                        onChange={(e) => handleInputChange('score_meca', e.target.value)}
-                        placeholder="Ex: 85"
-                        className="w-full px-4 py-2 border-2 border-blue-300 rounded-lg bg-white text-gray-900"
-                      />
-                    </div>
-                  </div>
+              {/* Type d'entraînement */}
+              <div className="p-4 bg-gray-50 border-2 border-gray-300 rounded-xl">
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  📚 Type d'entraînement
+                </label>
+                <div className="flex gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="type"
+                      value="mecanique"
+                      checked={typeEntrainement === 'mecanique'}
+                      onChange={() => {
+                        setTypeEntrainement('mecanique');
+                        setFeuilleSelectionnee('');
+                      }}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span className="font-medium text-gray-900">🔧 Feuille Mécanique</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="type"
+                      value="chaotique"
+                      checked={typeEntrainement === 'chaotique'}
+                      onChange={() => {
+                        setTypeEntrainement('chaotique');
+                        setFeuilleSelectionnee('');
+                      }}
+                      className="w-4 h-4 text-purple-600"
+                    />
+                    <span className="font-medium text-gray-900">🎲 Feuille Chaotique</span>
+                  </label>
                 </div>
-              )}
+              </div>
 
-              {/* Feuille Chaotique */}
-              {feuilleChaos && (
-                <div className="p-4 bg-purple-50/20 border-2 border-purple-200 rounded-xl">
-                  <h3 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
-                    🎲 Feuille Chaotique : {feuilleChaos.titre}
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-purple-700 mb-2">
-                        ⏱️ Temps (minutes)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={formData.temps_chaos}
-                        onChange={(e) => handleInputChange('temps_chaos', e.target.value)}
-                        placeholder="Ex: 30"
-                        className="w-full px-4 py-2 border-2 border-purple-300 rounded-lg bg-white text-gray-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-purple-700 mb-2">
-                        📊 Score (0-100)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={formData.score_chaos}
-                        onChange={(e) => handleInputChange('score_chaos', e.target.value)}
-                        placeholder="Ex: 78"
-                        className="w-full px-4 py-2 border-2 border-purple-300 rounded-lg bg-white text-gray-900"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/* Sélection de feuille */}
+              <div className={`p-4 border-2 rounded-xl ${
+                typeEntrainement === 'mecanique' 
+                  ? 'bg-blue-50/20 border-blue-200' 
+                  : 'bg-purple-50/20 border-purple-200'
+              }`}>
+                <label className={`block text-sm font-medium mb-2 ${
+                  typeEntrainement === 'mecanique' ? 'text-blue-700' : 'text-purple-700'
+                }`}>
+                  {typeEntrainement === 'mecanique' ? '🔧' : '🎲'} Feuille sélectionnée
+                </label>
+                <select
+                  value={feuilleSelectionnee}
+                  onChange={(e) => setFeuilleSelectionnee(e.target.value)}
+                  required
+                  className={`w-full px-4 py-2 border-2 rounded-lg bg-white text-gray-900 ${
+                    typeEntrainement === 'mecanique' 
+                      ? 'border-blue-300' 
+                      : 'border-purple-300'
+                  }`}
+                >
+                  <option value="">-- Sélectionner une feuille --</option>
+                  {(typeEntrainement === 'mecanique' && feuilleMeca) && (
+                    <option value={feuilleMeca.feuille_id}>
+                      {feuilleMeca.titre}
+                    </option>
+                  )}
+                  {(typeEntrainement === 'chaotique' && feuilleChaos) && (
+                    <option value={feuilleChaos.feuille_id}>
+                      {feuilleChaos.titre}
+                    </option>
+                  )}
+                </select>
+              </div>
+
+              {/* Temps */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  ⏱️ Temps (minutes)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.temps}
+                  onChange={(e) => handleInputChange('temps', e.target.value)}
+                  placeholder="Ex: 45"
+                  required
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+                />
+              </div>
 
               {/* Objectifs */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  🎯 Objectifs réalisés (format "x.x")
+                  🎯 Objectifs réalisés
                 </label>
                 <input
                   type="text"
                   value={formData.objectifs}
                   onChange={(e) => handleInputChange('objectifs', e.target.value)}
-                  placeholder="Ex: 3.1 (3 exercices méca + 1 chaos)"
+                  placeholder={
+                    typeEntrainement === 'mecanique' 
+                      ? "Ex: 3 (3 exercices mécaniques)" 
+                      : "Ex: 1 (1 exercice chaotique)"
+                  }
                   className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Format : [nombre d'exercices mécaniques].[nombre d'exercices chaotiques]
+                  {typeEntrainement === 'mecanique' 
+                    ? "Nombre d'exercices mécaniques réalisés"
+                    : "Nombre d'exercices chaotiques réalisés"
+                  }
                 </p>
               </div>
 
@@ -544,52 +567,60 @@ export default function SessionsPage() {
                     <th className="px-3 py-3 text-left font-bold text-gray-700">N°</th>
                     <th className="px-3 py-3 text-left font-bold text-gray-700">Date</th>
                     <th className="px-3 py-3 text-left font-bold text-gray-700">Heure</th>
-                    <th className="px-3 py-3 text-left font-bold text-gray-700">Feuille Mécanique</th>
-                    <th className="px-3 py-3 text-left font-bold text-gray-700">Feuille Chaotique</th>
+                    <th className="px-3 py-3 text-left font-bold text-gray-700">Type & Feuille</th>
+                    <th className="px-3 py-3 text-left font-bold text-gray-700">Temps</th>
                     <th className="px-3 py-3 text-left font-bold text-gray-700">Obj.</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sessions.map((session) => (
-                    <tr key={session.id} className="border-b border-gray-300 hover:bg-gray-50/50">
-                      <td className="px-3 py-3 font-bold text-teal-600">
-                        #{session.numero_session}
-                      </td>
-                      <td className="px-3 py-3 text-gray-900">
-                        {new Date(session.date_session).toLocaleDateString('fr-FR')}
-                      </td>
-                      <td className="px-3 py-3 text-gray-600">
-                        {session.heure_session}
-                      </td>
-                      <td className="px-3 py-3">
-                        {session.feuille_mecanique_titre ? (
-                          <div className="text-gray-900">
-                            <div className="font-medium">{session.feuille_mecanique_titre}</div>
-                            <div className="text-xs text-gray-500">
-                              {session.temps_mecanique}min • {session.score_mecanique}/100
+                  {sessions.map((session) => {
+                    // Déterminer le type et les données
+                    const isMecanique = session.feuille_mecanique_titre !== null;
+                    const titre = isMecanique ? session.feuille_mecanique_titre : session.feuille_chaotique_titre;
+                    const temps = isMecanique ? session.temps_mecanique : session.temps_chaotique;
+                    
+                    return (
+                      <tr key={session.id} className="border-b border-gray-300 hover:bg-gray-50/50">
+                        <td className="px-3 py-3 font-bold text-teal-600">
+                          #{session.numero_session}
+                        </td>
+                        <td className="px-3 py-3 text-gray-900">
+                          {new Date(session.date_session).toLocaleDateString('fr-FR')}
+                        </td>
+                        <td className="px-3 py-3 text-gray-600">
+                          {session.heure_session}
+                        </td>
+                        <td className="px-3 py-3">
+                          {titre ? (
+                            <div className="text-gray-900">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={`px-2 py-0.5 text-xs font-bold rounded ${
+                                  isMecanique 
+                                    ? 'bg-blue-100 text-blue-800' 
+                                    : 'bg-purple-100 text-purple-800'
+                                }`}>
+                                  {isMecanique ? '🔧 Mécanique' : '🎲 Chaotique'}
+                                </span>
+                              </div>
+                              <div className="font-medium">{titre}</div>
                             </div>
-                          </div>
-                        ) : (
-                          <span className="text-gray-500">-</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-3">
-                        {session.feuille_chaotique_titre ? (
-                          <div className="text-gray-900">
-                            <div className="font-medium">{session.feuille_chaotique_titre}</div>
-                            <div className="text-xs text-gray-500">
-                              {session.temps_chaotique}min • {session.score_chaotique}/100
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-gray-500">-</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-gray-900 font-medium">
-                        {session.objectifs || '-'}
-                      </td>
-                    </tr>
-                  ))}
+                          ) : (
+                            <span className="text-gray-500">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3">
+                          {temps ? (
+                            <span className="text-gray-900 font-medium">{temps} min</span>
+                          ) : (
+                            <span className="text-gray-500">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-gray-900 font-medium">
+                          {session.objectifs || '-'}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
