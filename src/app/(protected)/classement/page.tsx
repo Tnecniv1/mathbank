@@ -284,46 +284,46 @@ function ClassementEquipes({
         return (
           <div
             key={equipe.equipe_id}
-            className={`bg-white rounded-xl border-2 p-6 transition-all ${
+            className={`bg-white rounded-xl border-2 p-4 sm:p-6 transition-all ${
               estMonEquipe
                 ? 'border-blue-400 shadow-lg'
                 : 'border-gray-300'
             }`}
           >
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               {/* Rang et nom */}
-              <div className="flex items-center gap-4 flex-1">
-                <div className="text-3xl font-bold w-12 text-center">
+              <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                <div className="text-2xl sm:text-3xl font-bold w-10 sm:w-12 text-center flex-shrink-0">
                   {getMedaille(rang)}
                 </div>
                 
                 <div
-                  className="w-3 h-12 rounded-full flex-shrink-0"
+                  className="w-2 sm:w-3 h-10 sm:h-12 rounded-full flex-shrink-0"
                   style={{ backgroundColor: equipe.couleur }}
                 />
                 
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xl font-bold text-gray-900">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-lg sm:text-xl font-bold text-gray-900">
                       {equipe.equipe_nom}
                     </h3>
                     {estMonEquipe && (
-                      <span className="text-xs font-medium px-2 py-1 bg-blue-100/50 text-blue-700 rounded-full">
+                      <span className="text-xs font-medium px-2 py-1 bg-blue-100/50 text-blue-700 rounded-full whitespace-nowrap">
                         Mon équipe
                       </span>
                     )}
                   </div>
                   {equipe.description && (
-                    <p className="text-sm text-gray-600 mt-1">
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1 line-clamp-2">
                       {equipe.description}
                     </p>
                   )}
-                  <div className="flex items-center gap-3 mt-1">
-                    <p className="text-sm text-gray-500">
+                  <div className="flex items-center gap-2 sm:gap-3 mt-1 flex-wrap text-xs sm:text-sm">
+                    <p className="text-gray-500">
                       {equipe.nb_membres} membre{equipe.nb_membres > 1 ? 's' : ''}
                     </p>
                     <span className="text-slate-300">•</span>
-                    <p className="text-sm text-gray-600">
+                    <p className="text-gray-600">
                       👑 Chef : <span className="font-medium">{equipe.chef_nom || 'Inconnu'}</span>
                     </p>
                   </div>
@@ -331,7 +331,7 @@ function ClassementEquipes({
               </div>
 
               {/* Stats et action */}
-              <div className="flex items-center gap-6">
+              <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-6 flex-shrink-0">
                 <div className="text-center">
                   <div className="text-3xl font-bold text-blue-600">
                     {equipe.score_total}
