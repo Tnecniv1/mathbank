@@ -101,6 +101,7 @@ const IconLock = () => (
 
 /* ---------- Data fetch ---------- */
 async function getParcoursComplet(niveauId: string) {
+  console.log('🔄 Chargement du parcours niveau:', niveauId);
   try {
     const { data, error } = await supabase
       .from('niveau')
@@ -112,7 +113,7 @@ async function getParcoursComplet(niveauId: string) {
           chapitres:chapitre (
             id, ordre, titre, description,
             feuilles:feuille_entrainement (
-              id, ordre, ordre_dans_niveau, titre, description, pdf_url
+              id, ordre, ordre_dans_niveau, titre, description, pdf_url, created_at
             )
           )
         )
@@ -123,19 +124,41 @@ async function getParcoursComplet(niveauId: string) {
 
     if (error) throw error;
 
-    // Tri des éléments par ordre
+    // Tri des éléments
     if (data?.sujets) {
+      // Trier sujets et chapitres par ordre
       data.sujets.sort((a: any, b: any) => a.ordre - b.ordre);
+      
       data.sujets.forEach((s: any) => {
         if (s.chapitres) {
           s.chapitres.sort((a: any, b: any) => a.ordre - b.ordre);
+          
           s.chapitres.forEach((c: any) => {
             if (c.feuilles) {
+              // Trier les feuilles par ordre (maintenant que les ordres sont corrects)
               c.feuilles.sort((a: any, b: any) => a.ordre - b.ordre);
             }
           });
         }
       });
+      
+      // Recalculer ordre_dans_niveau en respectant l'ordre des feuilles
+      let compteurGlobal = 1;
+      for (const sujet of data.sujets) {
+        for (const chapitre of sujet.chapitres || []) {
+          for (const feuille of chapitre.feuilles || []) {
+            const ancienOrdre = feuille.ordre_dans_niveau;
+            feuille.ordre_dans_niveau = compteurGlobal;
+            
+            // Log pour débugger
+            if (process.env.NODE_ENV === 'development') {
+              console.log(`📝 ${feuille.titre} : ordre=${feuille.ordre}, ordre_dans_niveau=${ancienOrdre} → ${compteurGlobal}`);
+            }
+            
+            compteurGlobal++;
+          }
+        }
+      }
     }
 
     return { data: data as Niveau, error: null };

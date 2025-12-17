@@ -296,7 +296,7 @@ function ItemForm({
 }) {
   const [titre, setTitre] = useState(initial?.titre || '');
   const [description, setDescription] = useState(initial?.description || '');
-  const [ordre, setOrdre] = useState(initial?.ordre?.toString() || '1');
+  const [ordre, setOrdre] = useState(initial?.ordre?.toString() || '');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
@@ -310,7 +310,7 @@ function ItemForm({
       const data: any = {
         titre,
         description: description || null,
-        ordre: parseInt(ordre),
+        ordre: ordre && parseInt(ordre) > 0 ? parseInt(ordre) : null,
       };
       
       if (type === 'sujet' && parentId) data.niveau_id = parentId;
@@ -355,7 +355,7 @@ function ItemForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <Input label="Titre" value={titre} onChange={setTitre} placeholder="Ex: Addition" required />
-      <Input label="Ordre" value={ordre} onChange={setOrdre} type="number" required />
+      <Input label="Ordre (optionnel)" value={ordre} onChange={setOrdre} type="number" placeholder="Laissez vide pour auto" />
       {type === 'feuille' && (
         <div>
           <label className="block text-sm font-medium mb-1.5 text-slate-700 dark:text-slate-300">
@@ -1097,6 +1097,7 @@ export default function AdminPage() {
         niveau.sujets?.forEach((sujet: any) => {
           sujet.chapitres?.sort((a: any, b: any) => a.ordre - b.ordre);
           sujet.chapitres?.forEach((chapitre: any) => {
+            // Trier par ordre (maintenant que les ordres sont corrects)
             chapitre.feuilles?.sort((a: any, b: any) => a.ordre - b.ordre);
           });
         });
@@ -1195,10 +1196,39 @@ export default function AdminPage() {
     const item1 = items[index];
     const item2 = items[direction === 'up' ? index - 1 : index + 1];
 
+    // Swap les ordres
     await supabase.from(table).update({ ordre: item2.ordre }).eq('id', item1.id);
     await supabase.from(table).update({ ordre: item1.ordre }).eq('id', item2.id);
 
+    // Si c'est une feuille, recalculer tous les ordres du chapitre
+    if (table === 'feuille_entrainement' && item1.chapitre_id) {
+      await recalculerOrdresChapitre(item1.chapitre_id);
+    }
+
     await loadData();
+  }
+
+  // Fonction pour recalculer tous les ordres d'un chapitre
+  async function recalculerOrdresChapitre(chapitreId: string) {
+    // Récupérer toutes les feuilles du chapitre triées par ordre actuel
+    const { data: feuilles } = await supabase
+      .from('feuille_entrainement')
+      .select('id, ordre')
+      .eq('chapitre_id', chapitreId)
+      .order('ordre', { ascending: true });
+
+    if (!feuilles) return;
+
+    // Recalculer les ordres : 1, 2, 3, 4...
+    for (let i = 0; i < feuilles.length; i++) {
+      const nouvelOrdre = i + 1;
+      if (feuilles[i].ordre !== nouvelOrdre) {
+        await supabase
+          .from('feuille_entrainement')
+          .update({ ordre: nouvelOrdre })
+          .eq('id', feuilles[i].id);
+      }
+    }
   }
 
   async function createItem(table: string, data: any) {
@@ -1220,6 +1250,8 @@ export default function AdminPage() {
   async function deleteItem(table: string, id: string, confirmMsg: string) {
     if (!confirm(confirmMsg)) return;
     
+    let chapitreId: string | null = null;
+    
     // Si c'est une feuille, supprimer d'abord le PDF du storage
     if (table === 'feuille_entrainement') {
       const feuille = niveaux
@@ -1228,13 +1260,25 @@ export default function AdminPage() {
         .flatMap(c => c.feuilles || [])
         .find(f => f.id === id);
       
-      if (feuille?.pdf_url) {
-        await deletePdfFromStorage(feuille.pdf_url);
+      if (feuille) {
+        chapitreId = feuille.chapitre_id; // Sauvegarder le chapitre_id
+        
+        if (feuille.pdf_url) {
+          await deletePdfFromStorage(feuille.pdf_url);
+        }
       }
     }
     
     const { error } = await supabase.from(table).delete().eq('id', id);
-    if (!error) await loadData();
+    
+    if (!error) {
+      // Si c'est une feuille, recalculer les ordres du chapitre
+      if (table === 'feuille_entrainement' && chapitreId) {
+        await recalculerOrdresChapitre(chapitreId);
+      }
+      
+      await loadData();
+    }
   }
 
   function openModal(type: 'niveau' | 'sujet' | 'chapitre' | 'feuille', item?: any, parent?: string) {
