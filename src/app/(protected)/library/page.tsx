@@ -12,6 +12,7 @@ type FeuilleEntrainement = {
   titre: string;
   description: string | null;
   pdf_url: string;
+  difficulte: number | null;
 };
 
 type Chapitre = {
@@ -113,7 +114,7 @@ async function getParcoursComplet(niveauId: string) {
           chapitres:chapitre (
             id, ordre, titre, description,
             feuilles:feuille_entrainement (
-              id, ordre, ordre_dans_niveau, titre, description, pdf_url, created_at
+              id, ordre, ordre_dans_niveau, titre, description, pdf_url, created_at, difficulte
             )
           )
         )
@@ -302,7 +303,25 @@ function FeuilleCard({
 
         {/* Contenu */}
         <div className="flex-1 text-left min-w-0">
-          <div className="font-medium text-gray-900 truncate">{feuille.titre}</div>
+          <div className="flex items-center gap-2">
+            <div className="font-medium text-gray-900 truncate">{feuille.titre}</div>
+            {feuille.difficulte && (
+              <div className="flex items-center gap-1 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-md flex-shrink-0">
+                <div className="grid grid-cols-2 gap-0.5">
+                  {[...Array(6)].map((_, i) => (
+                    <div 
+                      key={i} 
+                      className={`w-2 h-2 rounded-full transition-colors ${
+                        i < feuille.difficulte 
+                          ? 'bg-slate-700 dark:bg-slate-300' 
+                          : 'bg-slate-300 dark:bg-slate-700'
+                      }`} 
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
           {feuille.description && (
             <div className="text-sm text-gray-600 mt-0.5 line-clamp-1">{feuille.description}</div>
           )}

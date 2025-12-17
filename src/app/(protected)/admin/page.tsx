@@ -297,6 +297,7 @@ function ItemForm({
   const [titre, setTitre] = useState(initial?.titre || '');
   const [description, setDescription] = useState(initial?.description || '');
   const [ordre, setOrdre] = useState(initial?.ordre?.toString() || '');
+  const [difficulte, setDifficulte] = useState(initial?.difficulte?.toString() || '');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
@@ -312,6 +313,11 @@ function ItemForm({
         description: description || null,
         ordre: ordre && parseInt(ordre) > 0 ? parseInt(ordre) : null,
       };
+      
+      // Ajouter la difficulté si c'est une feuille
+      if (type === 'feuille' && difficulte) {
+        data.difficulte = parseInt(difficulte);
+      }
       
       if (type === 'sujet' && parentId) data.niveau_id = parentId;
       if (type === 'chapitre' && parentId) data.sujet_id = parentId;
@@ -356,6 +362,30 @@ function ItemForm({
     <form onSubmit={handleSubmit} className="space-y-4">
       <Input label="Titre" value={titre} onChange={setTitre} placeholder="Ex: Addition" required />
       <Input label="Ordre (optionnel)" value={ordre} onChange={setOrdre} type="number" placeholder="Laissez vide pour auto" />
+      
+      {type === 'feuille' && (
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1.5 text-slate-700 dark:text-slate-300">
+              Difficulté (1-6)
+            </label>
+            <select
+              value={difficulte}
+              onChange={(e) => setDifficulte(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-teal-500 dark:bg-slate-800 dark:text-slate-100"
+            >
+              <option value="">Non définie</option>
+              <option value="1">⚪ Niveau 1 - Très facile</option>
+              <option value="2">⚪⚪ Niveau 2 - Facile</option>
+              <option value="3">⚪⚪⚪ Niveau 3 - Moyen</option>
+              <option value="4">⚪⚪⚪⚪ Niveau 4 - Difficile</option>
+              <option value="5">⚪⚪⚪⚪⚪ Niveau 5 - Très difficile</option>
+              <option value="6">⚪⚪⚪⚪⚪⚪ Niveau 6 - Extrême</option>
+            </select>
+          </div>
+        </div>
+      )}
+      
       {type === 'feuille' && (
         <div>
           <label className="block text-sm font-medium mb-1.5 text-slate-700 dark:text-slate-300">
@@ -666,6 +696,29 @@ function FeuilleItem({
     }
   };
 
+  const handleDifficulteChange = async (newDifficulte: number | null) => {
+    try {
+      setUpdatingType(true);
+      
+      const { error } = await supabase
+        .from('feuille_entrainement')
+        .update({ difficulte: newDifficulte })
+        .eq('id', feuille.id);
+
+      if (error) throw error;
+
+      // Mettre à jour localement
+      feuille.difficulte = newDifficulte;
+      
+      console.log(`✅ Difficulté mise à jour: ${newDifficulte}`);
+    } catch (error) {
+      console.error('Erreur mise à jour difficulté:', error);
+      alert('Erreur lors de la mise à jour de la difficulté');
+    } finally {
+      setUpdatingType(false);
+    }
+  };
+
   return (
     <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
       <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -686,8 +739,27 @@ function FeuilleItem({
           </a>
         </div>
 
-        {/* Sélecteur de type */}
+        {/* Sélecteur de difficulté */}
         <div className="flex items-center gap-2 ml-4">
+          <select
+            value={feuille.difficulte || ''}
+            onChange={(e) => handleDifficulteChange(parseInt(e.target.value) || null)}
+            disabled={updatingType}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 cursor-pointer hover:border-slate-400 transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <option value="">Difficulté ?</option>
+            <option value="1">⚪ Niveau 1</option>
+            <option value="2">⚪⚪ Niveau 2</option>
+            <option value="3">⚪⚪⚪ Niveau 3</option>
+            <option value="4">⚪⚪⚪⚪ Niveau 4</option>
+            <option value="5">⚪⚪⚪⚪⚪ Niveau 5</option>
+            <option value="6">⚪⚪⚪⚪⚪⚪ Niveau 6</option>
+          </select>
+        </div>
+
+        {/* Sélecteur de type */}
+        <div className="flex items-center gap-2">
           <select
             value={feuille.type || 'chaotique'}
             onChange={(e) => handleTypeChange(e.target.value as 'mecanique' | 'chaotique')}
