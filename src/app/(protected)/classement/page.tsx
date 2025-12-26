@@ -57,13 +57,14 @@ export default function ClassementPage() {
       setMonUserId(session.user.id);
 
       // Récupérer mon équipe
-      const { data: monMembre } = await supabase
+      const { data: monMembre, error: membreError } = await supabase
         .from('membre_equipe')
         .select('equipe_id')
         .eq('user_id', session.user.id)
-        .single();
+        .maybeSingle(); // maybeSingle() au lieu de single() pour gérer l'absence
 
-      if (monMembre) {
+      // Ignorer l'erreur si l'utilisateur n'est dans aucune équipe
+      if (monMembre && !membreError) {
         setMonEquipeId(monMembre.equipe_id);
       }
 

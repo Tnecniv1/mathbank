@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 import ModalObserverFeuilles from '@/components/ModalObserverFeuilles';
+import ModalGererFeuillesScope from '@/components/ModalGererFeuillesScope';
+
 /* ---------- Types ---------- */
 type Membre = {
   membre_id: string;
@@ -16,28 +18,6 @@ type Membre = {
   nb_soumissions_attente: number;
   score_moyen: number | null;
   joined_at: string;
-};
-
-type Feuille = {
-  id: string;
-  ordre: number;
-  titre: string;
-  chapitre_id: string;
-  chapitre_titre: string;
-  sujet_id: string;
-  sujet_titre: string;
-  niveau_id: string;
-  niveau_titre: string;
-};
-
-type FeuilleAutorisee = {
-  feuille_id: string;
-};
-
-type Progression = {
-  feuille_id: string;
-  statut: string;
-  score: number | null;
 };
 
 type Equipe = {
@@ -111,416 +91,6 @@ const Loader = () => (
   </svg>
 );
 
-/* ---------- Modal Gestion Feuilles ---------- */
-/* ---------- Modal Gestion Feuilles ---------- */
-function ModalGestionFeuilles({
-  membre,
-  onClose,
-  onSave,
-}: {
-  membre: Membre;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  // États
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  
-  // Feuilles disponibles par type
-  const [feuillesMecaniques, setFeuillesMecaniques] = useState<any[]>([]);
-  const [feuillesChaotiques, setFeuillesChaotiques] = useState<any[]>([]);
-  
-  // Feuilles actuellement autorisées
-  const [feuilleMecaAutorisee, setFeuilleMecaAutorisee] = useState<any>(null);
-  const [feuilleChaosAutorisee, setFeuilleChaosAutorisee] = useState<any>(null);
-  
-  // Sélections pour ajout
-  const [selectedMeca, setSelectedMeca] = useState<string>('');
-  const [selectedChaos, setSelectedChaos] = useState<string>('');
-
-  useEffect(() => {
-    if (membre) {
-      loadData();
-    }
-  }, [membre]);
-
-  async function loadData() {
-    try {
-      setLoading(true);
-
-      // 1. Charger toutes les feuilles avec leur type ET ordre de niveau
-      const { data: toutesLesFeuilles } = await supabase
-        .from('feuille_entrainement')
-        .select(`
-          id,
-          ordre,
-          titre,
-          type,
-          chapitre!inner(
-            sujet!inner(
-              niveau!inner(titre, ordre)
-            )
-          )
-        `)
-        .order('ordre');
-
-      // 1.bis Charger les feuilles VALIDÉES (est_termine = true) par ce membre
-      const { data: feuillesValidees } = await supabase
-        .from('progression_feuille')
-        .select('feuille_id')
-        .eq('user_id', membre.user_id)
-        .eq('est_termine', true);
-
-      const idsValidees = new Set(feuillesValidees?.map(p => p.feuille_id) || []);
-
-      // Après la ligne 165 (après .order('ordre'))
-      console.log('🔍 TOUTES les feuilles chaotiques lycée:', 
-        toutesLesFeuilles
-          ?.filter((f: any) => f.type === 'chaotique' && f.chapitre?.sujet?.niveau?.titre === 'lycée')
-          .map((f: any) => ({ 
-            id: f.id, 
-            titre: f.titre,
-            est_validee: idsValidees.has(f.id)
-          }))
-      );
-
-      if (toutesLesFeuilles) {
-        const mecaniques: any[] = [];
-        const chaotiques: any[] = [];
-
-        toutesLesFeuilles.forEach((f: any) => {
-          // FILTRER : Ne pas afficher les feuilles déjà validées
-          if (idsValidees.has(f.id)) {
-            return; // Skip cette feuille
-          }
-
-          const feuille = {
-            id: f.id,
-            ordre: f.ordre,
-            titre: f.titre,
-            type: f.type,
-            niveau_titre: f.chapitre?.sujet?.niveau?.titre || 'N/A',
-            niveau_ordre: f.chapitre?.sujet?.niveau?.ordre || 999,
-          };
-
-          if (f.type === 'mecanique') {
-            mecaniques.push(feuille);
-          } else if (f.type === 'chaotique') {
-            chaotiques.push(feuille);
-          }
-        });
-
-        // Trier par niveau puis par ordre
-        mecaniques.sort((a, b) => a.niveau_ordre - b.niveau_ordre || a.ordre - b.ordre);
-        chaotiques.sort((a, b) => a.niveau_ordre - b.niveau_ordre || a.ordre - b.ordre);
-
-        setFeuillesMecaniques(mecaniques);
-        console.log('🔍 Feuilles mécaniques finales:', mecaniques.length, mecaniques.map(f => f.titre));
-        console.log('🔍 Feuilles chaotiques finales:', chaotiques.length, chaotiques.map(f => f.titre));
-
-        setFeuillesChaotiques(chaotiques);
-      }
-
-      // 2. Charger les feuilles actuellement autorisées (NON validées uniquement)
-      const { data: autorisees } = await supabase
-        .from('feuilles_autorisees')
-        .select(`
-          feuille_id,
-          feuille_entrainement!inner(titre, type)
-        `)
-        .eq('membre_id', membre.membre_id);
-
-      if (autorisees) {
-        // Pour chaque feuille autorisée, vérifier si elle est validée
-        const autoriseesFiltrees = await Promise.all(
-          autorisees.map(async (a: any) => {
-            // Vérifier le statut de progression pour ce membre
-            const { data: progression } = await supabase
-              .from('progression_feuille')
-              .select('statut')
-              .eq('user_id', membre.user_id)
-              .eq('feuille_id', a.feuille_id)
-              .single();
-
-            // ✅ Garder uniquement si PAS validée
-            const estValidee = progression?.statut === 'validee';
-            return estValidee ? null : a;
-          })
-        );
-
-        // Filtrer les null et créer les détails
-        autoriseesFiltrees.filter(Boolean).forEach((a: any) => {
-          const detail = {
-            feuille_id: a.feuille_id,
-            type: a.feuille_entrainement.type,
-            titre: a.feuille_entrainement.titre,
-          };
-
-          if (detail.type === 'mecanique') {
-            setFeuilleMecaAutorisee(detail);
-          } else if (detail.type === 'chaotique') {
-            setFeuilleChaosAutorisee(detail);
-          }
-        });
-      }
-
-      setLoading(false);
-    } catch (error) {
-      console.error('Erreur chargement:', error);
-      alert('Erreur lors du chargement des données');
-      setLoading(false);
-    }
-  }
-
-  async function handleAutoriser(type: 'mecanique' | 'chaotique') {
-    const feuilleId = type === 'mecanique' ? selectedMeca : selectedChaos;
-    
-    if (!feuilleId) {
-      alert('Veuillez sélectionner une feuille');
-      return;
-    }
-
-    try {
-      setSaving(true);
-
-      const { data, error } = await supabase.rpc('gerer_feuilles_membre', {
-        p_membre_id: membre.membre_id,
-        p_feuilles_a_ajouter: [feuilleId],
-        p_feuilles_a_retirer: [],
-      });
-
-      if (error) throw error;
-
-      if (data && !data.success) {
-        alert(data.error || 'Erreur lors de l\'autorisation');
-        setSaving(false);
-        return;
-      }
-
-      alert('✓ Feuille autorisée avec succès');
-      await loadData();
-      
-      if (type === 'mecanique') {
-        setSelectedMeca('');
-      } else {
-        setSelectedChaos('');
-      }
-      
-      onSave();
-    } catch (error: any) {
-      console.error('Erreur autorisation:', error);
-      alert('Erreur : ' + (error.message || 'Impossible d\'autoriser la feuille'));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleRetirer(type: 'mecanique' | 'chaotique') {
-    const feuille = type === 'mecanique' ? feuilleMecaAutorisee : feuilleChaosAutorisee;
-    
-    if (!feuille) return;
-    if (!confirm(`Retirer "${feuille.titre}" ?`)) return;
-
-    try {
-      setSaving(true);
-
-      const { data, error } = await supabase.rpc('gerer_feuilles_membre', {
-        p_membre_id: membre.membre_id,
-        p_feuilles_a_ajouter: [],
-        p_feuilles_a_retirer: [feuille.feuille_id],
-      });
-
-      if (error) throw error;
-
-      alert('✓ Feuille retirée');
-      await loadData();
-      onSave();
-    } catch (error: any) {
-      console.error('Erreur retrait:', error);
-      alert('Erreur : ' + (error.message || 'Impossible de retirer la feuille'));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  // Fonction pour grouper les feuilles par niveau
-  function grouperParNiveau(feuilles: any[]) {
-    const niveauxMap = new Map<string, any[]>();
-    
-    feuilles.forEach(f => {
-      if (!niveauxMap.has(f.niveau_titre)) {
-        niveauxMap.set(f.niveau_titre, []);
-      }
-      niveauxMap.get(f.niveau_titre)!.push(f);
-    });
-
-    return Array.from(niveauxMap.entries());
-  }
-
-  if (loading) {
-    return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-2xl p-8">
-          <Loader />
-        </div>
-      </div>
-    );
-  }
-
-  const niveauxMecaniques = grouperParNiveau(feuillesMecaniques);
-  const niveauxChaotiques = grouperParNiveau(feuillesChaotiques);
-
-  console.log('Feuilles chaotiques:', JSON.stringify(feuillesChaotiques.map(f => ({
-    titre: f.titre, 
-    niveau: f.niveau_titre,
-    id: f.id
-  })), null, 2));
-
-  console.log('Niveaux chaotiques groupés:', JSON.stringify(niveauxChaotiques.map(([niveau, feuilles]) => 
-    ({
-      niveau: niveau,
-      nb_feuilles: feuilles.length
-    })
-  ), null, 2));
-
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-        
-        <div className="p-6 border-b-2 border-gray-300">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold text-gray-900">
-              Gérer les feuilles - {membre.membre_nom}
-            </h2>
-            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center transition-colors">
-              <IconX />
-            </button>
-          </div>
-          <p className="text-sm text-gray-600 mt-2">
-            Maximum : 1 feuille mécanique + 1 feuille chaotique
-          </p>
-        </div>
-
-        <div className="p-6 space-y-6">
-          
-          {/* Section Mécanique */}
-          <div className="border-2 border-blue-200 rounded-xl p-4 bg-gradient-to-br from-blue-50 to-blue-100/50/20/10">
-            <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
-              🔧 Feuille Mécanique <span className="text-sm font-normal">(1 maximum)</span>
-            </h3>
-
-            {feuilleMecaAutorisee ? (
-              <div className="mb-4 p-3 bg-green-100/30 border-2 border-green-300 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium text-green-900">✅ Actuellement autorisée :</div>
-                    <div className="font-bold text-green-800 mt-1">{feuilleMecaAutorisee.titre}</div>
-                  </div>
-                  <button onClick={() => handleRetirer('mecanique')} disabled={saving} className="px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:bg-slate-300 text-gray-900 text-sm font-medium rounded-lg transition-colors">
-                    Retirer
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="mb-4 p-3 bg-gray-100 border-2 border-gray-300 rounded-lg">
-                <div className="text-sm text-gray-600">Aucune feuille mécanique autorisée</div>
-              </div>
-            )}
-
-            {!feuilleMecaAutorisee && (
-              <div>
-                <label className="block text-sm font-medium text-blue-900 mb-2">Choisir une feuille à autoriser :</label>
-                <div className="flex gap-2">
-                  <select 
-                    value={selectedMeca} 
-                    onChange={(e) => setSelectedMeca(e.target.value)} 
-                    disabled={saving} 
-                    className="flex-1 px-3 py-2 border-2 border-blue-300 rounded-lg bg-white text-gray-900 disabled:opacity-50"
-                  >
-                    <option value="">-- Sélectionner une feuille --</option>
-                    {niveauxMecaniques.map(([niveau, feuilles]) => (
-                      <optgroup key={niveau} label={niveau}>
-                        {feuilles.map((f: any) => (
-                          <option key={f.id} value={f.id}>
-                            #{f.ordre} - {f.titre}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                  <button onClick={() => handleAutoriser('mecanique')} disabled={!selectedMeca || saving} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-gray-900 font-medium rounded-lg transition-colors">
-                    {saving ? 'Chargement...' : 'Autoriser'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Section Chaotique */}
-          <div className="border-2 border-purple-200 rounded-xl p-4 bg-gradient-to-br from-purple-50 to-purple-100/50/20/10">
-            <h3 className="text-lg font-bold text-purple-900 mb-4 flex items-center gap-2">
-              🎲 Feuille Chaotique <span className="text-sm font-normal">(1 maximum)</span>
-            </h3>
-
-            {feuilleChaosAutorisee ? (
-              <div className="mb-4 p-3 bg-green-100/30 border-2 border-green-300 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium text-green-900">✅ Actuellement autorisée :</div>
-                    <div className="font-bold text-green-800 mt-1">{feuilleChaosAutorisee.titre}</div>
-                  </div>
-                  <button onClick={() => handleRetirer('chaotique')} disabled={saving} className="px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:bg-slate-300 text-gray-900 text-sm font-medium rounded-lg transition-colors">
-                    Retirer
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="mb-4 p-3 bg-gray-100 border-2 border-gray-300 rounded-lg">
-                <div className="text-sm text-gray-600">Aucune feuille chaotique autorisée</div>
-              </div>
-            )}
-
-            {!feuilleChaosAutorisee && (
-              <div>
-                <label className="block text-sm font-medium text-purple-900 mb-2">Choisir une feuille à autoriser :</label>
-                <div className="flex gap-2">
-                  <select 
-                    value={selectedChaos} 
-                    onChange={(e) => setSelectedChaos(e.target.value)} 
-                    disabled={saving} 
-                    className="flex-1 px-3 py-2 border-2 border-purple-300 rounded-lg bg-white text-gray-900 disabled:opacity-50"
-                  >
-                    <option value="">-- Sélectionner une feuille --</option>
-                    {niveauxChaotiques.map(([niveau, feuilles]) => (
-                      <optgroup key={niveau} label={niveau}>
-                        {feuilles.map((f: any) => (
-                          <option key={f.id} value={f.id}>
-                            #{f.ordre} - {f.titre}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                  <button onClick={() => handleAutoriser('chaotique')} disabled={!selectedChaos || saving} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-gray-900 font-medium rounded-lg transition-colors">
-                    {saving ? 'Chargement...' : 'Autoriser'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="p-6 border-t-2 border-gray-300">
-          <button onClick={onClose} className="w-full px-4 py-2 bg-gray-100 hover:bg-slate-300 text-gray-800 font-medium rounded-lg transition-colors">
-            Fermer
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ---------- Page principale ---------- */
 export default function GestionEquipePage() {
   const router = useRouter();
@@ -562,19 +132,26 @@ export default function GestionEquipePage() {
       setUserId(session.user.id);
 
       // Charger l'équipe spécifique
-      const { data: equipeData, error: equipeError } = await supabase
+      const { data: equipeDataArray, error: equipeError } = await supabase
         .from('equipe')
         .select('*')
         .eq('id', equipeIdParam)
-        .eq('chef_id', session.user.id)
-        .single();
+        .eq('chef_id', session.user.id);
 
-      if (equipeError || !equipeData) {
+      if (equipeError) {
+        console.error('Erreur équipe:', equipeError);
+        alert('Erreur lors du chargement de l\'équipe');
+        router.push('/classement');
+        return;
+      }
+
+      if (!equipeDataArray || equipeDataArray.length === 0) {
         alert('Équipe introuvable ou vous n\'êtes pas le chef');
         router.push('/classement');
         return;
       }
 
+      const equipeData = equipeDataArray[0];
       setEquipe(equipeData);
 
       // Charger les membres avec stats
@@ -586,12 +163,13 @@ export default function GestionEquipePage() {
 
       setMembres(membresData || []);
 
-      // Charger les notifications
+      // Charger les notifications LIÉES À CETTE ÉQUIPE uniquement
       const { data: notifsData } = await supabase
         .from('notification')
         .select('*')
         .eq('user_id', session.user.id)
         .eq('lu', false)
+        .contains('metadata', { equipe_id: equipeData.id })
         .order('created_at', { ascending: false })
         .limit(10);
 
@@ -868,20 +446,19 @@ export default function GestionEquipePage() {
         </div>
       </div>
 
-      {/* Modal Gestion Feuilles */}
+      {/* Modal Gestion Feuilles (Vue Scope) */}
       {showModalGestion && membreSelectionne && (
-        <ModalGestionFeuilles
+        <ModalGererFeuillesScope
           membre={membreSelectionne}
           onClose={() => {
             setShowModalGestion(false);
             setMembreSelectionne(null);
           }}
-          onSave={() => {
+          onUpdate={() => {
             if (equipeId) loadData(equipeId);
           }}
         />
       )}
-
 
       {/* Modal Observer Feuilles */}
       {showObserverModal && equipeId && (
@@ -890,6 +467,7 @@ export default function GestionEquipePage() {
           onClose={() => setShowObserverModal(false)}
         />
       )}
+
       {/* Modal Rejet */}
       {showRejetModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

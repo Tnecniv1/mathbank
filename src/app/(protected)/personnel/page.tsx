@@ -111,6 +111,10 @@ export default function PersonnelPage() {
       await loadMesEquipes(session.user.id);
 
     } catch (error: any) {
+      console.error('Erreur complète:', error);
+      console.error('Message:', error.message);
+      console.error('Code:', error.code);
+      alert('Erreur de chargement. Voir console F12');
       console.error('Erreur chargement:', error);
       await supabase.auth.signOut();
       router.push('/auth');
