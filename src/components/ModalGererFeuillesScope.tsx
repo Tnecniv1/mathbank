@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import VueGraphe from './VueGraphe';
 
 type Feuille = {
   id: string;
@@ -49,6 +50,8 @@ type Props = {
 export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: Props) {
   const [loading, setLoading] = useState(true);
   const [niveaux, setNiveaux] = useState<Niveau[]>([]);
+  const [modeVue, setModeVue] = useState<'scope' | 'graphe'>('scope');
+  const [niveauSelectionne, setNiveauSelectionne] = useState<string>('');
   
   // États pour les feuilles autorisées
   const [feuilleMecaAutorisee, setFeuilleMecaAutorisee] = useState<Feuille | null>(null);
@@ -105,7 +108,6 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
       const idsValidees = new Set(feuillesValidees?.map(p => p.feuille_id) || []);
 
       // 3. Charger les feuilles actuellement autorisées
-      // Note: La table feuilles_autorisees utilise membre_id, pas user_id
       const { data: feuillesAutorisees } = await supabase
         .from('feuilles_autorisees')
         .select('feuille_id')
@@ -127,7 +129,7 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
             titre: c.titre,
             ordre: c.ordre,
             feuilles: (c.feuilles || [])
-              .filter((f: any) => f.type) // Filtrer les feuilles sans type
+              .filter((f: any) => f.type)
               .map((f: any) => ({
                 id: f.id,
                 titre: f.titre,
@@ -149,6 +151,11 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
       .filter((n: any) => n.sujets.length > 0);
 
       setNiveaux(niveauxEnrichis);
+
+      // Sélectionner le premier niveau par défaut
+      if (niveauxEnrichis.length > 0 && !niveauSelectionne) {
+        setNiveauSelectionne(niveauxEnrichis[0].id);
+      }
 
       // 5. Identifier les feuilles autorisées
       let mecaAutorisee: Feuille | null = null;
@@ -185,7 +192,6 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
     try {
       setSaving(true);
 
-      // Utiliser la RPC fonction existante
       const { data, error } = await supabase.rpc('gerer_feuilles_membre', {
         p_membre_id: membre.membre_id || null,
         p_feuilles_a_ajouter: [feuilleId],
@@ -295,7 +301,6 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
     
     const rows = 2;
     const cols = 3;
-    const total = rows * cols;
     
     return (
       <div className="inline-flex gap-0.5">
@@ -463,7 +468,7 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
         
         {/* Header */}
         <div className="p-6 border-b-2 border-gray-300 sticky top-0 bg-white z-10">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">
                 Gérer les feuilles
@@ -481,92 +486,147 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
               </svg>
             </button>
           </div>
-        </div>
 
-        <div className="p-6 space-y-6">
-          
-          {/* Section Mécanique */}
-          <div className="border-2 border-blue-200 rounded-xl p-4 bg-gradient-to-br from-blue-50 to-blue-100/20">
-            <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
-              🔧 Feuille Mécanique <span className="text-sm font-normal">(1 maximum)</span>
-            </h3>
-
-            {feuilleMecaAutorisee ? (
-              <div className="mb-4 p-3 bg-green-100/30 border-2 border-green-300 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium text-green-900">✅ Actuellement autorisée :</div>
-                    <div className="font-bold text-green-800 mt-1 flex items-center gap-2">
-                      #{feuilleMecaAutorisee.ordre} - {feuilleMecaAutorisee.titre}
-                      {feuilleMecaAutorisee.difficulte && renderDifficulte(feuilleMecaAutorisee.difficulte)}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRetirer(feuilleMecaAutorisee.id)}
-                    disabled={saving}
-                    className="px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 text-white text-sm font-medium rounded-lg transition-colors"
-                  >
-                    Retirer
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="mb-4 p-3 bg-gray-100 border-2 border-gray-300 rounded-lg">
-                <div className="text-sm text-gray-600">Aucune feuille mécanique autorisée</div>
-              </div>
-            )}
-
-            {!feuilleMecaAutorisee && (
-              <div>
-                <label className="block text-sm font-medium text-blue-900 mb-2">
-                  Choisir une feuille à autoriser :
-                </label>
-                {renderAccordeon('mecanique')}
-              </div>
-            )}
+          {/* Toggle Vue */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setModeVue('scope')}
+              className={`flex-1 px-4 py-2 font-medium rounded-lg transition-colors ${
+                modeVue === 'scope'
+                  ? 'bg-teal-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              📚 Vue Scope
+            </button>
+            <button
+              onClick={() => setModeVue('graphe')}
+              className={`flex-1 px-4 py-2 font-medium rounded-lg transition-colors ${
+                modeVue === 'graphe'
+                  ? 'bg-teal-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              🗺️ Vue Graphe
+            </button>
           </div>
 
-          {/* Section Chaotique */}
-          <div className="border-2 border-purple-200 rounded-xl p-4 bg-gradient-to-br from-purple-50 to-purple-100/20">
-            <h3 className="text-lg font-bold text-purple-900 mb-4 flex items-center gap-2">
-              🎲 Feuille Chaotique <span className="text-sm font-normal">(1 maximum)</span>
-            </h3>
-
-            {feuilleChaosAutorisee ? (
-              <div className="mb-4 p-3 bg-green-100/30 border-2 border-green-300 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium text-green-900">✅ Actuellement autorisée :</div>
-                    <div className="font-bold text-green-800 mt-1 flex items-center gap-2">
-                      #{feuilleChaosAutorisee.ordre} - {feuilleChaosAutorisee.titre}
-                      {feuilleChaosAutorisee.difficulte && renderDifficulte(feuilleChaosAutorisee.difficulte)}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRetirer(feuilleChaosAutorisee.id)}
-                    disabled={saving}
-                    className="px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 text-white text-sm font-medium rounded-lg transition-colors"
-                  >
-                    Retirer
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="mb-4 p-3 bg-gray-100 border-2 border-gray-300 rounded-lg">
-                <div className="text-sm text-gray-600">Aucune feuille chaotique autorisée</div>
-              </div>
-            )}
-
-            {!feuilleChaosAutorisee && (
-              <div>
-                <label className="block text-sm font-medium text-purple-900 mb-2">
-                  Choisir une feuille à autoriser :
-                </label>
-                {renderAccordeon('chaotique')}
-              </div>
-            )}
-          </div>
+          {/* Sélecteur de niveau (pour vue graphe) */}
+          {modeVue === 'graphe' && (
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Niveau à afficher :
+              </label>
+              <select
+                value={niveauSelectionne}
+                onChange={(e) => setNiveauSelectionne(e.target.value)}
+                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+              >
+                {niveaux.map(niveau => (
+                  <option key={niveau.id} value={niveau.id}>
+                    {niveau.titre}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
+
+        {/* Contenu selon le mode */}
+        {modeVue === 'scope' ? (
+          <div className="p-6 space-y-6">
+            {/* Section Mécanique */}
+            <div className="border-2 border-blue-200 rounded-xl p-4 bg-gradient-to-br from-blue-50 to-blue-100/20">
+              <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
+                🔧 Feuille Mécanique <span className="text-sm font-normal">(1 maximum)</span>
+              </h3>
+
+              {feuilleMecaAutorisee ? (
+                <div className="mb-4 p-3 bg-green-100/30 border-2 border-green-300 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-green-900">✅ Actuellement autorisée :</div>
+                      <div className="font-bold text-green-800 mt-1 flex items-center gap-2">
+                        #{feuilleMecaAutorisee.ordre} - {feuilleMecaAutorisee.titre}
+                        {feuilleMecaAutorisee.difficulte && renderDifficulte(feuilleMecaAutorisee.difficulte)}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRetirer(feuilleMecaAutorisee.id)}
+                      disabled={saving}
+                      className="px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 text-white text-sm font-medium rounded-lg transition-colors"
+                    >
+                      Retirer
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-4 p-3 bg-gray-100 border-2 border-gray-300 rounded-lg">
+                  <div className="text-sm text-gray-600">Aucune feuille mécanique autorisée</div>
+                </div>
+              )}
+
+              {!feuilleMecaAutorisee && (
+                <div>
+                  <label className="block text-sm font-medium text-blue-900 mb-2">
+                    Choisir une feuille à autoriser :
+                  </label>
+                  {renderAccordeon('mecanique')}
+                </div>
+              )}
+            </div>
+
+            {/* Section Chaotique */}
+            <div className="border-2 border-purple-200 rounded-xl p-4 bg-gradient-to-br from-purple-50 to-purple-100/20">
+              <h3 className="text-lg font-bold text-purple-900 mb-4 flex items-center gap-2">
+                🎲 Feuille Chaotique <span className="text-sm font-normal">(1 maximum)</span>
+              </h3>
+
+              {feuilleChaosAutorisee ? (
+                <div className="mb-4 p-3 bg-green-100/30 border-2 border-green-300 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-green-900">✅ Actuellement autorisée :</div>
+                      <div className="font-bold text-green-800 mt-1 flex items-center gap-2">
+                        #{feuilleChaosAutorisee.ordre} - {feuilleChaosAutorisee.titre}
+                        {feuilleChaosAutorisee.difficulte && renderDifficulte(feuilleChaosAutorisee.difficulte)}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRetirer(feuilleChaosAutorisee.id)}
+                      disabled={saving}
+                      className="px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 text-white text-sm font-medium rounded-lg transition-colors"
+                    >
+                      Retirer
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-4 p-3 bg-gray-100 border-2 border-gray-300 rounded-lg">
+                  <div className="text-sm text-gray-600">Aucune feuille chaotique autorisée</div>
+                </div>
+              )}
+
+              {!feuilleChaosAutorisee && (
+                <div>
+                  <label className="block text-sm font-medium text-purple-900 mb-2">
+                    Choisir une feuille à autoriser :
+                  </label>
+                  {renderAccordeon('chaotique')}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="p-6">
+            <VueGraphe
+              niveauId={niveauSelectionne}
+              membreUserId={membre.user_id}
+              onAutoriser={handleAutoriser}
+              onRetirer={handleRetirer}
+            />
+          </div>
+        )}
 
         {/* Footer */}
         <div className="p-6 border-t-2 border-gray-300 sticky bottom-0 bg-white">

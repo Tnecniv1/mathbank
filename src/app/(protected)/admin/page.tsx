@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-
+import GestionPrerequisAdmin from '@/components/GestionPrerequisAdmin';
 
 /* ---------- Types ---------- */
 type Niveau = {
@@ -1096,8 +1096,8 @@ function NiveauItem({
 export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [activeTab, setActiveTab] = useState<'bibliotheque' | 'demandes'>('bibliotheque');
-  
+  const [activeTab, setActiveTab] = useState<'bibliotheque' | 'demandes' | 'prerequis'>('bibliotheque');  
+
   // États bibliothèque
   const [niveaux, setNiveaux] = useState<NiveauWithData[]>([]);
   const [openNiveaux, setOpenNiveaux] = useState<Set<string>>(new Set());
@@ -1429,6 +1429,17 @@ export default function AdminPage() {
                 </span>
               )}
             </button>
+            <button
+              onClick={() => setActiveTab('prerequis')}
+              className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
+                activeTab === 'prerequis'
+                  ? 'bg-teal-500 text-white shadow-lg'
+                  : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700'
+              }`}
+            >
+              🔗 Prérequis
+            </button>
+
           </div>
         </header>
 
@@ -1496,75 +1507,77 @@ export default function AdminPage() {
           </div>
         )}
           </>
-        ) : (
-                  <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 border-2 border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center justify-between mb-6">
-                      <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-                        Demandes de création d'équipes
-                      </h2>
-                      {demandes.length > 0 && (
-                        <span className="px-4 py-2 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 font-semibold rounded-full">
-                          {demandes.length} en attente
-                        </span>
-                      )}
-                    </div>
+        ) : activeTab === 'demandes' ? (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 border-2 border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                Demandes de création d'équipes
+              </h2>
+              {demandes.length > 0 && (
+                <span className="px-4 py-2 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 font-semibold rounded-full">
+                  {demandes.length} en attente
+                </span>
+              )}
+            </div>
 
-                    {loadingDemandes ? (
-                      <div className="text-center py-12">
-                        <Loader />
-                        <p className="mt-4 text-slate-600 dark:text-slate-400">Chargement...</p>
+            {loadingDemandes ? (
+              <div className="text-center py-12">
+                <Loader />
+                <p className="mt-4 text-slate-600 dark:text-slate-400">Chargement...</p>
+              </div>
+            ) : demandes.length === 0 ? (
+              <div className="text-center py-16">
+                <div className="text-6xl mb-4">✅</div>
+                <p className="text-lg font-medium">Aucune demande en attente</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {demandes.map(demande => (
+                  <div key={demande.id} className="p-6 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-slate-200 dark:border-slate-700">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1">
+                        <h3 className="text-xl font-bold mb-1">{demande.nom_equipe}</h3>
+                        <p className="text-sm text-slate-600 dark:text-slate-400">
+                          Par : <span className="font-semibold">{demande.demandeur_nom}</span>
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {new Date(demande.created_at).toLocaleDateString('fr-FR', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </p>
+                        {demande.description && (
+                          <p className="mt-3 p-3 bg-white dark:bg-slate-900 rounded-lg border">
+                            "{demande.description}"
+                          </p>
+                        )}
                       </div>
-                    ) : demandes.length === 0 ? (
-                      <div className="text-center py-16">
-                        <div className="text-6xl mb-4">✅</div>
-                        <p className="text-lg font-medium">Aucune demande en attente</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {demandes.map(demande => (
-                          <div key={demande.id} className="p-6 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-slate-200 dark:border-slate-700">
-                            <div className="flex items-start justify-between mb-4">
-                              <div className="flex-1">
-                                <h3 className="text-xl font-bold mb-1">{demande.nom_equipe}</h3>
-                                <p className="text-sm text-slate-600 dark:text-slate-400">
-                                  Par : <span className="font-semibold">{demande.demandeur_nom}</span>
-                                </p>
-                                <p className="text-xs text-slate-500 mt-1">
-                                  {new Date(demande.created_at).toLocaleDateString('fr-FR', {
-                                    day: 'numeric',
-                                    month: 'long',
-                                    year: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  })}
-                                </p>
-                                {demande.description && (
-                                  <p className="mt-3 p-3 bg-white dark:bg-slate-900 rounded-lg border">
-                                    "{demande.description}"
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex gap-3 pt-4 border-t">
-                              <button
-                                onClick={() => handleApprouverDemande(demande.id)}
-                                className="flex-1 px-5 py-3 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg"
-                              >
-                                ✓ Approuver
-                              </button>
-                              <button
-                                onClick={() => handleRefuserDemande(demande.id)}
-                                className="flex-1 px-5 py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg"
-                              >
-                                ✗ Refuser
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    </div>
+                    <div className="flex gap-3 pt-4 border-t">
+                      <button
+                        onClick={() => handleApprouverDemande(demande.id)}
+                        className="flex-1 px-5 py-3 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg"
+                      >
+                        ✓ Approuver
+                      </button>
+                      <button
+                        onClick={() => handleRefuserDemande(demande.id)}
+                        className="flex-1 px-5 py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg"
+                      >
+                        ✗ Refuser
+                      </button>
+                    </div>
                   </div>
-                )}
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <GestionPrerequisAdmin />
+        )}
       </div>
 
       {/* Modal */}
