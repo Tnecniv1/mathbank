@@ -42,14 +42,7 @@ type TableauData = {
   txSatGlobal: number;
 };
 
-type ScoreEvolution = {
-  ordre: number;
-  score_meca: number | null;
-  score_chaos: number | null;
-  titre_meca: string | null;
-  titre_chaos: string | null;
-  date: string;
-};
+
 
 type ConcentrationData = {
   date: string;
@@ -72,13 +65,13 @@ export default function TableauProgression() {
   const [niveaux, setNiveaux] = useState<Niveau[]>([]);
   const [niveauSelectionne, setNiveauSelectionne] = useState<string | null>(null);
   const [data, setData] = useState<TableauData | null>(null);
-  const [scoresEvolution, setScoresEvolution] = useState<ScoreEvolution[]>([]);
   const [concentrationData, setConcentrationData] = useState<ConcentrationData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fullscreenBlock, setFullscreenBlock] = useState<string | null>(null);
-  const [scoresLocaux, setScoresLocaux] = useState<ScoreLocal[]>([]);
-  const [graphMode, setGraphMode] = useState<'global' | 'local'>('global');
+  const [scoresMecaniques, setScoresMecaniques] = useState<ScoreLocal[]>([]);
+  const [scoresChaotiques, setScoresChaotiques] = useState<ScoreLocal[]>([]);
+  const [scoreType, setScoreType] = useState<'mecanique' | 'chaotique'>('mecanique');
 
   useEffect(() => {
     loadNiveaux();
@@ -137,8 +130,7 @@ export default function TableauProgression() {
         processData(rawData);
       }
 
-      await loadScoresEvolution(niveauId, userId);
-      await loadScoresLocaux(userId);
+      await loadScoresLocauxAvecType(userId);
       await loadConcentrationData(niveauId, userId);
 
       setLoading(false);
@@ -224,71 +216,9 @@ export default function TableauProgression() {
     return result;
   }
 
-  async function loadScoresEvolution(niveauId: string, userId: string) {
-    try {
-      const { data: feuillesData } = await supabase
-        .from('feuille_entrainement')
-        .select(`
-          id,
-          titre,
-          type,
-          chapitre:chapitre!inner(
-            sujet:sujet!inner(
-              niveau_id
-            )
-          )
-        `)
-        .eq('chapitre.sujet.niveau_id', niveauId);
 
-      if (!feuillesData || feuillesData.length === 0) {
-        setScoresEvolution([]);
-        return;
-      }
 
-      const feuilleIds = feuillesData.map(f => f.id);
-
-      const { data: progressions } = await supabase
-        .from('progression_feuille')
-        .select('feuille_id, score, validee_at')
-        .eq('user_id', userId)
-        .eq('statut', 'validee')
-        .in('feuille_id', feuilleIds)
-        .not('score', 'is', null)
-        .not('validee_at', 'is', null)
-        .order('validee_at', { ascending: true });
-
-      if (!progressions || progressions.length === 0) {
-        setScoresEvolution([]);
-        return;
-      }
-
-      const feuillesMap = new Map(
-        feuillesData.map(f => [f.id, { titre: f.titre, type: f.type }])
-      );
-
-      // Créer un tableau avec toutes les dates et séparer méca/chaos
-      const scores: ScoreEvolution[] = progressions.map((prog, index) => {
-        const feuille = feuillesMap.get(prog.feuille_id);
-        const isMecanique = feuille?.type === 'mecanique';
-        
-        return {
-          ordre: index + 1,
-          score_meca: isMecanique ? (prog.score || 0) : null,
-          score_chaos: !isMecanique ? (prog.score || 0) : null,
-          titre_meca: isMecanique ? feuille.titre : null,
-          titre_chaos: !isMecanique ? feuille.titre : null,
-          date: new Date(prog.validee_at).toLocaleDateString('fr-FR')
-        };
-      });
-
-      setScoresEvolution(scores);
-    } catch (err: any) {
-      console.error('Erreur chargement scores:', err);
-      setScoresEvolution([]);
-    }
-  }
-
-  async function loadScoresLocaux(userId: string) {
+  async function loadScoresLocauxAvecType(userId: string) {
       try {
         const { data: scoresData, error } = await supabase
           .from('score_local')
@@ -299,6 +229,7 @@ export default function TableauProgression() {
             created_at,
             session_entrainement!inner(
               user_id,
+              feuille_mecanique_id,
               feuille_chaotique_id
             )
           `)
@@ -307,27 +238,51 @@ export default function TableauProgression() {
 
         if (error) {
           console.error('Erreur chargement scores locaux:', error);
-          setScoresLocaux([]);
+          setScoresMecaniques([]);
+          setScoresChaotiques([]);
           return;
         }
 
         if (!scoresData || scoresData.length === 0) {
-          setScoresLocaux([]);
+          setScoresMecaniques([]);
+          setScoresChaotiques([]);
           return;
         }
 
-        const scores: ScoreLocal[] = scoresData.map((score, index) => ({
-          ordre: index + 1,
-          score: parseFloat(score.score_calcule) || 0,
-          exercice: score.exercice,
-          question: score.question,
-          date: new Date(score.created_at).toLocaleDateString('fr-FR')
-        }));
+        // Séparer les scores mécaniques et chaotiques
+        const scoresMeca: ScoreLocal[] = [];
+        const scoresChaos: ScoreLocal[] = [];
+        let indexMeca = 1;
+        let indexChaos = 1;
 
-        setScoresLocaux(scores);
+        scoresData.forEach((score: any) => {
+          const isMecanique = score.session_entrainement.feuille_mecanique_id !== null;
+          
+          if (isMecanique) {
+            scoresMeca.push({
+              ordre: indexMeca++,
+              score: parseFloat(score.score_calcule) || 0,
+              exercice: score.exercice,
+              question: score.question,
+              date: new Date(score.created_at).toLocaleDateString('fr-FR')
+            });
+          } else {
+            scoresChaos.push({
+              ordre: indexChaos++,
+              score: parseFloat(score.score_calcule) || 0,
+              exercice: score.exercice,
+              question: score.question,
+              date: new Date(score.created_at).toLocaleDateString('fr-FR')
+            });
+          }
+        });
+
+        setScoresMecaniques(scoresMeca);
+        setScoresChaotiques(scoresChaos);
       } catch (err: any) {
         console.error('Erreur chargement scores locaux:', err);
-        setScoresLocaux([]);
+        setScoresMecaniques([]);
+        setScoresChaotiques([]);
       }
     }
 
@@ -738,213 +693,201 @@ export default function TableauProgression() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         {/* Graphique des scores avec toggle */}
                 <div className={`bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden flex flex-col ${fullscreenBlock === 'scores' ? 'fixed inset-4 z-50' : ''}`}>
-                  <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-3 py-2 flex items-center justify-between flex-shrink-0">
-                    <div>
-                      <h2 className="text-sm font-bold text-gray-900">Progresser en mathématique</h2>
-                      <p className="text-purple-100 text-xs">
-                        {graphMode === 'global' 
-                          ? `${scoresEvolution.length} feuille${scoresEvolution.length > 1 ? 's' : ''}`
-                          : `${scoresLocaux.length} question${scoresLocaux.length > 1 ? 's' : ''}`
-                        }
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {/* Toggle Global/Local */}
-                      <div className="flex bg-white/20 rounded-lg p-0.5">
-                        <button
-                          onClick={() => setGraphMode('global')}
-                          className={`px-2 py-1 text-xs font-medium rounded transition ${
-                            graphMode === 'global'
-                              ? 'bg-white text-purple-700'
-                              : 'text-white hover:bg-white/10'
-                          }`}
-                        >
-                          Global
-                        </button>
-                        <button
-                          onClick={() => setGraphMode('local')}
-                          className={`px-2 py-1 text-xs font-medium rounded transition ${
-                            graphMode === 'local'
-                              ? 'bg-white text-purple-700'
-                              : 'text-white hover:bg-white/10'
-                          }`}
-                        >
-                          Local
-                        </button>
-                      </div>
-                      <FullscreenButton blockId="scores" />
-                    </div>
-                  </div>
+                          <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-3 py-2 flex items-center justify-between flex-shrink-0">
+                            <div>
+                              <h2 className="text-sm font-bold text-gray-900">Progresser en mathématique</h2>
+                              <p className="text-purple-100 text-xs">
+                                {scoreType === 'mecanique'
+                                  ? `${scoresMecaniques.length} question${scoresMecaniques.length > 1 ? 's' : ''} mécaniques`
+                                  : `${scoresChaotiques.length} question${scoresChaotiques.length > 1 ? 's' : ''} chaotiques`
+                                }
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {/* Toggle Mécanique/Chaotique */}
+                              <div className="flex bg-white/20 rounded-lg p-0.5">
+                                <button
+                                  onClick={() => setScoreType('mecanique')}
+                                  className={`px-2 py-1 text-xs font-medium rounded transition ${
+                                    scoreType === 'mecanique'
+                                      ? 'bg-white text-blue-700'
+                                      : 'text-white hover:bg-white/10'
+                                  }`}
+                                >
+                                  M
+                                </button>
+                                <button
+                                  onClick={() => setScoreType('chaotique')}
+                                  className={`px-2 py-1 text-xs font-medium rounded transition ${
+                                    scoreType === 'chaotique'
+                                      ? 'bg-white text-purple-700'
+                                      : 'text-white hover:bg-white/10'
+                                  }`}
+                                >
+                                  C
+                                </button>
+                              </div>
+                              <FullscreenButton blockId="scores" />
+                            </div>
+                          </div>
 
-                  {/* Graphique Global */}
-                  {graphMode === 'global' && scoresEvolution.length > 0 && (
-                    <>
-                      <div className="p-3 flex-1 min-h-0">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={scoresEvolution}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7"  />
-                            <XAxis 
-                              dataKey="ordre" 
-                              stroke="#71717a"
-                              style={{ fontSize: '10px' }}
-                            />
-                            <YAxis 
-                              domain={[0, 100]}
-                              stroke="#71717a"
-                              style={{ fontSize: '10px' }}
-                            />
-                            <Tooltip
-                              contentStyle={{
-                                backgroundColor: '#fff',
-                                border: '1px solid #e4e4e7',
-                                borderRadius: '8px',
-                                fontSize: '11px'
-                              }}
-                              formatter={(value: any, name: string) => {
-                                if (value === null) return ['', ''];
-                                return [`${value}%`, name === 'score_meca' ? 'Mécanique' : 'Chaotique'];
-                              }}
-                              labelFormatter={(value: any) => `Feuille #${value}`}
-                              />
-                            <Line
-                              type="monotone"
-                              dataKey="score_meca"
-                              stroke="#3b82f6"
-                              strokeWidth={2}
-                              dot={{ fill: '#3b82f6', r: 3 }}
-                              connectNulls
-                              name="Mécanique"
-                            />
-                            <Line
-                              type="monotone"
-                              dataKey="score_chaos"
-                              stroke="#a855f7"
-                              strokeWidth={2}
-                              dot={{ fill: '#a855f7', r: 3 }}
-                              connectNulls
-                              name="Chaotique"
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
+                          {/* Graphique Mécanique */}
+                          {scoreType === 'mecanique' && scoresMecaniques.length > 0 && (
+                            <>
+                              <div className="p-3 flex-1 min-h-0">
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <LineChart data={scoresMecaniques}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                                    <XAxis 
+                                      dataKey="ordre" 
+                                      stroke="#71717a"
+                                      style={{ fontSize: '10px' }}
+                                      label={{ value: 'Question', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+                                    />
+                                    <YAxis 
+                                      domain={[0, 100]}
+                                      stroke="#71717a"
+                                      style={{ fontSize: '10px' }}
+                                    />
+                                    <Tooltip
+                                      contentStyle={{
+                                        backgroundColor: '#fff',
+                                        border: '1px solid #e4e4e7',
+                                        borderRadius: '8px',
+                                        fontSize: '11px'
+                                      }}
+                                      formatter={(value: any) => [`${Math.round(value)}%`, 'Score']}
+                                      labelFormatter={(value: any, payload: any) => {
+                                        const item = payload[0]?.payload;
+                                        return item ? `Q${value} - ${item.question}` : `Question ${value}`;
+                                      }}
+                                    />
+                                    <Line
+                                      type="monotone"
+                                      dataKey="score"
+                                      stroke="#3b82f6"
+                                      strokeWidth={2}
+                                      dot={{ fill: '#3b82f6', r: 4 }}
+                                      name="Score Mécanique"
+                                    />
+                                  </LineChart>
+                                </ResponsiveContainer>
+                              </div>
 
-                      <div className="bg-purple-50/20 px-3 py-1.5 border-t border-purple-200 flex-shrink-0">
-                        <div className="flex justify-around text-center text-xs">
-                          <div>
-                            <div className="font-bold text-blue-600">
-                              {Math.round(
-                                scoresEvolution.filter(s => s.score_meca !== null).reduce((acc, s) => acc + (s.score_meca || 0), 0) / 
-                                (scoresEvolution.filter(s => s.score_meca !== null).length || 1)
-                              )}%
+                              <div className="bg-blue-50/20 px-3 py-1.5 border-t border-blue-200 flex-shrink-0">
+                                <div className="flex justify-around text-center text-xs">
+                                  <div>
+                                    <div className="font-bold text-blue-600">
+                                      {Math.round(
+                                        scoresMecaniques.reduce((acc, s) => acc + s.score, 0) / scoresMecaniques.length
+                                      )}%
+                                    </div>
+                                    <div className="text-blue-700 text-[10px]">Moyenne</div>
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-blue-600">
+                                      {Math.max(...scoresMecaniques.map(s => s.score))}%
+                                    </div>
+                                    <div className="text-blue-700 text-[10px]">Max</div>
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-blue-600">
+                                      {Math.min(...scoresMecaniques.map(s => s.score))}%
+                                    </div>
+                                    <div className="text-blue-700 text-[10px]">Min</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </>
+                          )}
+
+                          {/* Graphique Chaotique */}
+                          {scoreType === 'chaotique' && scoresChaotiques.length > 0 && (
+                            <>
+                              <div className="p-3 flex-1 min-h-0">
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <LineChart data={scoresChaotiques}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                                    <XAxis 
+                                      dataKey="ordre" 
+                                      stroke="#71717a"
+                                      style={{ fontSize: '10px' }}
+                                      label={{ value: 'Question', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+                                    />
+                                    <YAxis 
+                                      domain={[0, 100]}
+                                      stroke="#71717a"
+                                      style={{ fontSize: '10px' }}
+                                    />
+                                    <Tooltip
+                                      contentStyle={{
+                                        backgroundColor: '#fff',
+                                        border: '1px solid #e4e4e7',
+                                        borderRadius: '8px',
+                                        fontSize: '11px'
+                                      }}
+                                      formatter={(value: any) => [`${Math.round(value)}%`, 'Score']}
+                                      labelFormatter={(value: any, payload: any) => {
+                                        const item = payload[0]?.payload;
+                                        return item ? `Q${value} - ${item.exercice} ${item.question}` : `Question ${value}`;
+                                      }}
+                                    />
+                                    <Line
+                                      type="monotone"
+                                      dataKey="score"
+                                      stroke="#a855f7"
+                                      strokeWidth={2}
+                                      dot={{ fill: '#a855f7', r: 4 }}
+                                      name="Score Chaotique"
+                                    />
+                                  </LineChart>
+                                </ResponsiveContainer>
+                              </div>
+
+                              <div className="bg-purple-50/20 px-3 py-1.5 border-t border-purple-200 flex-shrink-0">
+                                <div className="flex justify-around text-center text-xs">
+                                  <div>
+                                    <div className="font-bold text-purple-600">
+                                      {Math.round(
+                                        scoresChaotiques.reduce((acc, s) => acc + s.score, 0) / scoresChaotiques.length
+                                      )}%
+                                    </div>
+                                    <div className="text-purple-700 text-[10px]">Moyenne</div>
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-purple-600">
+                                      {Math.max(...scoresChaotiques.map(s => s.score))}%
+                                    </div>
+                                    <div className="text-purple-700 text-[10px]">Max</div>
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-purple-600">
+                                      {Math.min(...scoresChaotiques.map(s => s.score))}%
+                                    </div>
+                                    <div className="text-purple-700 text-[10px]">Min</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </>
+                          )}
+
+                          {/* Messages si pas de données */}
+                          {scoreType === 'mecanique' && scoresMecaniques.length === 0 && (
+                            <div className="p-6 text-center text-gray-500 flex-1 flex flex-col items-center justify-center">
+                              <div className="text-2xl mb-1">📈</div>
+                              <p className="text-xs">Aucun score mécanique enregistré</p>
+                              <p className="text-[10px] text-gray-400 mt-1">Les scores sont créés lors des sessions mécaniques</p>
                             </div>
-                            <div className="text-blue-700 text-[10px]">Moy. Méca</div>
-                          </div>
-                          <div>
-                            <div className="font-bold text-purple-600">
-                              {Math.round(
-                                scoresEvolution.filter(s => s.score_chaos !== null).reduce((acc, s) => acc + (s.score_chaos || 0), 0) / 
-                                (scoresEvolution.filter(s => s.score_chaos !== null).length || 1)
-                              )}%
+                          )}
+
+                          {scoreType === 'chaotique' && scoresChaotiques.length === 0 && (
+                            <div className="p-6 text-center text-gray-500 flex-1 flex flex-col items-center justify-center">
+                              <div className="text-2xl mb-1">📈</div>
+                              <p className="text-xs">Aucun score chaotique enregistré</p>
+                              <p className="text-[10px] text-gray-400 mt-1">Les scores sont créés lors des sessions chaotiques</p>
                             </div>
-                            <div className="text-purple-700 text-[10px]">Moy. Chaos</div>
-                          </div>
-                          <div>
-                            <div className="font-bold text-purple-600">
-                              {Math.max(...scoresEvolution.map(s => s.score))}%
-                            </div>
-                            <div className="text-purple-700 text-[10px]">Max</div>
-                          </div>
+                          )}
                         </div>
-                      </div>
-                    </>
-                  )}
-
-                  {/* Graphique Local */}
-                  {graphMode === 'local' && scoresLocaux.length > 0 && (
-                    <>
-                      <div className="p-3 flex-1 min-h-0">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={scoresLocaux}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-                            <XAxis 
-                              dataKey="ordre" 
-                              stroke="#71717a"
-                              style={{ fontSize: '10px' }}
-                              label={{ value: 'Question', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
-                            />
-                            <YAxis 
-                              domain={[0, 100]}
-                              stroke="#71717a"
-                              style={{ fontSize: '10px' }}
-                            />
-                            <Tooltip
-                              contentStyle={{
-                                backgroundColor: '#fff',
-                                border: '1px solid #e4e4e7',
-                                borderRadius: '8px',
-                                fontSize: '11px'
-                              }}
-                              formatter={(value: any) => [`${Math.round(value)}%`, 'Score']}
-                              labelFormatter={(value: any, payload: any) => {
-                                const item = payload[0]?.payload;
-                                return item ? `Q${value} - ${item.exercice} ${item.question}` : `Question ${value}`;
-                              }}
-                            />
-                            <Line
-                              type="monotone"
-                              dataKey="score"
-                              stroke="#a855f7"
-                              strokeWidth={2}
-                              dot={{ fill: '#a855f7', r: 4 }}
-                              name="Score Local"
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-
-                      <div className="bg-purple-50/20 px-3 py-1.5 border-t border-purple-200 flex-shrink-0">
-                        <div className="flex justify-around text-center text-xs">
-                          <div>
-                            <div className="font-bold text-purple-600">
-                              {Math.round(
-                                scoresLocaux.reduce((acc, s) => acc + s.score, 0) / scoresLocaux.length
-                              )}%
-                            </div>
-                            <div className="text-purple-700 text-[10px]">Moyenne</div>
-                          </div>
-                          <div>
-                            <div className="font-bold text-purple-600">
-                              {Math.max(...scoresLocaux.map(s => s.score))}%
-                            </div>
-                            <div className="text-purple-700 text-[10px]">Max</div>
-                          </div>
-                          <div>
-                            <div className="font-bold text-purple-600">
-                              {Math.min(...scoresLocaux.map(s => s.score))}%
-                            </div>
-                            <div className="text-purple-700 text-[10px]">Min</div>
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {/* Messages si pas de données */}
-                  {graphMode === 'global' && scoresEvolution.length === 0 && (
-                    <div className="p-6 text-center text-gray-500 flex-1 flex flex-col items-center justify-center">
-                      <div className="text-2xl mb-1">📊</div>
-                      <p className="text-xs">Aucune donnée</p>
-                    </div>
-                  )}
-
-                  {graphMode === 'local' && scoresLocaux.length === 0 && (
-                    <div className="p-6 text-center text-gray-500 flex-1 flex flex-col items-center justify-center">
-                      <div className="text-2xl mb-1">📈</div>
-                      <p className="text-xs">Aucun score local enregistré</p>
-                      <p className="text-[10px] text-gray-400 mt-1">Les scores locaux sont créés lors des sessions chaotiques</p>
-                    </div>
-                  )}
-                </div>
 
         {/* Graphique de concentration */}
         <div className={`bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden flex flex-col ${fullscreenBlock === 'concentration' ? 'fixed inset-4 z-50' : ''}`}>

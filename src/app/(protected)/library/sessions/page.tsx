@@ -37,20 +37,25 @@ type ScoreLocalHistorique = {
   savoir: number;
   redaction: number;
   correction: number;
-  questions_posees: string[];
   score_calcule: number;
   created_at: string;
   session_numero: number;
 };
 
-type ScoreLocalFormData = {
+type QuestionMecanique = {
+  tempId: string;
+  question: string;
+  succes: boolean;
+};
+
+type QuestionChaotique = {
+  tempId: string;
   exercice: string;
   question: string;
   comprehension: number;
   savoir: number;
   redaction: number;
   correction: number;
-  questions_posees: string[];
 };
 
 // Icônes
@@ -89,7 +94,7 @@ export default function SessionsPage() {
   const [feuilleMeca, setFeuilleMeca] = useState<FeuilleProgression | null>(null);
   const [feuilleChaos, setFeuilleChaos] = useState<FeuilleProgression | null>(null);
   
-  // Formulaire global
+  // Formulaire unifié
   const [nextSessionNum, setNextSessionNum] = useState(1);
   const [typeEntrainement, setTypeEntrainement] = useState<'mecanique' | 'chaotique'>('mecanique');
   const [feuilleSelectionnee, setFeuilleSelectionnee] = useState('');
@@ -97,21 +102,23 @@ export default function SessionsPage() {
     date: new Date().toISOString().split('T')[0],
     heure: new Date().toTimeString().slice(0, 5),
     temps: '',
-    objectifs: '',
   });
   
-  // Formulaire granulaire (score local) - visible uniquement pour chaotique
-  const [showScoreLocalForm, setShowScoreLocalForm] = useState(false);
-  const [lastSessionId, setLastSessionId] = useState<string | null>(null);
-  const [questionsCount, setQuestionsCount] = useState(0);
-  const [scoreLocalData, setScoreLocalData] = useState<ScoreLocalFormData>({
-    exercice: '',
+  // Questions ajoutées
+  const [questionsMecaniques, setQuestionsMecaniques] = useState<QuestionMecanique[]>([]);
+  const [questionsChaotiques, setQuestionsChaotiques] = useState<QuestionChaotique[]>([]);
+  
+  // Formulaire d'ajout de question (inline)
+  const [showAddQuestion, setShowAddQuestion] = useState(false);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+  const [questionFormData, setQuestionFormData] = useState<any>({
     question: '',
+    succes: true,
+    exercice: '',
     comprehension: 0,
     savoir: 0,
     redaction: 0,
     correction: 0,
-    questions_posees: [''],
   });
   
   // Historique
@@ -230,7 +237,6 @@ export default function SessionsPage() {
           savoir,
           redaction,
           correction,
-          questions_posees,
           score_calcule,
           created_at,
           session_entrainement!inner(
@@ -253,7 +259,6 @@ export default function SessionsPage() {
           savoir: s.savoir,
           redaction: s.redaction,
           correction: s.correction,
-          questions_posees: s.questions_posees || [],
           score_calcule: parseFloat(s.score_calcule) || 0,
           created_at: s.created_at,
           session_numero: s.session_entrainement?.numero_session || 0
@@ -273,29 +278,105 @@ export default function SessionsPage() {
     setFormData(prev => ({ ...prev, [field]: value }));
   }
 
-  function handleScoreLocalChange(field: keyof ScoreLocalFormData, value: any) {
-    setScoreLocalData(prev => ({ ...prev, [field]: value }));
+  function handleQuestionFormChange(field: string, value: any) {
+    setQuestionFormData((prev: any) => ({ ...prev, [field]: value }));
   }
 
   function addQuestion() {
-    setScoreLocalData(prev => ({
-      ...prev,
-      questions_posees: [...prev.questions_posees, '']
-    }));
+    if (typeEntrainement === 'mecanique') {
+      if (!questionFormData.question.trim()) {
+        alert('Veuillez renseigner la référence de la question');
+        return;
+      }
+      
+      const newQuestion: QuestionMecanique = {
+        tempId: editingQuestionId || `temp-${Date.now()}`,
+        question: questionFormData.question,
+        succes: questionFormData.succes,
+      };
+      
+      if (editingQuestionId) {
+        setQuestionsMecaniques(prev => 
+          prev.map(q => q.tempId === editingQuestionId ? newQuestion : q)
+        );
+      } else {
+        setQuestionsMecaniques(prev => [...prev, newQuestion]);
+      }
+    } else {
+      if (!questionFormData.exercice.trim() || !questionFormData.question.trim()) {
+        alert('Veuillez renseigner l\'exercice et la question');
+        return;
+      }
+      
+      const newQuestion: QuestionChaotique = {
+        tempId: editingQuestionId || `temp-${Date.now()}`,
+        exercice: questionFormData.exercice,
+        question: questionFormData.question,
+        comprehension: questionFormData.comprehension,
+        savoir: questionFormData.savoir,
+        redaction: questionFormData.redaction,
+        correction: questionFormData.correction,
+      };
+      
+      if (editingQuestionId) {
+        setQuestionsChaotiques(prev => 
+          prev.map(q => q.tempId === editingQuestionId ? newQuestion : q)
+        );
+      } else {
+        setQuestionsChaotiques(prev => [...prev, newQuestion]);
+      }
+    }
+    
+    resetQuestionForm();
   }
 
-  function updateQuestion(index: number, value: string) {
-    setScoreLocalData(prev => ({
-      ...prev,
-      questions_posees: prev.questions_posees.map((q, i) => i === index ? value : q)
-    }));
+  function resetQuestionForm() {
+    setQuestionFormData({
+      question: '',
+      succes: true,
+      exercice: '',
+      comprehension: 0,
+      savoir: 0,
+      redaction: 0,
+      correction: 0,
+    });
+    setShowAddQuestion(false);
+    setEditingQuestionId(null);
   }
 
-  function removeQuestion(index: number) {
-    setScoreLocalData(prev => ({
-      ...prev,
-      questions_posees: prev.questions_posees.filter((_, i) => i !== index)
-    }));
+  function editQuestion(tempId: string) {
+    setEditingQuestionId(tempId);
+    setShowAddQuestion(true);
+    
+    if (typeEntrainement === 'mecanique') {
+      const question = questionsMecaniques.find(q => q.tempId === tempId);
+      if (question) {
+        setQuestionFormData({
+          question: question.question,
+          succes: question.succes,
+        });
+      }
+    } else {
+      const question = questionsChaotiques.find(q => q.tempId === tempId);
+      if (question) {
+        setQuestionFormData({
+          exercice: question.exercice,
+          question: question.question,
+          comprehension: question.comprehension,
+          savoir: question.savoir,
+          redaction: question.redaction,
+          correction: question.correction,
+        });
+      }
+    }
+  }
+
+  function deleteQuestion(tempId: string) {
+    if (typeEntrainement === 'mecanique') {
+      setQuestionsMecaniques(prev => prev.filter(q => q.tempId !== tempId));
+    } else {
+      setQuestionsChaotiques(prev => prev.filter(q => q.tempId !== tempId));
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -311,18 +392,26 @@ export default function SessionsPage() {
       return;
     }
 
+    const questions = typeEntrainement === 'mecanique' ? questionsMecaniques : questionsChaotiques;
+    
+    if (questions.length === 0) {
+      alert('Veuillez ajouter au moins une question');
+      return;
+    }
+
     setSaving(true);
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Non connecté');
 
+      // Créer la session
       const sessionData: any = {
         user_id: user.id,
         numero_session: nextSessionNum,
         date_session: formData.date,
         heure_session: formData.heure,
-        objectifs: formData.objectifs || null,
+        objectifs: null,
       };
 
       if (typeEntrainement === 'mecanique') {
@@ -341,87 +430,42 @@ export default function SessionsPage() {
 
       if (sessionError) throw sessionError;
 
-      // Si c'est une feuille chaotique, afficher le formulaire granulaire
-      if (typeEntrainement === 'chaotique') {
-        setLastSessionId(newSession.id);
-        setShowScoreLocalForm(true);
-        setSaving(false);
-      } else {
-        // Si mécanique, recharger directement
-        await loadData();
-        resetForm();
-        setSaving(false);
-        alert('✅ Session enregistrée avec succès !');
-      }
+      // Créer les scores locaux
+      const scoresLocaux = questions.map((q: any) => {
+        if (typeEntrainement === 'mecanique') {
+          return {
+            session_id: newSession.id,
+            exercice: '',
+            question: q.question,
+            comprehension: q.succes ? 100 : 0,
+            savoir: 0,
+            redaction: 0,
+            correction: 0,
+          };
+        } else {
+          return {
+            session_id: newSession.id,
+            exercice: q.exercice,
+            question: q.question,
+            comprehension: q.comprehension,
+            savoir: q.savoir,
+            redaction: q.redaction,
+            correction: q.correction,
+          };
+        }
+      });
 
-    } catch (err: any) {
-      console.error('Erreur:', err);
-      alert('Erreur: ' + err.message);
-      setSaving(false);
-    }
-  }
-
-  async function handleScoreLocalSubmit(e: React.FormEvent, addAnother: boolean = false) {
-    e.preventDefault();
-
-    if (!lastSessionId) {
-      alert('Erreur: pas de session associée');
-      return;
-    }
-
-    if (!scoreLocalData.exercice || !scoreLocalData.question) {
-      alert('Veuillez renseigner l\'exercice et la question');
-      return;
-    }
-
-    setSaving(true);
-
-    try {
-      // Filtrer les questions vides
-      const questionsFiltered = scoreLocalData.questions_posees.filter(q => q.trim() !== '');
-
-      const scoreLocalInsert = {
-        session_id: lastSessionId,
-        exercice: scoreLocalData.exercice,
-        question: scoreLocalData.question,
-        comprehension: scoreLocalData.comprehension,
-        savoir: scoreLocalData.savoir,
-        redaction: scoreLocalData.redaction,
-        correction: scoreLocalData.correction,
-        questions_posees: questionsFiltered,
-      };
-
-      const { error: scoreError } = await supabase
+      const { error: scoresError } = await supabase
         .from('score_local')
-        .insert([scoreLocalInsert]);
+        .insert(scoresLocaux);
 
-      if (scoreError) throw scoreError;
+      if (scoresError) throw scoresError;
 
+      // Recharger et reset
+      await loadData();
+      resetForm();
       setSaving(false);
-
-      if (addAnother) {
-        // Incrémenter le compteur
-        setQuestionsCount(prev => prev + 1);
-        // Réinitialiser uniquement les données du formulaire granulaire
-        setScoreLocalData({
-          exercice: '',
-          question: '',
-          comprehension: 0,
-          savoir: 0,
-          redaction: 0,
-          correction: 0,
-          questions_posees: [''],
-        });
-        alert('✅ Question enregistrée ! Vous pouvez en ajouter une autre.');
-      } else {
-        // Terminer : recharger et reset complet
-        await loadData();
-        resetForm();
-        setShowScoreLocalForm(false);
-        setLastSessionId(null);
-        setQuestionsCount(0);
-        alert('✅ Session et scores locaux enregistrés avec succès !');
-      }
+      alert('✅ Session enregistrée avec succès !');
 
     } catch (err: any) {
       console.error('Erreur:', err);
@@ -435,19 +479,11 @@ export default function SessionsPage() {
       date: new Date().toISOString().split('T')[0],
       heure: new Date().toTimeString().slice(0, 5),
       temps: '',
-      objectifs: '',
     });
     setFeuilleSelectionnee('');
-    setQuestionsCount(0);
-    setScoreLocalData({
-      exercice: '',
-      question: '',
-      comprehension: 0,
-      savoir: 0,
-      redaction: 0,
-      correction: 0,
-      questions_posees: [''],
-    });
+    setQuestionsMecaniques([]);
+    setQuestionsChaotiques([]);
+    resetQuestionForm();
   }
 
   function openObserverModal(sessionId: string) {
@@ -543,7 +579,6 @@ export default function SessionsPage() {
       savoir: score.savoir,
       redaction: score.redaction,
       correction: score.correction,
-      questions_posees: score.questions_posees
     });
   }
 
@@ -565,7 +600,6 @@ export default function SessionsPage() {
           savoir: editFormData.savoir,
           redaction: editFormData.redaction,
           correction: editFormData.correction,
-          questions_posees: editFormData.questions_posees.filter((q: string) => q.trim() !== '')
         })
         .eq('id', scoreId);
 
@@ -599,26 +633,6 @@ export default function SessionsPage() {
       console.error('Erreur:', err);
       alert('Erreur: ' + err.message);
     }
-  }
-
-  function resetForm() {
-    setFormData({
-      date: new Date().toISOString().split('T')[0],
-      heure: new Date().toTimeString().slice(0, 5),
-      temps: '',
-      objectifs: '',
-    });
-    setFeuilleSelectionnee('');
-    setQuestionsCount(0);
-    setScoreLocalData({
-      exercice: '',
-      question: '',
-      comprehension: 0,
-      savoir: 0,
-      redaction: 0,
-      correction: 0,
-      questions_posees: [''],
-    });
   }
 
   function exportToCSV() {
@@ -656,6 +670,8 @@ export default function SessionsPage() {
     );
   }
 
+  const questionsActuelles = typeEntrainement === 'mecanique' ? questionsMecaniques : questionsChaotiques;
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-teal-50 p-4">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -663,19 +679,22 @@ export default function SessionsPage() {
           ⏱️ Gestion des Sessions
         </h1>
 
-        {/* Formulaire Global */}
-        {!showScoreLocalForm && (
+        {/* Formulaire Unifié */}
+        {feuilles.length === 0 ? (
+          <div className="bg-white rounded-2xl p-6 border-2 border-gray-300 text-center text-gray-500">
+            Aucune feuille en cours. Rendez-vous dans l'onglet Progression pour en démarrer une.
+          </div>
+        ) : (
           <div className="bg-white rounded-2xl p-6 border-2 border-gray-300">
             <h2 className="text-xl font-bold text-gray-900 mb-6">
               📝 Nouvelle Session #{nextSessionNum}
             </h2>
             
-            {feuilles.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                Aucune feuille en cours. Rendez-vous dans l'onglet Progression pour en démarrer une.
-              </div>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Section 1 : Informations de la session */}
+              <div className="bg-gray-50 rounded-xl p-4 space-y-4">
+                <h3 className="font-bold text-gray-900">📋 Informations de la session</h3>
+                
                 {/* Date & Heure */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -704,10 +723,26 @@ export default function SessionsPage() {
                   </div>
                 </div>
 
-                {/* Type d'entraînement */}
+                {/* Temps */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    ⏱️ Temps (minutes)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.temps}
+                    onChange={(e) => handleInputChange('temps', e.target.value)}
+                    placeholder="Ex: 45"
+                    required
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+                  />
+                </div>
+
+                {/* Nature */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-3">
-                    Type d'entraînement
+                    🎲 Nature
                   </label>
                   <div className="grid grid-cols-2 gap-4">
                     <label className={`flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition ${
@@ -722,10 +757,13 @@ export default function SessionsPage() {
                         onChange={() => {
                           setTypeEntrainement('mecanique');
                           setFeuilleSelectionnee('');
+                          setQuestionsMecaniques([]);
+                          setQuestionsChaotiques([]);
+                          resetQuestionForm();
                         }}
                         className="w-4 h-4 text-blue-600"
                       />
-                      <span className="font-medium text-gray-900">🔧 Feuille Mécanique</span>
+                      <span className="font-medium text-gray-900">🔧 Mécanique</span>
                     </label>
                     <label className={`flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition ${
                       typeEntrainement === 'chaotique' 
@@ -739,15 +777,18 @@ export default function SessionsPage() {
                         onChange={() => {
                           setTypeEntrainement('chaotique');
                           setFeuilleSelectionnee('');
+                          setQuestionsMecaniques([]);
+                          setQuestionsChaotiques([]);
+                          resetQuestionForm();
                         }}
                         className="w-4 h-4 text-purple-600"
                       />
-                      <span className="font-medium text-gray-900">🎲 Feuille Chaotique</span>
+                      <span className="font-medium text-gray-900">🎲 Chaotique</span>
                     </label>
                   </div>
                 </div>
 
-                {/* Sélection de feuille */}
+                {/* Feuille */}
                 <div className={`p-4 border-2 rounded-xl ${
                   typeEntrainement === 'mecanique' 
                     ? 'bg-blue-50/20 border-blue-200' 
@@ -781,269 +822,270 @@ export default function SessionsPage() {
                     )}
                   </select>
                 </div>
+              </div>
 
-                {/* Temps */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    ⏱️ Temps (minutes)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formData.temps}
-                    onChange={(e) => handleInputChange('temps', e.target.value)}
-                    placeholder="Ex: 45"
-                    required
-                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                  />
-                </div>
-
-                {/* Objectifs */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    🎯 Objectifs réalisés
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.objectifs}
-                    onChange={(e) => handleInputChange('objectifs', e.target.value)}
-                    placeholder={
-                      typeEntrainement === 'mecanique' 
-                        ? "Ex: 3 (3 exercices mécaniques)" 
-                        : "Ex: 1 (1 exercice chaotique)"
-                    }
-                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    {typeEntrainement === 'mecanique' 
-                      ? "Nombre d'exercices mécaniques réalisés"
-                      : "Nombre d'exercices chaotiques réalisés"
-                    }
-                  </p>
-                </div>
-
-                {/* Bouton Submit */}
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="w-full px-6 py-3 bg-teal-500 hover:bg-teal-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-gray-900 font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  {saving ? (
-                    <>
-                      <Loader />
-                      Enregistrement...
-                    </>
-                  ) : (
-                    <>
-                      💾 Enregistrer la session
-                    </>
+              {/* Section 2 : Questions */}
+              <div className="bg-gray-50 rounded-xl p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-gray-900">
+                    ❓ Questions ({questionsActuelles.length})
+                  </h3>
+                  {!showAddQuestion && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAddQuestion(true)}
+                      className={`px-4 py-2 font-medium rounded-lg transition ${
+                        typeEntrainement === 'mecanique'
+                          ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                          : 'bg-purple-500 hover:bg-purple-600 text-white'
+                      }`}
+                    >
+                      ➕ Insérer une question
+                    </button>
                   )}
-                </button>
-              </form>
-            )}
-          </div>
-        )}
-
-        {/* Formulaire Score Local (visible après création session chaotique) */}
-        {showScoreLocalForm && (
-          <div className="bg-white rounded-2xl p-6 border-2 border-purple-300">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-purple-700">
-                🎯 Score Local - Détails de la question
-              </h2>
-              {questionsCount > 0 && (
-                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-bold">
-                  {questionsCount} question{questionsCount > 1 ? 's' : ''} enregistrée{questionsCount > 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-            <p className="text-sm text-gray-600 mb-6">
-              Session #{nextSessionNum} créée. Renseignez maintenant les détails de la question travaillée.
-            </p>
-
-            <form onSubmit={handleScoreLocalSubmit} className="space-y-6">
-              {/* Exercice et Question */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    📝 Exercice
-                  </label>
-                  <input
-                    type="text"
-                    value={scoreLocalData.exercice}
-                    onChange={(e) => handleScoreLocalChange('exercice', e.target.value)}
-                    placeholder="Ex: Exercice 3"
-                    required
-                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                  />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    ❓ Question
-                  </label>
-                  <input
-                    type="text"
-                    value={scoreLocalData.question}
-                    onChange={(e) => handleScoreLocalChange('question', e.target.value)}
-                    placeholder="Ex: Question 2.a"
-                    required
-                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                  />
-                </div>
-              </div>
 
-              {/* Compréhension */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  🧠 Compréhension (0-100)
-                </label>
-                <select
-                  value={scoreLocalData.comprehension}
-                  onChange={(e) => handleScoreLocalChange('comprehension', parseInt(e.target.value))}
-                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                >
-                  <option value={0}>0 - Pas compris</option>
-                  <option value={25}>25 - Compréhension minimale</option>
-                  <option value={50}>50 - Compréhension partielle</option>
-                  <option value={75}>75 - Bonne compréhension</option>
-                  <option value={100}>100 - Compréhension totale</option>
-                </select>
-              </div>
+                {/* Formulaire d'ajout de question */}
+                {showAddQuestion && (
+                  <div className={`border-2 rounded-xl p-4 ${
+                    typeEntrainement === 'mecanique'
+                      ? 'bg-blue-50 border-blue-300'
+                      : 'bg-purple-50 border-purple-300'
+                  }`}>
+                    <h4 className="font-bold text-gray-900 mb-4">
+                      {editingQuestionId ? '✏️ Modifier la question' : '➕ Nouvelle question'}
+                    </h4>
+                    
+                    {typeEntrainement === 'mecanique' ? (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Ref Question
+                          </label>
+                          <input
+                            type="text"
+                            value={questionFormData.question}
+                            onChange={(e) => handleQuestionFormChange('question', e.target.value)}
+                            placeholder="Ex: Question 5"
+                            className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-3">
+                            Résultat
+                          </label>
+                          <div className="flex gap-4">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="radio"
+                                checked={questionFormData.succes === true}
+                                onChange={() => handleQuestionFormChange('succes', true)}
+                                className="w-4 h-4"
+                              />
+                              <span className="text-green-700 font-medium">✓ Succès</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="radio"
+                                checked={questionFormData.succes === false}
+                                onChange={() => handleQuestionFormChange('succes', false)}
+                                className="w-4 h-4"
+                              />
+                              <span className="text-red-700 font-medium">✗ Échec</span>
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Ref Exercice
+                            </label>
+                            <input
+                              type="text"
+                              value={questionFormData.exercice}
+                              onChange={(e) => handleQuestionFormChange('exercice', e.target.value)}
+                              placeholder="Ex: Exercice 3"
+                              className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Ref Question
+                            </label>
+                            <input
+                              type="text"
+                              value={questionFormData.question}
+                              onChange={(e) => handleQuestionFormChange('question', e.target.value)}
+                              placeholder="Ex: Question 2.a"
+                              className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+                            />
+                          </div>
+                        </div>
 
-              {/* Savoir-faire */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  🛠️ Savoir-faire (0 ou 100)
-                </label>
-                <select
-                  value={scoreLocalData.savoir}
-                  onChange={(e) => handleScoreLocalChange('savoir', parseInt(e.target.value))}
-                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                >
-                  <option value={0}>0 - Non maîtrisé</option>
-                  <option value={100}>100 - Maîtrisé</option>
-                </select>
-              </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            🧠 Compréhension
+                          </label>
+                          <select
+                            value={questionFormData.comprehension}
+                            onChange={(e) => handleQuestionFormChange('comprehension', parseInt(e.target.value))}
+                            className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+                          >
+                            <option value={0}>0 - Pas compris</option>
+                            <option value={25}>25 - Compréhension minimale</option>
+                            <option value={50}>50 - Compréhension partielle</option>
+                            <option value={75}>75 - Bonne compréhension</option>
+                            <option value={100}>100 - Compréhension totale</option>
+                          </select>
+                        </div>
 
-              {/* Rédaction */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  ✍️ Rédaction (0 ou 100)
-                </label>
-                <select
-                  value={scoreLocalData.redaction}
-                  onChange={(e) => handleScoreLocalChange('redaction', parseInt(e.target.value))}
-                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                >
-                  <option value={0}>0 - Rédaction insuffisante</option>
-                  <option value={100}>100 - Rédaction satisfaisante</option>
-                </select>
-              </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            🛠️ Savoir-faire
+                          </label>
+                          <select
+                            value={questionFormData.savoir}
+                            onChange={(e) => handleQuestionFormChange('savoir', parseInt(e.target.value))}
+                            className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+                          >
+                            <option value={0}>0 - Non maîtrisé</option>
+                            <option value={100}>100 - Maîtrisé</option>
+                          </select>
+                        </div>
 
-              {/* Correction */}
-              <div className="flex items-center gap-3 p-4 bg-green-50 border-2 border-green-200 rounded-xl">
-                <input
-                  type="checkbox"
-                  checked={scoreLocalData.correction === 1}
-                  onChange={(e) => handleScoreLocalChange('correction', e.target.checked ? 1 : 0)}
-                  className="w-5 h-5 text-green-600 rounded"
-                />
-                <label className="text-sm font-medium text-gray-700">
-                  ✅ Correction effectuée (+30% de bonus)
-                </label>
-              </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            ✍️ Rédaction
+                          </label>
+                          <select
+                            value={questionFormData.redaction}
+                            onChange={(e) => handleQuestionFormChange('redaction', parseInt(e.target.value))}
+                            className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+                          >
+                            <option value={0}>0 - Rédaction insuffisante</option>
+                            <option value={100}>100 - Rédaction satisfaisante</option>
+                          </select>
+                        </div>
 
-              {/* Questions posées */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-gray-700">
-                    💬 Questions posées par l'étudiant
-                  </label>
-                  <button
-                    type="button"
-                    onClick={addQuestion}
-                    className="text-sm text-purple-600 hover:text-purple-700 font-medium"
-                  >
-                    + Ajouter une question
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {scoreLocalData.questions_posees.map((q, idx) => (
-                    <div key={idx} className="flex gap-2">
-                      <input
-                        type="text"
-                        value={q}
-                        onChange={(e) => updateQuestion(idx, e.target.value)}
-                        placeholder={`Question ${idx + 1}`}
-                        className="flex-1 px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                      />
-                      {scoreLocalData.questions_posees.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeQuestion(idx)}
-                          className="px-3 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition"
-                        >
-                          ✕
-                        </button>
-                      )}
+                        <div className="flex items-center gap-3 p-4 bg-green-50 border-2 border-green-200 rounded-xl">
+                          <input
+                            type="checkbox"
+                            checked={questionFormData.correction === 1}
+                            onChange={(e) => handleQuestionFormChange('correction', e.target.checked ? 1 : 0)}
+                            className="w-5 h-5 text-green-600 rounded"
+                          />
+                          <label className="text-sm font-medium text-gray-700">
+                            ✅ Correction effectuée (+30% de bonus)
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 mt-4">
+                      <button
+                        type="button"
+                        onClick={addQuestion}
+                        className="flex-1 px-4 py-2 bg-green-500 hover:bg-green-600 text-white font-medium rounded-lg transition"
+                      >
+                        {editingQuestionId ? '✓ Mettre à jour' : '➕ Ajouter'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={resetQuestionForm}
+                        className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-900 font-medium rounded-lg transition"
+                      >
+                        ✕ Annuler
+                      </button>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
+
+                {/* Liste des questions ajoutées */}
+                {questionsActuelles.length > 0 && (
+                  <div className="space-y-2">
+                    {typeEntrainement === 'mecanique' ? (
+                      questionsMecaniques.map((q, index) => (
+                        <div key={q.tempId} className="bg-white border-2 border-blue-200 rounded-lg p-3 flex items-center justify-between">
+                          <div>
+                            <span className="font-bold text-blue-600">Question {index + 1}:</span>
+                            <span className="ml-2 text-gray-900">{q.question}</span>
+                            <span className={`ml-3 px-2 py-0.5 rounded text-xs font-bold ${
+                              q.succes ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                            }`}>
+                              {q.succes ? '✓ Succès' : '✗ Échec'}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => editQuestion(q.tempId)}
+                              className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs font-medium rounded transition"
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteQuestion(q.tempId)}
+                              className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium rounded transition"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      questionsChaotiques.map((q, index) => (
+                        <div key={q.tempId} className="bg-white border-2 border-purple-200 rounded-lg p-3 flex items-center justify-between">
+                          <div>
+                            <span className="font-bold text-purple-600">Question {index + 1}:</span>
+                            <span className="ml-2 text-gray-900">{q.exercice} - {q.question}</span>
+                            <div className="text-xs text-gray-600 mt-1">
+                              C: {q.comprehension} | S: {q.savoir} | R: {q.redaction} | Corr: {q.correction ? '✓' : '✗'}
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => editQuestion(q.tempId)}
+                              className="px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 text-xs font-medium rounded transition"
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteQuestion(q.tempId)}
+                              className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium rounded transition"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
 
-              {/* Boutons */}
-              <div className="flex gap-4">
-                <button
-                  type="button"
-                  onClick={(e) => handleScoreLocalSubmit(e, true)}
-                  disabled={saving}
-                  className="flex-1 px-6 py-3 bg-purple-500 hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  {saving ? (
-                    <>
-                      <Loader />
-                      Enregistrement...
-                    </>
-                  ) : (
-                    <>
-                      ➕ Enregistrer et ajouter une autre question
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => handleScoreLocalSubmit(e, false)}
-                  disabled={saving}
-                  className="flex-1 px-6 py-3 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  {saving ? (
-                    <>
-                      <Loader />
-                      Enregistrement...
-                    </>
-                  ) : (
-                    <>
-                      ✅ Enregistrer et terminer
-                    </>
-                  )}
-                </button>
-              </div>
-              <div className="text-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (confirm('Êtes-vous sûr de vouloir annuler ? Les données de la session globale sont déjà enregistrées.')) {
-                      setShowScoreLocalForm(false);
-                      setLastSessionId(null);
-                      loadData();
-                      resetForm();
-                    }
-                  }}
-                  className="px-6 py-2 text-gray-600 hover:text-gray-900 font-medium transition-colors"
-                >
-                  Annuler
-                </button>
-              </div>
+              {/* Bouton Submit */}
+              <button
+                type="submit"
+                disabled={saving || questionsActuelles.length === 0}
+                className="w-full px-6 py-3 bg-teal-500 hover:bg-teal-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-gray-900 font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {saving ? (
+                  <>
+                    <Loader />
+                    Enregistrement...
+                  </>
+                ) : (
+                  <>
+                    💾 Enregistrer la session complète
+                  </>
+                )}
+              </button>
             </form>
           </div>
         )}
@@ -1244,7 +1286,6 @@ export default function SessionsPage() {
                   <div className="text-center py-12 text-gray-500">
                     <div className="text-4xl mb-2">📭</div>
                     <p>Aucun score local pour cette session</p>
-                    <p className="text-sm mt-2">Les scores locaux sont enregistrés uniquement pour les sessions chaotiques</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -1257,7 +1298,7 @@ export default function SessionsPage() {
                                 Question {index + 1}
                               </span>
                               <span className="text-lg font-bold text-purple-700">
-                                {score.exercice} - {score.question}
+                                {score.exercice && `${score.exercice} - `}{score.question}
                               </span>
                             </div>
                             <div className="text-sm text-gray-600">
@@ -1292,19 +1333,6 @@ export default function SessionsPage() {
                             </div>
                           </div>
                         </div>
-
-                        {score.questions_posees && score.questions_posees.length > 0 && (
-                          <div className="bg-white rounded-lg p-3 border border-purple-200">
-                            <div className="text-xs font-semibold text-gray-700 mb-2">💬 Questions posées :</div>
-                            <ul className="space-y-1">
-                              {score.questions_posees.map((q: string, idx: number) => (
-                                <li key={idx} className="text-sm text-gray-700 pl-4">
-                                  • {q}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
 
                         <div className="flex items-center justify-end gap-2 mt-3">
                           <button

@@ -319,6 +319,11 @@ function ItemForm({
         data.difficulte = parseInt(difficulte);
       }
       
+      // 🆕 FIX : Définir le type par défaut pour les feuilles
+      if (type === 'feuille') {
+        data.type = initial?.type || 'chaotique'; // Par défaut "chaotique" si pas déjà défini
+      }
+      
       if (type === 'sujet' && parentId) data.niveau_id = parentId;
       if (type === 'chapitre' && parentId) data.sujet_id = parentId;
       if (type === 'feuille' && parentId) {
