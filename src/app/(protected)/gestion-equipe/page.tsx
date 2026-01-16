@@ -37,6 +37,27 @@ type Notification = {
   metadata: any;
 };
 
+type ScoreLocalDetail = {
+  id: string;
+  exercice: string;
+  question: string;
+  comprehension: number;
+  savoir: number;
+  redaction: number;
+  correction: number;
+  score_calcule: number;
+};
+
+type SyntheseData = {
+  scoresLocaux: ScoreLocalDetail[];
+  scoreGlobal: number;
+  scoreMax: number;
+  feuilleId: string;
+  feuilleTitre: string;
+  membreNom: string;
+  userId: string;
+};
+
 /* ---------- Icônes ---------- */
 const IconUser = () => (
   <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
@@ -109,6 +130,10 @@ export default function GestionEquipePage() {
   const [showRejetModal, setShowRejetModal] = useState(false);
   const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
   const [commentaireRejet, setCommentaireRejet] = useState('');
+
+  const [showSyntheseModal, setShowSyntheseModal] = useState(false);
+  const [syntheseData, setSyntheseData] = useState<SyntheseData | null>(null);
+  const [loadingSynthese, setLoadingSynthese] = useState(false);
 
   useEffect(() => {
     // Récupérer l'ID de l'équipe depuis l'URL
@@ -196,20 +221,125 @@ export default function GestionEquipePage() {
     router.push(`/progression/observer/${membre.user_id}`);
   }
 
+  async function handleOuvrirSynthese(notif: Notification) {
+    setLoadingSynthese(true);
+    setShowSyntheseModal(true);
+
+    try {
+      const userId = notif.metadata.user_id;
+      const feuilleId = notif.metadata.feuille_id;
+
+      // Récupérer le titre de la feuille et le nom du membre
+      const { data: feuilleData } = await supabase
+        .from('feuille_entrainement')
+        .select('titre')
+        .eq('id', feuilleId)
+        .single();
+
+      const { data: userData } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', userId)
+        .single();
+
+      // Récupérer les sessions de cette feuille pour cet utilisateur
+      const { data: sessionsData } = await supabase
+        .from('session_entrainement')
+        .select('id')
+        .eq('user_id', userId)
+        .or(`feuille_mecanique_id.eq.${feuilleId},feuille_chaotique_id.eq.${feuilleId}`);
+
+      if (!sessionsData || sessionsData.length === 0) {
+        setSyntheseData({
+          scoresLocaux: [],
+          scoreGlobal: 0,
+          scoreMax: 0,
+          feuilleId,
+          feuilleTitre: feuilleData?.titre || 'Feuille inconnue',
+          membreNom: userData?.full_name || 'Membre inconnu',
+          userId,
+        });
+        setLoadingSynthese(false);
+        return;
+      }
+
+      const sessionIds = sessionsData.map((s: any) => s.id);
+
+      // Charger les scores locaux
+      const { data: scoresData } = await supabase
+        .from('score_local')
+        .select('*')
+        .in('session_id', sessionIds)
+        .order('created_at', { ascending: true });
+
+      if (!scoresData || scoresData.length === 0) {
+        setSyntheseData({
+          scoresLocaux: [],
+          scoreGlobal: 0,
+          scoreMax: 0,
+          feuilleId,
+          feuilleTitre: feuilleData?.titre || 'Feuille inconnue',
+          membreNom: userData?.full_name || 'Membre inconnu',
+          userId,
+        });
+        setLoadingSynthese(false);
+        return;
+      }
+
+      const scores: ScoreLocalDetail[] = scoresData.map((s: any) => ({
+        id: s.id,
+        exercice: s.exercice || 'Question',
+        question: s.question,
+        comprehension: s.comprehension,
+        savoir: s.savoir,
+        redaction: s.redaction,
+        correction: s.correction,
+        score_calcule: parseFloat(s.score_calcule) || 0,
+      }));
+
+      // Calculer le score global
+      const total = scores.reduce((acc, s) => acc + s.score_calcule, 0);
+      const max = scores.length * 130;
+      const pourcentage = scores.length > 0 ? Math.round((total / max) * 100) : 0;
+
+      setSyntheseData({
+        scoresLocaux: scores,
+        scoreGlobal: pourcentage,
+        scoreMax: max,
+        feuilleId,
+        feuilleTitre: feuilleData?.titre || 'Feuille inconnue',
+        membreNom: userData?.full_name || 'Membre inconnu',
+        userId,
+      });
+
+      setLoadingSynthese(false);
+    } catch (error) {
+      console.error('Erreur chargement synthèse:', error);
+      alert('Erreur lors du chargement de la synthèse');
+      setShowSyntheseModal(false);
+      setLoadingSynthese(false);
+    }
+  }
+
   async function handleValiderSoumission(notif: Notification) {
     if (!confirm('Valider cette soumission ?')) return;
 
     try {
+      // Si on valide depuis le modal de synthèse, utiliser le score calculé
+      const scoreAUtiliser = syntheseData ? syntheseData.scoreGlobal : notif.metadata.score;
+
       const { error } = await supabase.rpc('valider_soumission_feuille', {
         p_notification_id: notif.id,
         p_user_id: notif.metadata.user_id,
         p_feuille_id: notif.metadata.feuille_id,
-        p_score: notif.metadata.score,
+        p_score: scoreAUtiliser,
       });
 
       if (error) throw error;
 
       alert('✓ Soumission validée');
+      setShowSyntheseModal(false);
+      setSyntheseData(null);
       if (equipeId) loadData(equipeId);
     } catch (error) {
       console.error(error);
@@ -237,8 +367,10 @@ export default function GestionEquipePage() {
 
       alert('✓ Soumission rejetée');
       setShowRejetModal(false);
+      setShowSyntheseModal(false);
       setNotificationSelectionnee(null);
       setCommentaireRejet('');
+      setSyntheseData(null);
       if (equipeId) loadData(equipeId);
     } catch (error) {
       console.error(error);
@@ -258,49 +390,51 @@ export default function GestionEquipePage() {
 
   return (
     <main className="min-h-screen bg-white p-4 md:p-8">
-      <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Lora:wght@400;500;600;700&display=swap');
-        h1, h2, h3, h4, h5, h6, .font-mono { font-family: 'IBM Plex Mono', monospace; }
-        body { font-family: 'Lora', serif; }
-        p, span, div { font-family: 'Lora', serif; }
-      `}</style>
       <div className="max-w-6xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="bg-white rounded-2xl p-6 border-2 border-gray-300">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">
-                Gestion de l'équipe
-              </h1>
-              <p className="text-gray-600 mt-2">
-                Équipe : <span className="font-semibold" style={{ color: equipe.couleur }}>{equipe.nom}</span>
-              </p>
-            </div>
-            <button
-              onClick={() => router.push('/classement')}
-              className="px-4 py-2 bg-gray-100 hover:bg-gray-100 text-gray-900 font-medium rounded-lg transition-colors"
-            >
-              ← Retour
-            </button>
+        {/* Header avec retour */}
+        <div className="flex items-center gap-4 mb-6">
+          <button
+            onClick={() => router.push('/classement')}
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium rounded-lg transition-colors"
+          >
+            ← Retour
+          </button>
+          <div className="flex-1">
+            <h1 className="text-3xl font-black text-gray-900">
+              🏆 Gestion de l'équipe
+            </h1>
+            <p className="text-gray-600 mt-1">
+              {equipe.nom}
+            </p>
           </div>
+        </div>
+
+        {/* Boutons d'action */}
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowObserverModal(true)}
+            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-gray-900 font-medium rounded-lg transition-colors flex items-center gap-2"
+          >
+            <IconEye />
+            Observer toutes les feuilles
+          </button>
+          <button
+            onClick={() => router.push('/classement')}
+            className="px-4 py-2 bg-teal-500 hover:bg-teal-600 text-gray-900 font-medium rounded-lg transition-colors flex items-center gap-2"
+          >
+            <IconChart />
+            Voir le classement
+          </button>
         </div>
 
         {/* Liste des membres */}
         <div className="bg-white rounded-2xl p-6 border-2 border-gray-300">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-gray-900">
-              👥 Membres de l'équipe ({membres.length})
-            </h2>
-            <button
-              onClick={() => setShowObserverModal(true)}
-              className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-gray-900 font-semibold rounded-lg transition-colors flex items-center gap-2"
-            >
-              🔍 Observer feuilles
-            </button>
-          </div>
-
+          <h2 className="text-xl font-bold text-gray-900 mb-4">
+            👥 Membres de l'équipe ({membres.length})
+          </h2>
+          
           {membres.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
+            <div className="text-center py-8 text-gray-500">
               Aucun membre pour le moment
             </div>
           ) : (
@@ -407,16 +541,10 @@ export default function GestionEquipePage() {
                     {notif.type === 'soumission_feuille' ? (
                       <div className="flex gap-2">
                         <button
-                          onClick={() => handleValiderSoumission(notif)}
-                          className="px-3 py-1.5 bg-green-100/30 hover:bg-green-200/50 text-green-600 text-sm font-medium rounded-lg transition-colors"
+                          onClick={() => handleOuvrirSynthese(notif)}
+                          className="px-3 py-1.5 bg-blue-100/30 hover:bg-blue-200/50 text-blue-600 text-sm font-medium rounded-lg transition-colors"
                         >
-                          ✓ Valider
-                        </button>
-                        <button
-                          onClick={() => handleOuvrirRejet(notif)}
-                          className="px-3 py-1.5 bg-red-100/30 hover:bg-red-200/50 text-red-600 text-sm font-medium rounded-lg transition-colors"
-                        >
-                          ✗ Rejeter
+                          👁️ Voir détails
                         </button>
                       </div>
                     ) : (
@@ -492,7 +620,7 @@ export default function GestionEquipePage() {
                   setNotificationSelectionnee(null);
                   setCommentaireRejet('');
                 }}
-                className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-100 text-gray-900 font-medium rounded-lg transition-colors"
+                className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium rounded-lg transition-colors"
               >
                 Annuler
               </button>
@@ -504,6 +632,185 @@ export default function GestionEquipePage() {
                 Rejeter
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Synthèse */}
+      {showSyntheseModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-4 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h2 className="text-xl font-bold text-white">
+                  📝 Synthèse de la soumission
+                </h2>
+                {syntheseData && (
+                  <p className="text-blue-100 text-sm mt-1">
+                    {syntheseData.membreNom} - {syntheseData.feuilleTitre}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  setShowSyntheseModal(false);
+                  setSyntheseData(null);
+                }}
+                className="text-white hover:bg-white/20 rounded-lg p-2 transition"
+              >
+                <IconX />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {loadingSynthese ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader />
+                </div>
+              ) : syntheseData ? (
+                <div className="space-y-4">
+                  {syntheseData.scoresLocaux.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      <div className="text-4xl mb-2">📭</div>
+                      <p>Aucune question enregistrée pour cette feuille</p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Score global */}
+                      <div className="bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-200 rounded-xl p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm text-gray-600 mb-1">Score Global Calculé</div>
+                            <div className="text-3xl font-bold text-blue-600">{syntheseData.scoreGlobal}%</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs text-gray-500">Détail</div>
+                            <div className="text-sm font-medium text-gray-700">
+                              {syntheseData.scoresLocaux.reduce((acc, s) => acc + s.score_calcule, 0).toFixed(1)} / {syntheseData.scoreMax}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              {syntheseData.scoresLocaux.length} question{syntheseData.scoresLocaux.length > 1 ? 's' : ''}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Liste des questions par exercice */}
+                      <div className="space-y-3">
+                        <div className="text-sm font-semibold text-gray-700 mb-2">
+                          📝 Détail des questions
+                        </div>
+                        
+                        {(() => {
+                          // Regrouper par exercice
+                          const parExercice = syntheseData.scoresLocaux.reduce((acc, score) => {
+                            const exercice = score.exercice || 'Questions';
+                            if (!acc[exercice]) {
+                              acc[exercice] = [];
+                            }
+                            acc[exercice].push(score);
+                            return acc;
+                          }, {} as Record<string, ScoreLocalDetail[]>);
+
+                          return Object.entries(parExercice).map(([exercice, questions]) => (
+                            <div key={exercice} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                              {/* Titre de l'exercice */}
+                              <div className="font-semibold text-gray-900 mb-2 pb-2 border-b border-gray-300">
+                                {exercice}
+                              </div>
+
+                              {/* Questions */}
+                              <div className="space-y-2">
+                                {questions.map((q) => (
+                                  <div key={q.id} className="bg-white border border-gray-200 rounded-lg p-2.5">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="flex-1">
+                                        <div className="font-medium text-gray-900 text-sm mb-1">
+                                          {q.question}
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 text-xs">
+                                          <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
+                                            C: {q.comprehension}
+                                          </span>
+                                          <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded">
+                                            S: {q.savoir}
+                                          </span>
+                                          <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded">
+                                            R: {q.redaction}
+                                          </span>
+                                          {q.correction === 1 && (
+                                            <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded">
+                                              ✓ Corr.
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="text-right">
+                                        <div className="text-lg font-bold text-blue-600">
+                                          {Math.round(q.score_calcule)}%
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            {/* Footer avec boutons */}
+            {syntheseData && syntheseData.scoresLocaux.length > 0 && (
+              <div className="border-t border-gray-200 p-6 flex gap-3 flex-shrink-0">
+                <button
+                  onClick={() => {
+                    setShowSyntheseModal(false);
+                    setSyntheseData(null);
+                  }}
+                  className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium rounded-lg transition-colors"
+                >
+                  Fermer
+                </button>
+                <button
+                  onClick={() => {
+                    // Trouver la notification correspondante
+                    const notif = notifications.find(n => 
+                      n.metadata.user_id === syntheseData.userId && 
+                      n.metadata.feuille_id === syntheseData.feuilleId
+                    );
+                    if (notif) {
+                      setShowSyntheseModal(false);
+                      handleOuvrirRejet(notif);
+                    }
+                  }}
+                  className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-medium rounded-lg transition-colors"
+                >
+                  ✗ Rejeter
+                </button>
+                <button
+                  onClick={() => {
+                    // Trouver la notification correspondante
+                    const notif = notifications.find(n => 
+                      n.metadata.user_id === syntheseData.userId && 
+                      n.metadata.feuille_id === syntheseData.feuilleId
+                    );
+                    if (notif) {
+                      handleValiderSoumission(notif);
+                    }
+                  }}
+                  className="flex-1 px-4 py-2 bg-green-500 hover:bg-green-600 text-white font-medium rounded-lg transition-colors"
+                >
+                  ✓ Valider
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

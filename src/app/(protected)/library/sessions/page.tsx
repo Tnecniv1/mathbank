@@ -952,6 +952,7 @@ export default function SessionsPage() {
                             className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
                           >
                             <option value={0}>0 - Non maîtrisé</option>
+                            <option value={50}>50 - Partiellement maîtrisé</option>
                             <option value={100}>100 - Maîtrisé</option>
                           </select>
                         </div>
@@ -966,6 +967,7 @@ export default function SessionsPage() {
                             className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
                           >
                             <option value={0}>0 - Rédaction insuffisante</option>
+                            <option value={50}>50 - Rédaction partielle</option>
                             <option value={100}>100 - Rédaction satisfaisante</option>
                           </select>
                         </div>

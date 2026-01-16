@@ -56,6 +56,23 @@ type ScoreLocal = {
   exercice: string;
   question: string;
   date: string;
+  session_id?: string;
+  session_numero?: number;
+};
+
+type ScoreMecaCumulatif = {
+  ordre: number;
+  scoreCumulatif: number;
+  question: string;
+  date: string;
+};
+
+type ScoreParSession = {
+  ordre: number;
+  session_numero: number;
+  scoreMoyen: number;
+  nbQuestions: number;
+  date: string;
 };
 
 const MAX_FEUILLES_PAR_LIGNE = 30;
@@ -72,6 +89,10 @@ export default function TableauProgression() {
   const [scoresMecaniques, setScoresMecaniques] = useState<ScoreLocal[]>([]);
   const [scoresChaotiques, setScoresChaotiques] = useState<ScoreLocal[]>([]);
   const [scoreType, setScoreType] = useState<'mecanique' | 'chaotique'>('mecanique');
+  const [viewMode, setViewMode] = useState<'questions' | 'sessions'>('questions');
+  const [scoresMecaCumulatifs, setScoresMecaCumulatifs] = useState<ScoreMecaCumulatif[]>([]);
+  const [scoresParSessionMeca, setScoresParSessionMeca] = useState<ScoreParSession[]>([]);
+  const [scoresParSessionChaos, setScoresParSessionChaos] = useState<ScoreParSession[]>([]);
 
   useEffect(() => {
     loadNiveaux();
@@ -130,7 +151,7 @@ export default function TableauProgression() {
         processData(rawData);
       }
 
-      await loadScoresLocauxAvecType(userId);
+      await loadScoresLocauxAvecType(niveauId, userId);
       await loadConcentrationData(niveauId, userId);
 
       setLoading(false);
@@ -218,34 +239,70 @@ export default function TableauProgression() {
 
 
 
-  async function loadScoresLocauxAvecType(userId: string) {
+  async function loadScoresLocauxAvecType(niveauId: string, userId: string) {
       try {
+        // Récupérer d'abord toutes les feuilles du niveau
+        const { data: feuillesData } = await supabase
+          .from('feuille_entrainement')
+          .select(`
+            id,
+            chapitre:chapitre!inner(
+              sujet:sujet!inner(
+                niveau_id
+              )
+            )
+          `)
+          .eq('chapitre.sujet.niveau_id', niveauId);
+
+        if (!feuillesData || feuillesData.length === 0) {
+          setScoresMecaniques([]);
+          setScoresChaotiques([]);
+          setScoresMecaCumulatifs([]);
+          setScoresParSessionMeca([]);
+          setScoresParSessionChaos([]);
+          return;
+        }
+
+        const feuilleIds = feuillesData.map((f: any) => f.id);
+
+        // Récupérer les scores locaux filtrés par niveau
         const { data: scoresData, error } = await supabase
           .from('score_local')
           .select(`
+            id,
             exercice,
             question,
             score_calcule,
             created_at,
+            session_id,
             session_entrainement!inner(
               user_id,
               feuille_mecanique_id,
-              feuille_chaotique_id
+              feuille_chaotique_id,
+              numero_session,
+              date_session
             )
           `)
           .eq('session_entrainement.user_id', userId)
+          .or(`feuille_mecanique_id.in.(${feuilleIds.join(',')}),feuille_chaotique_id.in.(${feuilleIds.join(',')})`, { foreignTable: 'session_entrainement' })
           .order('created_at', { ascending: true });
 
         if (error) {
           console.error('Erreur chargement scores locaux:', error);
           setScoresMecaniques([]);
           setScoresChaotiques([]);
+          setScoresMecaCumulatifs([]);
+          setScoresParSessionMeca([]);
+          setScoresParSessionChaos([]);
           return;
         }
 
         if (!scoresData || scoresData.length === 0) {
           setScoresMecaniques([]);
           setScoresChaotiques([]);
+          setScoresMecaCumulatifs([]);
+          setScoresParSessionMeca([]);
+          setScoresParSessionChaos([]);
           return;
         }
 
@@ -254,35 +311,109 @@ export default function TableauProgression() {
         const scoresChaos: ScoreLocal[] = [];
         let indexMeca = 1;
         let indexChaos = 1;
+        let scoreCumulatif = 0;
+        const scoresCumulatifs: ScoreMecaCumulatif[] = [];
+
+        // Map pour regrouper par session
+        const sessionsMeca = new Map<string, ScoreLocal[]>();
+        const sessionsChaos = new Map<string, ScoreLocal[]>();
 
         scoresData.forEach((score: any) => {
           const isMecanique = score.session_entrainement.feuille_mecanique_id !== null;
+          const sessionId = score.session_id;
+          const sessionNumero = score.session_entrainement.numero_session;
+          const dateSession = score.session_entrainement.date_session;
           
           if (isMecanique) {
-            scoresMeca.push({
+            const scoreValue = parseFloat(score.score_calcule) || 0;
+            const isSucces = scoreValue === 100;
+            
+            // Score normal
+            const scoreLocal: ScoreLocal = {
               ordre: indexMeca++,
-              score: parseFloat(score.score_calcule) || 0,
+              score: scoreValue,
               exercice: score.exercice,
+              question: score.question,
+              date: new Date(score.created_at).toLocaleDateString('fr-FR'),
+              session_id: sessionId,
+              session_numero: sessionNumero
+            };
+            scoresMeca.push(scoreLocal);
+
+            // Score cumulatif
+            scoreCumulatif += isSucces ? 1 : -1;
+            scoresCumulatifs.push({
+              ordre: indexMeca - 1,
+              scoreCumulatif: scoreCumulatif,
               question: score.question,
               date: new Date(score.created_at).toLocaleDateString('fr-FR')
             });
+
+            // Regrouper par session
+            if (!sessionsMeca.has(sessionId)) {
+              sessionsMeca.set(sessionId, []);
+            }
+            sessionsMeca.get(sessionId)!.push(scoreLocal);
           } else {
-            scoresChaos.push({
+            const scoreLocal: ScoreLocal = {
               ordre: indexChaos++,
               score: parseFloat(score.score_calcule) || 0,
               exercice: score.exercice,
               question: score.question,
-              date: new Date(score.created_at).toLocaleDateString('fr-FR')
-            });
+              date: new Date(score.created_at).toLocaleDateString('fr-FR'),
+              session_id: sessionId,
+              session_numero: sessionNumero
+            };
+            scoresChaos.push(scoreLocal);
+
+            // Regrouper par session
+            if (!sessionsChaos.has(sessionId)) {
+              sessionsChaos.set(sessionId, []);
+            }
+            sessionsChaos.get(sessionId)!.push(scoreLocal);
           }
+        });
+
+        // Calculer les moyennes par session pour mécaniques
+        const scoresSessionMeca: ScoreParSession[] = [];
+        let ordreMeca = 1;
+        sessionsMeca.forEach((scores, sessionId) => {
+          const scoreMoyen = scores.reduce((acc, s) => acc + s.score, 0) / scores.length;
+          scoresSessionMeca.push({
+            ordre: ordreMeca++,
+            session_numero: scores[0].session_numero || 0,
+            scoreMoyen: Math.round(scoreMoyen),
+            nbQuestions: scores.length,
+            date: scores[0].date
+          });
+        });
+
+        // Calculer les moyennes par session pour chaotiques
+        const scoresSessionChaos: ScoreParSession[] = [];
+        let ordreChaos = 1;
+        sessionsChaos.forEach((scores, sessionId) => {
+          const scoreMoyen = scores.reduce((acc, s) => acc + s.score, 0) / scores.length;
+          scoresSessionChaos.push({
+            ordre: ordreChaos++,
+            session_numero: scores[0].session_numero || 0,
+            scoreMoyen: Math.round(scoreMoyen),
+            nbQuestions: scores.length,
+            date: scores[0].date
+          });
         });
 
         setScoresMecaniques(scoresMeca);
         setScoresChaotiques(scoresChaos);
+        setScoresMecaCumulatifs(scoresCumulatifs);
+        setScoresParSessionMeca(scoresSessionMeca);
+        setScoresParSessionChaos(scoresSessionChaos);
       } catch (err: any) {
         console.error('Erreur chargement scores locaux:', err);
         setScoresMecaniques([]);
         setScoresChaotiques([]);
+        setScoresMecaCumulatifs([]);
+        setScoresParSessionMeca([]);
+        setScoresParSessionChaos([]);
       }
     }
 
@@ -698,8 +829,12 @@ export default function TableauProgression() {
                               <h2 className="text-sm font-bold text-gray-900">Progresser en mathématique</h2>
                               <p className="text-purple-100 text-xs">
                                 {scoreType === 'mecanique'
-                                  ? `${scoresMecaniques.length} question${scoresMecaniques.length > 1 ? 's' : ''} mécaniques`
-                                  : `${scoresChaotiques.length} question${scoresChaotiques.length > 1 ? 's' : ''} chaotiques`
+                                  ? viewMode === 'questions'
+                                    ? `${scoresMecaniques.length} question${scoresMecaniques.length > 1 ? 's' : ''}`
+                                    : `${scoresParSessionMeca.length} session${scoresParSessionMeca.length > 1 ? 's' : ''}`
+                                  : viewMode === 'questions'
+                                    ? `${scoresChaotiques.length} question${scoresChaotiques.length > 1 ? 's' : ''}`
+                                    : `${scoresParSessionChaos.length} session${scoresParSessionChaos.length > 1 ? 's' : ''}`
                                 }
                               </p>
                             </div>
@@ -727,22 +862,112 @@ export default function TableauProgression() {
                                   C
                                 </button>
                               </div>
+                              {/* Toggle Questions/Sessions */}
+                              <div className="flex bg-white/20 rounded-lg p-0.5">
+                                <button
+                                  onClick={() => setViewMode('questions')}
+                                  className={`px-2 py-1 text-xs font-medium rounded transition ${
+                                    viewMode === 'questions'
+                                      ? 'bg-white text-gray-900'
+                                      : 'text-white hover:bg-white/10'
+                                  }`}
+                                >
+                                  Q
+                                </button>
+                                <button
+                                  onClick={() => setViewMode('sessions')}
+                                  className={`px-2 py-1 text-xs font-medium rounded transition ${
+                                    viewMode === 'sessions'
+                                      ? 'bg-white text-gray-900'
+                                      : 'text-white hover:bg-white/10'
+                                  }`}
+                                >
+                                  S
+                                </button>
+                              </div>
                               <FullscreenButton blockId="scores" />
                             </div>
                           </div>
 
-                          {/* Graphique Mécanique */}
-                          {scoreType === 'mecanique' && scoresMecaniques.length > 0 && (
+                          {/* GRAPHIQUE MÉCANIQUE - MODE QUESTIONS (Cumulatif) */}
+                          {scoreType === 'mecanique' && viewMode === 'questions' && scoresMecaCumulatifs.length > 0 && (
                             <>
                               <div className="p-3 flex-1 min-h-0">
                                 <ResponsiveContainer width="100%" height="100%">
-                                  <LineChart data={scoresMecaniques}>
+                                  <LineChart data={scoresMecaCumulatifs}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
                                     <XAxis 
                                       dataKey="ordre" 
                                       stroke="#71717a"
                                       style={{ fontSize: '10px' }}
                                       label={{ value: 'Question', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+                                    />
+                                    <YAxis 
+                                      stroke="#71717a"
+                                      style={{ fontSize: '10px' }}
+                                    />
+                                    <Tooltip
+                                      contentStyle={{
+                                        backgroundColor: '#fff',
+                                        border: '1px solid #e4e4e7',
+                                        borderRadius: '8px',
+                                        fontSize: '11px'
+                                      }}
+                                      formatter={(value: any) => [`Score: ${value}`, 'Cumulatif']}
+                                      labelFormatter={(value: any, payload: any) => {
+                                        const item = payload[0]?.payload;
+                                        return item ? `Q${value} - ${item.question}` : `Question ${value}`;
+                                      }}
+                                    />
+                                    <Line
+                                      type="monotone"
+                                      dataKey="scoreCumulatif"
+                                      stroke="#3b82f6"
+                                      strokeWidth={2}
+                                      dot={{ fill: '#3b82f6', r: 4 }}
+                                      name="Score Cumulatif"
+                                    />
+                                  </LineChart>
+                                </ResponsiveContainer>
+                              </div>
+
+                              <div className="bg-blue-50/20 px-3 py-1.5 border-t border-blue-200 flex-shrink-0">
+                                <div className="flex justify-around text-center text-xs">
+                                  <div>
+                                    <div className="font-bold text-blue-600">
+                                      {scoresMecaCumulatifs[scoresMecaCumulatifs.length - 1]?.scoreCumulatif || 0}
+                                    </div>
+                                    <div className="text-blue-700 text-[10px]">Score Actuel</div>
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-blue-600">
+                                      {Math.max(...scoresMecaCumulatifs.map(s => s.scoreCumulatif))}
+                                    </div>
+                                    <div className="text-blue-700 text-[10px]">Max</div>
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-blue-600">
+                                      {Math.min(...scoresMecaCumulatifs.map(s => s.scoreCumulatif))}
+                                    </div>
+                                    <div className="text-blue-700 text-[10px]">Min</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </>
+                          )}
+
+                          {/* GRAPHIQUE MÉCANIQUE - MODE SESSIONS */}
+                          {scoreType === 'mecanique' && viewMode === 'sessions' && scoresParSessionMeca.length > 0 && (
+                            <>
+                              <div className="p-3 flex-1 min-h-0">
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <LineChart data={scoresParSessionMeca}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                                    <XAxis 
+                                      dataKey="ordre" 
+                                      stroke="#71717a"
+                                      style={{ fontSize: '10px' }}
+                                      label={{ value: 'Session', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
                                     />
                                     <YAxis 
                                       domain={[0, 100]}
@@ -756,19 +981,19 @@ export default function TableauProgression() {
                                         borderRadius: '8px',
                                         fontSize: '11px'
                                       }}
-                                      formatter={(value: any) => [`${Math.round(value)}%`, 'Score']}
+                                      formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
                                       labelFormatter={(value: any, payload: any) => {
                                         const item = payload[0]?.payload;
-                                        return item ? `Q${value} - ${item.question}` : `Question ${value}`;
+                                        return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;
                                       }}
                                     />
                                     <Line
                                       type="monotone"
-                                      dataKey="score"
+                                      dataKey="scoreMoyen"
                                       stroke="#3b82f6"
                                       strokeWidth={2}
                                       dot={{ fill: '#3b82f6', r: 4 }}
-                                      name="Score Mécanique"
+                                      name="Score Moyen"
                                     />
                                   </LineChart>
                                 </ResponsiveContainer>
@@ -779,20 +1004,20 @@ export default function TableauProgression() {
                                   <div>
                                     <div className="font-bold text-blue-600">
                                       {Math.round(
-                                        scoresMecaniques.reduce((acc, s) => acc + s.score, 0) / scoresMecaniques.length
+                                        scoresParSessionMeca.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionMeca.length
                                       )}%
                                     </div>
                                     <div className="text-blue-700 text-[10px]">Moyenne</div>
                                   </div>
                                   <div>
                                     <div className="font-bold text-blue-600">
-                                      {Math.max(...scoresMecaniques.map(s => s.score))}%
+                                      {Math.max(...scoresParSessionMeca.map(s => s.scoreMoyen))}%
                                     </div>
                                     <div className="text-blue-700 text-[10px]">Max</div>
                                   </div>
                                   <div>
                                     <div className="font-bold text-blue-600">
-                                      {Math.min(...scoresMecaniques.map(s => s.score))}%
+                                      {Math.min(...scoresParSessionMeca.map(s => s.scoreMoyen))}%
                                     </div>
                                     <div className="text-blue-700 text-[10px]">Min</div>
                                   </div>
@@ -801,8 +1026,8 @@ export default function TableauProgression() {
                             </>
                           )}
 
-                          {/* Graphique Chaotique */}
-                          {scoreType === 'chaotique' && scoresChaotiques.length > 0 && (
+                          {/* GRAPHIQUE CHAOTIQUE - MODE QUESTIONS */}
+                          {scoreType === 'chaotique' && viewMode === 'questions' && scoresChaotiques.length > 0 && (
                             <>
                               <div className="p-3 flex-1 min-h-0">
                                 <ResponsiveContainer width="100%" height="100%">
@@ -871,8 +1096,78 @@ export default function TableauProgression() {
                             </>
                           )}
 
+                          {/* GRAPHIQUE CHAOTIQUE - MODE SESSIONS */}
+                          {scoreType === 'chaotique' && viewMode === 'sessions' && scoresParSessionChaos.length > 0 && (
+                            <>
+                              <div className="p-3 flex-1 min-h-0">
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <LineChart data={scoresParSessionChaos}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                                    <XAxis 
+                                      dataKey="ordre" 
+                                      stroke="#71717a"
+                                      style={{ fontSize: '10px' }}
+                                      label={{ value: 'Session', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+                                    />
+                                    <YAxis 
+                                      domain={[0, 100]}
+                                      stroke="#71717a"
+                                      style={{ fontSize: '10px' }}
+                                    />
+                                    <Tooltip
+                                      contentStyle={{
+                                        backgroundColor: '#fff',
+                                        border: '1px solid #e4e4e7',
+                                        borderRadius: '8px',
+                                        fontSize: '11px'
+                                      }}
+                                      formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
+                                      labelFormatter={(value: any, payload: any) => {
+                                        const item = payload[0]?.payload;
+                                        return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;
+                                      }}
+                                    />
+                                    <Line
+                                      type="monotone"
+                                      dataKey="scoreMoyen"
+                                      stroke="#a855f7"
+                                      strokeWidth={2}
+                                      dot={{ fill: '#a855f7', r: 4 }}
+                                      name="Score Moyen"
+                                    />
+                                  </LineChart>
+                                </ResponsiveContainer>
+                              </div>
+
+                              <div className="bg-purple-50/20 px-3 py-1.5 border-t border-purple-200 flex-shrink-0">
+                                <div className="flex justify-around text-center text-xs">
+                                  <div>
+                                    <div className="font-bold text-purple-600">
+                                      {Math.round(
+                                        scoresParSessionChaos.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionChaos.length
+                                      )}%
+                                    </div>
+                                    <div className="text-purple-700 text-[10px]">Moyenne</div>
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-purple-600">
+                                      {Math.max(...scoresParSessionChaos.map(s => s.scoreMoyen))}%
+                                    </div>
+                                    <div className="text-purple-700 text-[10px]">Max</div>
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-purple-600">
+                                      {Math.min(...scoresParSessionChaos.map(s => s.scoreMoyen))}%
+                                    </div>
+                                    <div className="text-purple-700 text-[10px]">Min</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </>
+                          )}
+
                           {/* Messages si pas de données */}
-                          {scoreType === 'mecanique' && scoresMecaniques.length === 0 && (
+                          {scoreType === 'mecanique' && scoresMecaCumulatifs.length === 0 && (
                             <div className="p-6 text-center text-gray-500 flex-1 flex flex-col items-center justify-center">
                               <div className="text-2xl mb-1">📈</div>
                               <p className="text-xs">Aucun score mécanique enregistré</p>

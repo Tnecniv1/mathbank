@@ -47,6 +47,22 @@ type SessionTravail = {
   commentaire: string | null;
 };
 
+type ScoreLocalDetail = {
+  id: string;
+  exercice: string;
+  question: string;
+  comprehension: number;
+  savoir: number;
+  redaction: number;
+  correction: number;
+  score_calcule: number;
+};
+
+type ScoresParExercice = {
+  exercice: string;
+  questions: ScoreLocalDetail[];
+};
+
 type Progression = {
   id: string;
   feuille_id: string;
@@ -394,47 +410,84 @@ function ProgressionModal({
   const [loading, setLoading] = useState(true);
   const [score, setScore] = useState(''); // Score saisi par le membre
   const [saving, setSaving] = useState(false);
+  const [scoresLocaux, setScoresLocaux] = useState<ScoreLocalDetail[]>([]);
+  const [scoreGlobal, setScoreGlobal] = useState<number>(0);
+  const [scoreMax, setScoreMax] = useState<number>(0);
 
   useEffect(() => {
     loadSessions();
   }, []);
 
   async function loadSessions() {
-    try {
-      const { data: { session: userSession } } = await supabase.auth.getSession();
-      if (!userSession || !userSession.user) return;
+      try {
+        const { data: { session: userSession } } = await supabase.auth.getSession();
+        if (!userSession || !userSession.user) return;
 
-      // Charger les sessions depuis session_entrainement
-      const { data: sessionsData } = await supabase
-        .from('session_entrainement')
-        .select('*')
-        .eq('user_id', userSession.user.id)
-        .or(`feuille_mecanique_id.eq.${feuille.id},feuille_chaotique_id.eq.${feuille.id}`)
-        .order('date_session', { ascending: false });
+        // Charger les sessions depuis session_entrainement
+        const { data: sessionsData } = await supabase
+          .from('session_entrainement')
+          .select('*')
+          .eq('user_id', userSession.user.id)
+          .or(`feuille_mecanique_id.eq.${feuille.id},feuille_chaotique_id.eq.${feuille.id}`)
+          .order('date_session', { ascending: false });
 
-      if (sessionsData) {
-        // Filtrer pour ne garder que les données de cette feuille spécifique
-        const sessionsFiltered = sessionsData.map((s: any) => {
-          const isMecanique = s.feuille_mecanique_id === feuille.id;
-          return {
-            id: s.id,
-            numero: s.numero_session,
-            date: s.date_session,
-            heure: s.heure_session,
-            temps: isMecanique ? s.temps_mecanique : s.temps_chaotique,
-            type: isMecanique ? 'mecanique' : 'chaotique',
-          };
-        }).filter((s: any) => s.temps !== null && s.temps > 0);
+        if (sessionsData) {
+          // Filtrer pour ne garder que les données de cette feuille spécifique
+          const sessionsFiltered = sessionsData.map((s: any) => {
+            const isMecanique = s.feuille_mecanique_id === feuille.id;
+            return {
+              id: s.id,
+              numero: s.numero_session,
+              date: s.date_session,
+              heure: s.heure_session,
+              temps: isMecanique ? s.temps_mecanique : s.temps_chaotique,
+              type: isMecanique ? 'mecanique' : 'chaotique',
+            };
+          }).filter((s: any) => s.temps !== null && s.temps > 0);
 
-        setSessions(sessionsFiltered);
+          setSessions(sessionsFiltered);
+
+          // Charger les scores locaux pour ces sessions
+          const sessionIds = sessionsData.map((s: any) => s.id);
+          
+          if (sessionIds.length > 0) {
+            const { data: scoresData } = await supabase
+              .from('score_local')
+              .select('*')
+              .in('session_id', sessionIds)
+              .order('created_at', { ascending: true });
+
+            if (scoresData && scoresData.length > 0) {
+              const scores: ScoreLocalDetail[] = scoresData.map((s: any) => ({
+                id: s.id,
+                exercice: s.exercice || 'Question',
+                question: s.question,
+                comprehension: s.comprehension,
+                savoir: s.savoir,
+                redaction: s.redaction,
+                correction: s.correction,
+                score_calcule: parseFloat(s.score_calcule) || 0,
+              }));
+
+              setScoresLocaux(scores);
+
+              // Calculer le score global
+              const total = scores.reduce((acc, s) => acc + s.score_calcule, 0);
+              const max = scores.length * 130; // Max théorique avec correction
+              const pourcentage = scores.length > 0 ? Math.round((total / max) * 100) : 0;
+              
+              setScoreGlobal(pourcentage);
+              setScoreMax(max);
+            }
+          }
+        }
+
+        setLoading(false);
+      } catch (error) {
+        console.error('Erreur chargement sessions:', error);
+        setLoading(false);
       }
-
-      setLoading(false);
-    } catch (error) {
-      console.error('Erreur chargement sessions:', error);
-      setLoading(false);
     }
-  }
 
   const handleValider = async () => {
     try {
@@ -447,10 +500,11 @@ function ProgressionModal({
         return;
       }
 
-      // Vérifier que le score est saisi
-      const scoreValue = parseInt(score);
-      if (!score || isNaN(scoreValue) || scoreValue < 0 || scoreValue > 100) {
-        alert('❌ Veuillez entrer un score valide entre 0 et 100');
+      // Utiliser le score calculé automatiquement
+      const scoreValue = scoreGlobal;
+      
+      if (scoresLocaux.length === 0) {
+        alert('❌ Aucune question enregistrée. Enregistrez des sessions avec des questions avant de soumettre.');
         setSaving(false);
         return;
       }
@@ -659,24 +713,91 @@ function ProgressionModal({
             )}
           </div>
 
-          {/* Saisie du score (si pas encore validée/en attente) */}
-          {!estValidee && !estEnAttente && sessions.length > 0 && (
-            <div className="p-4 bg-teal-50/20 border-2 border-teal-200 rounded-xl">
-              <label className="block font-semibold text-teal-900 mb-2">
-                📊 Score de la feuille (sur 100)
-              </label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={score}
-                onChange={(e) => setScore(e.target.value)}
-                placeholder="Ex: 85"
-                className="w-full px-4 py-3 text-lg font-bold rounded-lg border-2 border-blue-500/70 bg-white text-gray-900 text-center"
-              />
-              <p className="text-xs text-teal-700[#4db7ff]/70 mt-2">
-                Entrez votre score global pour l'ensemble de la feuille
-              </p>
+          {/* Synthèse des questions */}
+          {!estValidee && !estEnAttente && scoresLocaux.length > 0 && (
+            <div className="space-y-4">
+              {/* Score global */}
+              <div className="bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-200 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-gray-600 mb-1">Score Global Calculé</div>
+                    <div className="text-3xl font-bold text-blue-600">{scoreGlobal}%</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-gray-500">Détail</div>
+                    <div className="text-sm font-medium text-gray-700">
+                      {scoresLocaux.reduce((acc, s) => acc + s.score_calcule, 0).toFixed(1)} / {scoreMax}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {scoresLocaux.length} question{scoresLocaux.length > 1 ? 's' : ''}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Liste des questions par exercice */}
+              <div className="space-y-3">
+                <div className="text-sm font-semibold text-gray-700 mb-2">
+                  📝 Détail des questions
+                </div>
+                
+                {(() => {
+                  // Regrouper par exercice
+                  const parExercice = scoresLocaux.reduce((acc, score) => {
+                    const exercice = score.exercice || 'Questions';
+                    if (!acc[exercice]) {
+                      acc[exercice] = [];
+                    }
+                    acc[exercice].push(score);
+                    return acc;
+                  }, {} as Record<string, ScoreLocalDetail[]>);
+
+                  return Object.entries(parExercice).map(([exercice, questions]) => (
+                    <div key={exercice} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                      {/* Titre de l'exercice */}
+                      <div className="font-semibold text-gray-900 mb-2 pb-2 border-b border-gray-300">
+                        {exercice}
+                      </div>
+
+                      {/* Questions */}
+                      <div className="space-y-2">
+                        {questions.map((q, idx) => (
+                          <div key={q.id} className="bg-white border border-gray-200 rounded-lg p-2.5">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900 text-sm mb-1">
+                                  {q.question}
+                                </div>
+                                <div className="flex flex-wrap gap-2 text-xs">
+                                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
+                                    C: {q.comprehension}
+                                  </span>
+                                  <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded">
+                                    S: {q.savoir}
+                                  </span>
+                                  <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded">
+                                    R: {q.redaction}
+                                  </span>
+                                  {q.correction === 1 && (
+                                    <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded">
+                                      ✓ Corr.
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-lg font-bold text-blue-600">
+                                  {Math.round(q.score_calcule)}%
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
             </div>
           )}
 
@@ -712,7 +833,7 @@ function ProgressionModal({
           {!estValidee && !estEnAttente && progression && (
             <button
               onClick={handleValider}
-              disabled={saving || sessions.length === 0}
+              disabled={saving || scoresLocaux.length === 0}
               className="flex-1 px-4 py-2 bg-blue-500 hover:bg-blue-500 disabled:bg-slate-300 disabled:cursor-not-allowed text-gray-900 font-medium rounded-lg transition-colors"
             >
               {saving ? 'Envoi...' : 'Soumettre pour validation'}
