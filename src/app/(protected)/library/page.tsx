@@ -413,6 +413,11 @@ function ProgressionModal({
   const [scoresLocaux, setScoresLocaux] = useState<ScoreLocalDetail[]>([]);
   const [scoreGlobal, setScoreGlobal] = useState<number>(0);
   const [scoreMax, setScoreMax] = useState<number>(0);
+  const [scoreComprehension, setScoreComprehension] = useState<number>(0);
+  const [scoreSavoir, setScoreSavoir] = useState<number>(0);
+  const [scoreRedaction, setScoreRedaction] = useState<number>(0);
+  const [nbSessions, setNbSessions] = useState<number>(0);
+  const [tempsTotal, setTempsTotal] = useState<number>(0);
 
   useEffect(() => {
     loadSessions();
@@ -471,14 +476,34 @@ function ProgressionModal({
 
               setScoresLocaux(scores);
 
-              // Calculer le score global
+              // Calculer le score global (score moyen entre 0 et 1.3)
               const total = scores.reduce((acc, s) => acc + s.score_calcule, 0);
-              const max = scores.length * 130; // Max théorique avec correction
-              const pourcentage = scores.length > 0 ? Math.round((total / max) * 100) : 0;
+              const scoreMoyen = scores.length > 0 ? total / scores.length : 0;
               
-              setScoreGlobal(pourcentage);
-              setScoreMax(max);
+              setScoreGlobal(scoreMoyen * 100); // Multiplier par 100 pour garder la compatibilité avec l'affichage
+              setScoreMax(scores.length * 1.3);
+
+              // Calculer les scores moyens par composante
+              const scoreComprehensionCalc = scores.length > 0
+                ? scores.reduce((acc, s) => acc + s.comprehension, 0) / (scores.length * 100)
+                : 0;
+
+              const scoreSavoirCalc = scores.length > 0
+                ? scores.reduce((acc, s) => acc + s.savoir, 0) / (scores.length * 100)
+                : 0;
+
+              const scoreRedactionCalc = scores.length > 0
+                ? scores.reduce((acc, s) => acc + s.redaction, 0) / (scores.length * 100)
+                : 0;
+
+              setScoreComprehension(scoreComprehensionCalc);
+              setScoreSavoir(scoreSavoirCalc);
+              setScoreRedaction(scoreRedactionCalc);
             }
+
+            // Calculer volume de travail
+            setNbSessions(sessionsFiltered.length);
+            setTempsTotal(sessionsFiltered.reduce((acc: number, s: any) => acc + (s.temps || 0), 0));
           }
         }
 
@@ -491,6 +516,13 @@ function ProgressionModal({
 
   const handleValider = async () => {
     try {
+      console.log('=== DÉBUT handleValider ===');
+      console.log('scoreGlobal:', scoreGlobal);
+      console.log('tempsTotal:', tempsTotal);
+      console.log('sessions.length:', sessions.length);
+      console.log('scoresLocaux.length:', scoresLocaux.length);
+      console.log('progression:', progression);
+      
       setSaving(true);
       
       // Vérifier qu'on a des sessions
@@ -509,8 +541,6 @@ function ProgressionModal({
         return;
       }
 
-      // Calculer le temps total
-      const tempsTotal = sessions.reduce((acc, s) => acc + (s.temps || 0), 0);
 
       const { data: { session: userSession } } = await supabase.auth.getSession();
       if (!userSession || !userSession.user) {
@@ -544,20 +574,28 @@ function ProgressionModal({
 
         if (updateError) throw updateError;
 
+        console.log('=== Appel RPC soumettre_feuille ===');
+        console.log('progression.id:', progression!.id);
+
+
         // Appeler la fonction de soumission
         const { data, error } = await supabase.rpc('soumettre_feuille', {
           p_progression_id: progression!.id
         });
 
+        console.log('=== Retour RPC ===');
+        console.log('data:', data);
+        console.log('error:', error);
+
         if (error) throw error;
 
-        if (!data.success) {
-          alert(data.error);
+        if (!data || !data.success) {
+          alert(data?.error || 'Erreur lors de la soumission');
           setSaving(false);
           return;
         }
 
-        alert(`✅ Feuille soumise au chef pour validation !\n\n📊 Score : ${scoreValue}/100\n⏱️ Temps total : ${tempsTotal} min`);
+        alert(`✅ Feuille soumise au chef pour validation !\n\n📊 Score : ${(scoreValue / 100).toFixed(2)}\n⏱️ Temps total : ${tempsTotal} min`);
       } else {
         // ========================================
         // CAS 2 : PAS DANS UNE ÉQUIPE
@@ -578,7 +616,7 @@ function ProgressionModal({
 
         if (error) throw error;
 
-        alert(`✅ Feuille terminée !\n\n📊 Score : ${scoreValue}/100\n⏱️ Temps total : ${tempsTotal} min`);
+        alert(`✅ Feuille terminée !\n\n📊 Score : ${(scoreValue / 100).toFixed(2)}\n⏱️ Temps total : ${tempsTotal} min`);
       }
 
       onClose();
@@ -591,7 +629,6 @@ function ProgressionModal({
     }
   };
 
-  const tempsTotal = sessions.reduce((acc, s) => acc + (s.temps || 0), 0);
   const estValidee = progression?.statut === 'validee';
   const estEnAttente = progression?.statut === 'en_attente';
 
@@ -676,127 +713,80 @@ function ProgressionModal({
             </div>
           </div>
 
-          {/* Liste des sessions */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-900">Historique des sessions</h3>
-            </div>
-
-            {sessions.length === 0 ? (
-              <div className="p-6 bg-white rounded-xl text-center">
-                <div className="text-4xl mb-3">📝</div>
-                <p className="text-gray-600 mb-3">
-                  Aucune session enregistrée pour cette feuille
-                </p>
-                <p className="text-sm text-gray-600">
-                  Rendez-vous sur <span className="font-semibold">"Mes Sessions"</span> pour enregistrer vos entraînements quotidiens
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {sessions.map((session) => (
-                  <div
-                    key={session.id}
-                    className="p-3 bg-white rounded-lg flex items-center justify-between"
-                  >
-                    <div className="flex-1">
-                      <div className="font-medium text-gray-900">
-                        Session #{session.numero} - {new Date(session.date).toLocaleDateString('fr-FR')}
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        {session.heure} • {session.temps} min
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Synthèse des questions */}
+          {/* Nouvelle synthèse simplifiée */}
           {!estValidee && !estEnAttente && scoresLocaux.length > 0 && (
             <div className="space-y-4">
-              {/* Score global */}
+              {/* En-tête : Résumé de Travail */}
               <div className="bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-200 rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm text-gray-600 mb-1">Score Global Calculé</div>
-                    <div className="text-3xl font-bold text-blue-600">{scoreGlobal}%</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs text-gray-500">Détail</div>
-                    <div className="text-sm font-medium text-gray-700">
-                      {scoresLocaux.reduce((acc, s) => acc + s.score_calcule, 0).toFixed(1)} / {scoreMax}
+                <h3 className="text-lg font-bold text-gray-900 mb-3">📋 Résumé de Travail</h3>
+                
+                {/* Informations de la feuille */}
+                {progression && (
+                  <div className="space-y-1 text-sm">
+                    <div className="flex items-center gap-2 text-gray-700 flex-wrap">
+                      <span className="font-semibold">{progression.niveau?.nom || 'Niveau'}</span>
+                      <span>•</span>
+                      <span>{progression.sujet?.nom || 'Sujet'}</span>
+                      <span>•</span>
+                      <span>{progression.chapitre?.nom || 'Chapitre'}</span>
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {scoresLocaux.length} question{scoresLocaux.length > 1 ? 's' : ''}
+                    <div className="text-base font-semibold text-gray-900 mt-2">
+                      {feuille.titre}
                     </div>
                   </div>
+                )}
+              </div>
+
+              {/* Volume de travail */}
+              <div className="bg-white border-2 border-gray-200 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-lg">📊</span>
+                  <h4 className="font-semibold text-gray-900">Volume de travail</h4>
+                </div>
+                <div className="text-gray-700">
+                  <span className="font-bold text-blue-600">{nbSessions}</span> session{nbSessions > 1 ? 's' : ''} • <span className="font-bold text-blue-600">{tempsTotal}</span> minutes
                 </div>
               </div>
 
-              {/* Liste des questions par exercice */}
-              <div className="space-y-3">
-                <div className="text-sm font-semibold text-gray-700 mb-2">
-                  📝 Détail des questions
+              {/* Niveau de maîtrise */}
+              <div className="bg-white border-2 border-gray-200 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-lg">🎯</span>
+                  <h4 className="font-semibold text-gray-900">Niveau de maîtrise</h4>
                 </div>
-                
-                {(() => {
-                  // Regrouper par exercice
-                  const parExercice = scoresLocaux.reduce((acc, score) => {
-                    const exercice = score.exercice || 'Questions';
-                    if (!acc[exercice]) {
-                      acc[exercice] = [];
-                    }
-                    acc[exercice].push(score);
-                    return acc;
-                  }, {} as Record<string, ScoreLocalDetail[]>);
 
-                  return Object.entries(parExercice).map(([exercice, questions]) => (
-                    <div key={exercice} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                      {/* Titre de l'exercice */}
-                      <div className="font-semibold text-gray-900 mb-2 pb-2 border-b border-gray-300">
-                        {exercice}
-                      </div>
+                {/* Score Global */}
+                <div className="mb-4 pb-4 border-b border-gray-200">
+                  <div className="text-sm text-gray-600 mb-1">Score Global</div>
+                  <div className="text-3xl font-bold text-blue-600">
+                    {(scoreGlobal / 100).toFixed(2)}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    sur {scoresLocaux.length} question{scoresLocaux.length > 1 ? 's' : ''}
+                  </div>
+                </div>
 
-                      {/* Questions */}
-                      <div className="space-y-2">
-                        {questions.map((q, idx) => (
-                          <div key={q.id} className="bg-white border border-gray-200 rounded-lg p-2.5">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex-1">
-                                <div className="font-medium text-gray-900 text-sm mb-1">
-                                  {q.question}
-                                </div>
-                                <div className="flex flex-wrap gap-2 text-xs">
-                                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
-                                    C: {q.comprehension}
-                                  </span>
-                                  <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded">
-                                    S: {q.savoir}
-                                  </span>
-                                  <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded">
-                                    R: {q.redaction}
-                                  </span>
-                                  {q.correction === 1 && (
-                                    <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded">
-                                      ✓ Corr.
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-lg font-bold text-blue-600">
-                                  {Math.round(q.score_calcule)}%
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ));
-                })()}
+                {/* Détail par composante */}
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-gray-700 mb-2">
+                    Détail par composante :
+                  </div>
+                  
+                  <div className="flex items-center justify-between p-2 bg-blue-50 rounded-lg">
+                    <span className="text-sm text-gray-700">🧠 Compréhension</span>
+                    <span className="text-lg font-bold text-blue-600">{scoreComprehension.toFixed(2)}</span>
+                  </div>
+                  
+                  <div className="flex items-center justify-between p-2 bg-green-50 rounded-lg">
+                    <span className="text-sm text-gray-700">🛠️ Savoir-faire</span>
+                    <span className="text-lg font-bold text-green-600">{scoreSavoir.toFixed(2)}</span>
+                  </div>
+                  
+                  <div className="flex items-center justify-between p-2 bg-purple-50 rounded-lg">
+                    <span className="text-sm text-gray-700">✍️ Rédaction</span>
+                    <span className="text-lg font-bold text-purple-600">{scoreRedaction.toFixed(2)}</span>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -937,6 +927,11 @@ export default function LibraryPage() {
   const [niveauSelectionne, setNiveauSelectionne] = useState<string | null>(null);
   const [parcours, setParcours] = useState<Niveau | null>(null);
   const [progressions, setProgressions] = useState<Map<string, Progression>>(new Map());
+  const [feuillesEnProgression, setFeuillesEnProgression] = useState<Array<{
+    feuille: FeuilleEntrainement;
+    progression: Progression;
+    chapitre: string;
+  }>>([]);
 
   // Chargement initial des niveaux
   useEffect(() => {
@@ -956,6 +951,11 @@ export default function LibraryPage() {
         setLoading(false);
       }
     })();
+  }, []);
+
+  // Chargement des feuilles en progression
+  useEffect(() => {
+    loadFeuillesEnProgression();
   }, []);
 
   // Chargement du parcours quand un niveau est sélectionné
@@ -1116,6 +1116,67 @@ export default function LibraryPage() {
     });
 
     setProgressions(newProgMap);
+    await loadFeuillesEnProgression();
+  };
+
+  const loadFeuillesEnProgression = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session || !session.user) return;
+
+    const { data, error } = await supabase
+      .from('progression_feuille')
+      .select(`
+        id,
+        feuille_id,
+        statut,
+        en_cours,
+        est_termine,
+        score,
+        temps_total,
+        commentaire_chef,
+        feuille_entrainement:feuille_entrainement(
+          id,
+          titre,
+          description,
+          pdf_url,
+          ordre,
+          ordre_dans_niveau,
+          difficulte,
+          chapitre:chapitre(titre)
+        )
+      `)
+      .eq('user_id', session.user.id)
+      .eq('en_cours', true);
+
+    if (error) {
+      console.error('Erreur chargement feuilles en progression:', error);
+      return;
+    }
+
+    const feuilles = data?.map((item: any) => ({
+      feuille: {
+        id: item.feuille_entrainement.id,
+        titre: item.feuille_entrainement.titre,
+        description: item.feuille_entrainement.description,
+        pdf_url: item.feuille_entrainement.pdf_url,
+        ordre: item.feuille_entrainement.ordre,
+        ordre_dans_niveau: item.feuille_entrainement.ordre_dans_niveau,
+        difficulte: item.feuille_entrainement.difficulte,
+      },
+      progression: {
+        id: item.id,
+        feuille_id: item.feuille_id,
+        est_termine: item.est_termine,
+        score: item.score,
+        temps_total: item.temps_total,
+        sessions: [],
+        statut: item.statut || 'en_cours',
+        commentaire_chef: item.commentaire_chef,
+      },
+      chapitre: item.feuille_entrainement.chapitre?.titre || 'Chapitre inconnu',
+    })) || [];
+
+    setFeuillesEnProgression(feuilles);
   };
 
   /* ---------- États de chargement / erreur ---------- */
@@ -1168,6 +1229,28 @@ export default function LibraryPage() {
           </div>
         </header>
 
+        {/* Section En Progression */}
+        {feuillesEnProgression.length > 0 && (
+          <div className="mb-8 bg-gradient-to-r from-[#ffd93d]/10 to-[#4db7ff]/10 rounded-2xl p-6 border-2 border-[#ffd93d]/30">
+            <h2 className="text-2xl font-['IBM_Plex_Mono'] font-bold text-[#ffd93d] mb-4 flex items-center gap-2">
+              🔥 En Progression
+              <span className="text-sm font-normal text-[#ffd93d]/70">
+                ({feuillesEnProgression.length})
+              </span>
+            </h2>
+            <div className="space-y-2">
+              {feuillesEnProgression.map(({ feuille, progression }) => (
+                <FeuilleCard
+                  key={feuille.id}
+                  feuille={feuille}
+                  progression={progression}
+                  onOpen={() => handleOpenPdf(feuille.pdf_url)}
+                  onUpdateProgression={handleProgressionUpdate}
+                />
+              ))}
+            </div>
+          </div>
+        )}
         {/* Sélecteur de niveau (si plusieurs niveaux disponibles) */}
         {niveaux.length > 1 && (
           <div className="mb-8">
@@ -1186,44 +1269,7 @@ export default function LibraryPage() {
           </div>
         )}
 
-        {/* Section En Progression */}
-        {parcours && (() => {
-          const feuillesEnCours: Array<{feuille: FeuilleEntrainement, progression: Progression, chapitre: string}> = [];
-          parcours.sujets?.forEach(sujet => {
-            sujet.chapitres?.forEach(chapitre => {
-              chapitre.feuilles?.forEach(feuille => {
-                const prog = progressions.get(feuille.id);
-                if (prog && !prog.est_bloquee && prog.statut !== 'validee') {
-                  feuillesEnCours.push({ feuille, progression: prog, chapitre: chapitre.titre });
-                }
-              });
-            });
-          });
 
-          if (feuillesEnCours.length === 0) return null;
-
-          return (
-            <div className="mb-8 bg-gradient-to-r from-[#ffd93d]/10 to-[#4db7ff]/10 rounded-2xl p-6 border-2 border-[#ffd93d]/30">
-              <h2 className="text-2xl font-[\'IBM_Plex_Mono\'] font-bold text-[#ffd93d] mb-4 flex items-center gap-2">
-                🔥 En Progression
-                <span className="text-sm font-normal text-[#ffd93d]/70">
-                  ({feuillesEnCours.length})
-                </span>
-              </h2>
-              <div className="space-y-2">
-                {feuillesEnCours.map(({ feuille, progression }) => (
-                  <FeuilleCard
-                    key={feuille.id}
-                    feuille={feuille}
-                    progression={progression}
-                    onOpen={() => {}}
-                    onUpdateProgression={handleProgressionUpdate}
-                  />
-                ))}
-              </div>
-            </div>
-          );
-        })()}
 
         {/* Contenu du parcours */}
         {!parcours || !parcours.sujets || parcours.sujets.length === 0 ? (

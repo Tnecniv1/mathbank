@@ -88,11 +88,12 @@ export default function TableauProgression() {
   const [fullscreenBlock, setFullscreenBlock] = useState<string | null>(null);
   const [scoresMecaniques, setScoresMecaniques] = useState<ScoreLocal[]>([]);
   const [scoresChaotiques, setScoresChaotiques] = useState<ScoreLocal[]>([]);
-  const [scoreType, setScoreType] = useState<'mecanique' | 'chaotique'>('mecanique');
-  const [viewMode, setViewMode] = useState<'questions' | 'sessions'>('questions');
+  const [scoreType, setScoreType] = useState<'mecanique' | 'chaotique' | 'global'>('mecanique');
+  const [viewMode, setViewMode] = useState<'questions' | 'sessions'>('sessions');
   const [scoresMecaCumulatifs, setScoresMecaCumulatifs] = useState<ScoreMecaCumulatif[]>([]);
   const [scoresParSessionMeca, setScoresParSessionMeca] = useState<ScoreParSession[]>([]);
   const [scoresParSessionChaos, setScoresParSessionChaos] = useState<ScoreParSession[]>([]);
+  const [scoresGlobaux, setScoresGlobaux] = useState<{ jour: string; scoreCumulatif: number }[]>([]);
 
   useEffect(() => {
     loadNiveaux();
@@ -191,12 +192,12 @@ export default function TableauProgression() {
 
     const { data: progressions } = await supabase
       .from('progression_feuille')
-      .select('feuille_id, statut')
+      .select('feuille_id, statut, en_cours')
       .eq('user_id', userId)
       .in('feuille_id', feuilleIds);
 
     const progressionMap = new Map(
-      progressions?.map(p => [p.feuille_id, p.statut]) || []
+      progressions?.map(p => [p.feuille_id, { statut: p.statut, en_cours: p.en_cours }]) || []
     );
 
     const result: any[] = [];
@@ -213,7 +214,8 @@ export default function TableauProgression() {
             feuille_id: feuille.id,
             feuille_titre: feuille.titre,
             feuille_ordre: feuille.ordre,
-            feuille_statut: progressionMap.get(feuille.id) || null
+            feuille_statut: progressionMap.get(feuille.id)?.statut || null,
+            feuille_en_cours: progressionMap.get(feuille.id)?.en_cours || false
           });
         });
         
@@ -280,12 +282,12 @@ export default function TableauProgression() {
               feuille_mecanique_id,
               feuille_chaotique_id,
               numero_session,
-              date_session
+              date_session,
+              heure_session
             )
           `)
           .eq('session_entrainement.user_id', userId)
-          .or(`feuille_mecanique_id.in.(${feuilleIds.join(',')}),feuille_chaotique_id.in.(${feuilleIds.join(',')})`, { foreignTable: 'session_entrainement' })
-          .order('created_at', { ascending: true });
+          .or(`feuille_mecanique_id.in.(${feuilleIds.join(',')}),feuille_chaotique_id.in.(${feuilleIds.join(',')})`, { foreignTable: 'session_entrainement' });
 
         if (error) {
           console.error('Erreur chargement scores locaux:', error);
@@ -305,6 +307,14 @@ export default function TableauProgression() {
           setScoresParSessionChaos([]);
           return;
         }
+
+        // Trier par date et heure réelles de session (chronologique)
+        scoresData.sort((a: any, b: any) => {
+          const dateA = new Date(`${a.session_entrainement.date_session}T${a.session_entrainement.heure_session}`);
+          const dateB = new Date(`${b.session_entrainement.date_session}T${b.session_entrainement.heure_session}`);
+          return dateA.getTime() - dateB.getTime();
+        });
+
 
         // Séparer les scores mécaniques et chaotiques
         const scoresMeca: ScoreLocal[] = [];
@@ -334,7 +344,7 @@ export default function TableauProgression() {
               score: scoreValue,
               exercice: score.exercice,
               question: score.question,
-              date: new Date(score.created_at).toLocaleDateString('fr-FR'),
+              date: new Date(score.session_entrainement.date_session).toLocaleDateString('fr-FR'),
               session_id: sessionId,
               session_numero: sessionNumero
             };
@@ -346,7 +356,7 @@ export default function TableauProgression() {
               ordre: indexMeca - 1,
               scoreCumulatif: scoreCumulatif,
               question: score.question,
-              date: new Date(score.created_at).toLocaleDateString('fr-FR')
+              date: new Date(score.session_entrainement.date_session).toLocaleDateString('fr-FR')
             });
 
             // Regrouper par session
@@ -360,7 +370,7 @@ export default function TableauProgression() {
               score: parseFloat(score.score_calcule) || 0,
               exercice: score.exercice,
               question: score.question,
-              date: new Date(score.created_at).toLocaleDateString('fr-FR'),
+              date: new Date(score.session_entrainement.date_session).toLocaleDateString('fr-FR'),
               session_id: sessionId,
               session_numero: sessionNumero
             };
@@ -382,7 +392,7 @@ export default function TableauProgression() {
           scoresSessionMeca.push({
             ordre: ordreMeca++,
             session_numero: scores[0].session_numero || 0,
-            scoreMoyen: Math.round(scoreMoyen),
+            scoreMoyen: scoreMoyen,
             nbQuestions: scores.length,
             date: scores[0].date
           });
@@ -402,6 +412,32 @@ export default function TableauProgression() {
           });
         });
 
+
+        // Calculer le score global cumulatif
+        const scoresGlobauxMap = new Map<string, number>();
+        let cumulatifGlobal = 0;
+
+        scoresData.forEach((score: any) => {
+          const dateSession = score.session_entrainement.date_session;
+          const scoreMultiplied = parseFloat(score.score_calcule) * 100; // Score brut
+          
+          cumulatifGlobal += scoreMultiplied;
+          
+          if (!scoresGlobauxMap.has(dateSession)) {
+            scoresGlobauxMap.set(dateSession, cumulatifGlobal);
+          } else {
+            scoresGlobauxMap.set(dateSession, cumulatifGlobal);
+          }
+        });
+
+        const scoresGlobauxArray = Array.from(scoresGlobauxMap.entries())
+          .map(([date, score]) => ({
+            jour: new Date(date).getDate().toString(), // Jour du mois (1, 2, 3...)
+            scoreCumulatif: score
+          }))
+          .sort((a, b) => parseInt(a.jour) - parseInt(b.jour));
+
+        setScoresGlobaux(scoresGlobauxArray);
         setScoresMecaniques(scoresMeca);
         setScoresChaotiques(scoresChaos);
         setScoresMecaCumulatifs(scoresCumulatifs);
@@ -505,6 +541,7 @@ export default function TableauProgression() {
   }
 
   function processData(rawData: any[]) {
+    console.log('🔍 DONNÉES BRUTES REÇUES:', rawData[0]);
     if (!rawData || rawData.length === 0) {
       setData({
         chapitres: [],
@@ -537,7 +574,8 @@ export default function TableauProgression() {
           titre: row.feuille_titre,
           ordre: row.feuille_ordre,
           chapitre_id: row.chapitre_id,
-          statut: row.feuille_statut || 'non_faite'
+          statut: row.feuille_statut || 'non_faite',
+          en_cours: row.feuille_en_cours || false
         });
       }
     });
@@ -609,18 +647,19 @@ export default function TableauProgression() {
     return Math.round((validees / feuilles.length) * 100);
   };
 
-  const getCellColor = (statut: string | null) => {
-    if (statut === 'validee') return 'bg-[#ffd93d] text-gray-900';
-    if (statut === 'en_cours') return 'bg-orange-500 text-gray-900';
-    if (statut === 'non_faite') return 'bg-gray-200 text-gray-600';
-    return 'bg-white';
+  const getCellColor = (feuille: any) => {
+    if (!feuille) return 'bg-white border border-gray-300';
+    if (feuille.statut === 'validee') return 'bg-[#ffd93d] text-gray-900';
+    if (feuille.en_cours === true) return 'bg-purple-500 text-white';
+    return 'bg-gray-200 text-gray-600';
   };
 
-  const getCellContent = (statut: string | null) => {
-    if (statut === 'validee') return '1';
-    if (statut === 'en_cours') return '0';
-    if (statut === 'non_faite') return '0';
-    return 'x';
+  const getCellContent = (feuille: any, nbSessions: number) => {
+    if (!feuille) return 'x';
+    if (feuille.statut === 'validee') return '✓';
+    if (feuille.en_cours === true && nbSessions > 0) return nbSessions.toString();
+    if (feuille.en_cours === true) return '1';
+    return '0';
   };
 
   const sujetsGroupes = data ? data.chapitres.reduce((acc, chapitre) => {
@@ -776,6 +815,8 @@ export default function TableauProgression() {
                       {Array.from({ length: COLONNES_AFFICHEES }, (_, i) => {
                         const feuille = chapitre.feuilles.find((f, idx) => idx === i);
                         const statut = feuille ? feuille.statut : null;
+
+
                         
                         return (
                           <td
@@ -783,9 +824,9 @@ export default function TableauProgression() {
                             className="px-1.5 py-2 text-center border-r border-gray-200"
                           >
                             <div
-                              className={`inline-flex items-center justify-center w-6 h-6 rounded font-semibold text-xs ${getCellColor(statut)}`}
+                              className={`inline-flex items-center justify-center w-6 h-6 rounded font-semibold text-xs ${getCellColor(feuille || null)}`}
                             >
-                              {getCellContent(statut)}
+                              {getCellContent(feuille || null, feuille?.nbSessions || 0)}
                             </div>
                           </td>
                         );
@@ -802,11 +843,11 @@ export default function TableauProgression() {
           <div className="flex items-center gap-4 text-xs">
             <span className="text-gray-600 font-semibold">Légende :</span>
             <div className="flex items-center gap-1.5">
-              <div className="w-5 h-5 rounded bg-[#ffd93d] flex items-center justify-center text-gray-900 font-semibold text-xs">1</div>
+              <div className="w-5 h-5 rounded bg-[#ffd93d] flex items-center justify-center text-gray-900 font-semibold text-xs">✓</div>
               <span className="text-gray-600">Validée</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-5 h-5 rounded bg-orange-500 flex items-center justify-center text-gray-900 font-semibold text-xs">0</div>
+              <div className="w-5 h-5 rounded bg-purple-500 flex items-center justify-center text-white font-semibold text-xs">1</div>
               <span className="text-gray-600">En progression</span>
             </div>
             <div className="flex items-center gap-1.5">
@@ -821,481 +862,503 @@ export default function TableauProgression() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        {/* Graphique des scores avec toggle */}
-                <div className={`bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden flex flex-col ${fullscreenBlock === 'scores' ? 'fixed inset-4 z-50' : ''}`}>
-                          <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-3 py-2 flex items-center justify-between flex-shrink-0">
-                            <div>
-                              <h2 className="text-sm font-bold text-gray-900">Progresser en mathématique</h2>
-                              <p className="text-purple-100 text-xs">
-                                {scoreType === 'mecanique'
-                                  ? viewMode === 'questions'
-                                    ? `${scoresMecaniques.length} question${scoresMecaniques.length > 1 ? 's' : ''}`
-                                    : `${scoresParSessionMeca.length} session${scoresParSessionMeca.length > 1 ? 's' : ''}`
-                                  : viewMode === 'questions'
-                                    ? `${scoresChaotiques.length} question${scoresChaotiques.length > 1 ? 's' : ''}`
-                                    : `${scoresParSessionChaos.length} session${scoresParSessionChaos.length > 1 ? 's' : ''}`
-                                }
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {/* Toggle Mécanique/Chaotique */}
-                              <div className="flex bg-white/20 rounded-lg p-0.5">
-                                <button
-                                  onClick={() => setScoreType('mecanique')}
-                                  className={`px-2 py-1 text-xs font-medium rounded transition ${
-                                    scoreType === 'mecanique'
-                                      ? 'bg-white text-blue-700'
-                                      : 'text-white hover:bg-white/10'
-                                  }`}
-                                >
-                                  M
-                                </button>
-                                <button
-                                  onClick={() => setScoreType('chaotique')}
-                                  className={`px-2 py-1 text-xs font-medium rounded transition ${
-                                    scoreType === 'chaotique'
-                                      ? 'bg-white text-purple-700'
-                                      : 'text-white hover:bg-white/10'
-                                  }`}
-                                >
-                                  C
-                                </button>
-                              </div>
-                              {/* Toggle Questions/Sessions */}
-                              <div className="flex bg-white/20 rounded-lg p-0.5">
-                                <button
-                                  onClick={() => setViewMode('questions')}
-                                  className={`px-2 py-1 text-xs font-medium rounded transition ${
-                                    viewMode === 'questions'
-                                      ? 'bg-white text-gray-900'
-                                      : 'text-white hover:bg-white/10'
-                                  }`}
-                                >
-                                  Q
-                                </button>
-                                <button
-                                  onClick={() => setViewMode('sessions')}
-                                  className={`px-2 py-1 text-xs font-medium rounded transition ${
-                                    viewMode === 'sessions'
-                                      ? 'bg-white text-gray-900'
-                                      : 'text-white hover:bg-white/10'
-                                  }`}
-                                >
-                                  S
-                                </button>
-                              </div>
-                              <FullscreenButton blockId="scores" />
-                            </div>
-                          </div>
-
-                          {/* GRAPHIQUE MÉCANIQUE - MODE QUESTIONS (Cumulatif) */}
-                          {scoreType === 'mecanique' && viewMode === 'questions' && scoresMecaCumulatifs.length > 0 && (
-                            <>
-                              <div className="p-3 flex-1 min-h-0">
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <LineChart data={scoresMecaCumulatifs}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-                                    <XAxis 
-                                      dataKey="ordre" 
-                                      stroke="#71717a"
-                                      style={{ fontSize: '10px' }}
-                                      label={{ value: 'Question', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
-                                    />
-                                    <YAxis 
-                                      stroke="#71717a"
-                                      style={{ fontSize: '10px' }}
-                                    />
-                                    <Tooltip
-                                      contentStyle={{
-                                        backgroundColor: '#fff',
-                                        border: '1px solid #e4e4e7',
-                                        borderRadius: '8px',
-                                        fontSize: '11px'
-                                      }}
-                                      formatter={(value: any) => [`Score: ${value}`, 'Cumulatif']}
-                                      labelFormatter={(value: any, payload: any) => {
-                                        const item = payload[0]?.payload;
-                                        return item ? `Q${value} - ${item.question}` : `Question ${value}`;
-                                      }}
-                                    />
-                                    <Line
-                                      type="monotone"
-                                      dataKey="scoreCumulatif"
-                                      stroke="#3b82f6"
-                                      strokeWidth={2}
-                                      dot={{ fill: '#3b82f6', r: 4 }}
-                                      name="Score Cumulatif"
-                                    />
-                                  </LineChart>
-                                </ResponsiveContainer>
-                              </div>
-
-                              <div className="bg-blue-50/20 px-3 py-1.5 border-t border-blue-200 flex-shrink-0">
-                                <div className="flex justify-around text-center text-xs">
-                                  <div>
-                                    <div className="font-bold text-blue-600">
-                                      {scoresMecaCumulatifs[scoresMecaCumulatifs.length - 1]?.scoreCumulatif || 0}
-                                    </div>
-                                    <div className="text-blue-700 text-[10px]">Score Actuel</div>
-                                  </div>
-                                  <div>
-                                    <div className="font-bold text-blue-600">
-                                      {Math.max(...scoresMecaCumulatifs.map(s => s.scoreCumulatif))}
-                                    </div>
-                                    <div className="text-blue-700 text-[10px]">Max</div>
-                                  </div>
-                                  <div>
-                                    <div className="font-bold text-blue-600">
-                                      {Math.min(...scoresMecaCumulatifs.map(s => s.scoreCumulatif))}
-                                    </div>
-                                    <div className="text-blue-700 text-[10px]">Min</div>
-                                  </div>
-                                </div>
-                              </div>
-                            </>
-                          )}
-
-                          {/* GRAPHIQUE MÉCANIQUE - MODE SESSIONS */}
-                          {scoreType === 'mecanique' && viewMode === 'sessions' && scoresParSessionMeca.length > 0 && (
-                            <>
-                              <div className="p-3 flex-1 min-h-0">
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <LineChart data={scoresParSessionMeca}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-                                    <XAxis 
-                                      dataKey="ordre" 
-                                      stroke="#71717a"
-                                      style={{ fontSize: '10px' }}
-                                      label={{ value: 'Session', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
-                                    />
-                                    <YAxis 
-                                      domain={[0, 100]}
-                                      stroke="#71717a"
-                                      style={{ fontSize: '10px' }}
-                                    />
-                                    <Tooltip
-                                      contentStyle={{
-                                        backgroundColor: '#fff',
-                                        border: '1px solid #e4e4e7',
-                                        borderRadius: '8px',
-                                        fontSize: '11px'
-                                      }}
-                                      formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
-                                      labelFormatter={(value: any, payload: any) => {
-                                        const item = payload[0]?.payload;
-                                        return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;
-                                      }}
-                                    />
-                                    <Line
-                                      type="monotone"
-                                      dataKey="scoreMoyen"
-                                      stroke="#3b82f6"
-                                      strokeWidth={2}
-                                      dot={{ fill: '#3b82f6', r: 4 }}
-                                      name="Score Moyen"
-                                    />
-                                  </LineChart>
-                                </ResponsiveContainer>
-                              </div>
-
-                              <div className="bg-blue-50/20 px-3 py-1.5 border-t border-blue-200 flex-shrink-0">
-                                <div className="flex justify-around text-center text-xs">
-                                  <div>
-                                    <div className="font-bold text-blue-600">
-                                      {Math.round(
-                                        scoresParSessionMeca.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionMeca.length
-                                      )}%
-                                    </div>
-                                    <div className="text-blue-700 text-[10px]">Moyenne</div>
-                                  </div>
-                                  <div>
-                                    <div className="font-bold text-blue-600">
-                                      {Math.max(...scoresParSessionMeca.map(s => s.scoreMoyen))}%
-                                    </div>
-                                    <div className="text-blue-700 text-[10px]">Max</div>
-                                  </div>
-                                  <div>
-                                    <div className="font-bold text-blue-600">
-                                      {Math.min(...scoresParSessionMeca.map(s => s.scoreMoyen))}%
-                                    </div>
-                                    <div className="text-blue-700 text-[10px]">Min</div>
-                                  </div>
-                                </div>
-                              </div>
-                            </>
-                          )}
-
-                          {/* GRAPHIQUE CHAOTIQUE - MODE QUESTIONS */}
-                          {scoreType === 'chaotique' && viewMode === 'questions' && scoresChaotiques.length > 0 && (
-                            <>
-                              <div className="p-3 flex-1 min-h-0">
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <LineChart data={scoresChaotiques}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-                                    <XAxis 
-                                      dataKey="ordre" 
-                                      stroke="#71717a"
-                                      style={{ fontSize: '10px' }}
-                                      label={{ value: 'Question', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
-                                    />
-                                    <YAxis 
-                                      domain={[0, 100]}
-                                      stroke="#71717a"
-                                      style={{ fontSize: '10px' }}
-                                    />
-                                    <Tooltip
-                                      contentStyle={{
-                                        backgroundColor: '#fff',
-                                        border: '1px solid #e4e4e7',
-                                        borderRadius: '8px',
-                                        fontSize: '11px'
-                                      }}
-                                      formatter={(value: any) => [`${Math.round(value)}%`, 'Score']}
-                                      labelFormatter={(value: any, payload: any) => {
-                                        const item = payload[0]?.payload;
-                                        return item ? `Q${value} - ${item.exercice} ${item.question}` : `Question ${value}`;
-                                      }}
-                                    />
-                                    <Line
-                                      type="monotone"
-                                      dataKey="score"
-                                      stroke="#a855f7"
-                                      strokeWidth={2}
-                                      dot={{ fill: '#a855f7', r: 4 }}
-                                      name="Score Chaotique"
-                                    />
-                                  </LineChart>
-                                </ResponsiveContainer>
-                              </div>
-
-                              <div className="bg-purple-50/20 px-3 py-1.5 border-t border-purple-200 flex-shrink-0">
-                                <div className="flex justify-around text-center text-xs">
-                                  <div>
-                                    <div className="font-bold text-purple-600">
-                                      {Math.round(
-                                        scoresChaotiques.reduce((acc, s) => acc + s.score, 0) / scoresChaotiques.length
-                                      )}%
-                                    </div>
-                                    <div className="text-purple-700 text-[10px]">Moyenne</div>
-                                  </div>
-                                  <div>
-                                    <div className="font-bold text-purple-600">
-                                      {Math.max(...scoresChaotiques.map(s => s.score))}%
-                                    </div>
-                                    <div className="text-purple-700 text-[10px]">Max</div>
-                                  </div>
-                                  <div>
-                                    <div className="font-bold text-purple-600">
-                                      {Math.min(...scoresChaotiques.map(s => s.score))}%
-                                    </div>
-                                    <div className="text-purple-700 text-[10px]">Min</div>
-                                  </div>
-                                </div>
-                              </div>
-                            </>
-                          )}
-
-                          {/* GRAPHIQUE CHAOTIQUE - MODE SESSIONS */}
-                          {scoreType === 'chaotique' && viewMode === 'sessions' && scoresParSessionChaos.length > 0 && (
-                            <>
-                              <div className="p-3 flex-1 min-h-0">
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <LineChart data={scoresParSessionChaos}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-                                    <XAxis 
-                                      dataKey="ordre" 
-                                      stroke="#71717a"
-                                      style={{ fontSize: '10px' }}
-                                      label={{ value: 'Session', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
-                                    />
-                                    <YAxis 
-                                      domain={[0, 100]}
-                                      stroke="#71717a"
-                                      style={{ fontSize: '10px' }}
-                                    />
-                                    <Tooltip
-                                      contentStyle={{
-                                        backgroundColor: '#fff',
-                                        border: '1px solid #e4e4e7',
-                                        borderRadius: '8px',
-                                        fontSize: '11px'
-                                      }}
-                                      formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
-                                      labelFormatter={(value: any, payload: any) => {
-                                        const item = payload[0]?.payload;
-                                        return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;
-                                      }}
-                                    />
-                                    <Line
-                                      type="monotone"
-                                      dataKey="scoreMoyen"
-                                      stroke="#a855f7"
-                                      strokeWidth={2}
-                                      dot={{ fill: '#a855f7', r: 4 }}
-                                      name="Score Moyen"
-                                    />
-                                  </LineChart>
-                                </ResponsiveContainer>
-                              </div>
-
-                              <div className="bg-purple-50/20 px-3 py-1.5 border-t border-purple-200 flex-shrink-0">
-                                <div className="flex justify-around text-center text-xs">
-                                  <div>
-                                    <div className="font-bold text-purple-600">
-                                      {Math.round(
-                                        scoresParSessionChaos.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionChaos.length
-                                      )}%
-                                    </div>
-                                    <div className="text-purple-700 text-[10px]">Moyenne</div>
-                                  </div>
-                                  <div>
-                                    <div className="font-bold text-purple-600">
-                                      {Math.max(...scoresParSessionChaos.map(s => s.scoreMoyen))}%
-                                    </div>
-                                    <div className="text-purple-700 text-[10px]">Max</div>
-                                  </div>
-                                  <div>
-                                    <div className="font-bold text-purple-600">
-                                      {Math.min(...scoresParSessionChaos.map(s => s.scoreMoyen))}%
-                                    </div>
-                                    <div className="text-purple-700 text-[10px]">Min</div>
-                                  </div>
-                                </div>
-                              </div>
-                            </>
-                          )}
-
-                          {/* Messages si pas de données */}
-                          {scoreType === 'mecanique' && scoresMecaCumulatifs.length === 0 && (
-                            <div className="p-6 text-center text-gray-500 flex-1 flex flex-col items-center justify-center">
-                              <div className="text-2xl mb-1">📈</div>
-                              <p className="text-xs">Aucun score mécanique enregistré</p>
-                              <p className="text-[10px] text-gray-400 mt-1">Les scores sont créés lors des sessions mécaniques</p>
-                            </div>
-                          )}
-
-                          {scoreType === 'chaotique' && scoresChaotiques.length === 0 && (
-                            <div className="p-6 text-center text-gray-500 flex-1 flex flex-col items-center justify-center">
-                              <div className="text-2xl mb-1">📈</div>
-                              <p className="text-xs">Aucun score chaotique enregistré</p>
-                              <p className="text-[10px] text-gray-400 mt-1">Les scores sont créés lors des sessions chaotiques</p>
-                            </div>
-                          )}
-                        </div>
-
-        {/* Graphique de concentration */}
-        <div className={`bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden flex flex-col ${fullscreenBlock === 'concentration' ? 'fixed inset-4 z-50' : ''}`}>
-          <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-2 flex items-center justify-between flex-shrink-0">
-            <div>
-              <h2 className="text-sm font-bold text-gray-900">Entraîner sa concentration</h2>
-              <p className="text-blue-100 text-xs">21 derniers jours</p>
-            </div>
-            <FullscreenButton blockId="concentration" />
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {/* Graphique des scores avec toggle */}
+      <div className={`bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden ${fullscreenBlock === 'scores' ? 'fixed inset-4 z-50' : ''}`}>
+        <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-3 py-2 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-gray-900">Progresser en mathématique</h2>
+            <p className="text-purple-100 text-xs">
+              {scoreType === 'mecanique'
+                ? viewMode === 'questions'
+                  ? `${scoresMecaniques.length} question${scoresMecaniques.length > 1 ? 's' : ''}`
+                  : `${scoresParSessionMeca.length} session${scoresParSessionMeca.length > 1 ? 's' : ''}`
+                : viewMode === 'questions'
+                  ? `${scoresChaotiques.length} question${scoresChaotiques.length > 1 ? 's' : ''}`
+                  : `${scoresParSessionChaos.length} session${scoresParSessionChaos.length > 1 ? 's' : ''}`
+              }
+            </p>
           </div>
-
-          {concentrationData.some(d => d.duree > 0) ? (
-            <>
-              <div className="p-3 flex-1 min-h-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={concentrationData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7"  />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#71717a"
-                      style={{ fontSize: '9px' }}
-                      angle={-45}
-                      textAnchor="end"
-                      height={40}
-                      interval={6}
-                    />
-                    <YAxis 
-                      stroke="#71717a"
-                      style={{ fontSize: '10px' }}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#fff',
-                        border: '1px solid #e4e4e7',
-                        borderRadius: '8px',
-                        fontSize: '11px'
-                      }}
-                      formatter={(value: any, name: string, props: any) => [
-                        `${value} min (${props.payload.nbSessions} session${props.payload.nbSessions > 1 ? 's' : ''})`,
-                        'Temps'
-                      ]}
-                    />
-                    <Bar
-                      dataKey="duree"
-                      fill="#3b82f6"
-                      radius={[4, 4, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="bg-blue-50/20 px-3 py-1.5 border-t border-blue-200 flex-shrink-0">
-                <div className="flex justify-around text-center text-xs">
-                  <div>
-                    <div className="font-bold text-blue-600">
-                      {Math.round(
-                        concentrationData.reduce((acc, d) => acc + d.duree, 0) / 
-                        concentrationData.filter(d => d.duree > 0).length || 0
-                      )} min
-                    </div>
-                    <div className="text-blue-700 text-[10px]">Moy/jour</div>
-                  </div>
-                  <div>
-                    <div className="font-bold text-blue-600">
-                      {concentrationData.reduce((acc, d) => acc + d.duree, 0)} min
-                    </div>
-                    <div className="text-blue-700 text-[10px]">Total</div>
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="p-6 text-center text-gray-500 flex-1 flex flex-col items-center justify-center">
-              <div className="text-2xl mb-1">⏱️</div>
-              <p className="text-xs">Aucune donnée</p>
+          <div className="flex items-center gap-2">
+            {/* Toggle Mécanique/Chaotique */}
+            <div className="flex bg-white/20 rounded-lg p-0.5">
+              <button
+                onClick={() => setScoreType('mecanique')}
+                className={`px-2 py-1 text-xs font-medium rounded transition ${
+                  scoreType === 'mecanique'
+                    ? 'bg-white text-blue-700'
+                    : 'text-white hover:bg-white/10'
+                }`}
+              >
+                M
+              </button>
+              <button
+                onClick={() => setScoreType('chaotique')}
+                className={`px-2 py-1 text-xs font-medium rounded transition ${
+                  scoreType === 'chaotique'
+                    ? 'bg-white text-purple-700'
+                    : 'text-white hover:bg-white/10'
+                }`}
+              >
+                C
+              </button>
+              <button
+                onClick={() => setScoreType('global')}
+                className={`px-2 py-1 text-xs font-medium rounded transition ${
+                  scoreType === 'global'
+                    ? 'bg-white text-gray-900'
+                    : 'text-white hover:bg-white/10'
+                }`}
+              >
+                G
+              </button>
             </div>
-          )}
-        </div>
 
-        {/* Grille 4x3 */}
-        <div className={`bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden ${fullscreenBlock === 'grille' ? 'fixed inset-4 z-50' : ''}`}>
-          <div className="bg-gradient-to-r from-teal-500 to-teal-600 px-3 py-2 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-gray-900">Apprendre à apprendre</h2>
-              <p className="text-teal-100 text-xs">Pédago-visible</p>
-            </div>
-            <FullscreenButton blockId="grille" />
-          </div>
-          
-          <div className="p-3">
-            <div className="grid grid-cols-4 gap-1.5">
-              {Array.from({ length: 12 }, (_, i) => (
-                <div
-                  key={i}
-                  className={`aspect-square rounded-lg border-2 flex items-center justify-center font-bold text-base ${
-                    i % 3 === 0 
-                      ? 'border-green-500 bg-green-50/20 text-green-600'
-                      : 'border-red-500 bg-red-50/20 text-red-600'
-                  }`}
-                >
-                  {i % 3 === 0 ? '✓' : '✗'}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-gray-50/50 px-3 py-1.5 border-t border-gray-300 text-center">
-            <p className="text-xs text-gray-600">8/12 réussies</p>
+            <FullscreenButton blockId="scores" />
           </div>
         </div>
+
+        {/* GRAPHIQUE MÉCANIQUE - MODE QUESTIONS (Cumulatif) */}
+        {scoreType === 'mecanique' && viewMode === 'questions' && scoresMecaCumulatifs.length > 0 && (
+          <>
+            <div className="p-3 h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={scoresMecaCumulatifs}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                  <XAxis 
+                    dataKey="ordre" 
+                    stroke="#71717a"
+                    style={{ fontSize: '10px' }}
+                    label={{ value: 'Question', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+                  />
+                  <YAxis 
+                    stroke="#71717a"
+                    style={{ fontSize: '10px' }}
+                    domain={[0, 1.3]}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#fff',
+                      border: '1px solid #e4e4e7',
+                      borderRadius: '8px',
+                      fontSize: '11px'
+                    }}
+                    formatter={(value: any) => [`Score: ${value}`, 'Cumulatif']}
+                    labelFormatter={(value: any, payload: any) => {
+                      const item = payload[0]?.payload;
+                      return item ? `Q${value} - ${item.question}` : `Question ${value}`;
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="scoreCumulatif"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    dot={{ fill: '#3b82f6', r: 4 }}
+                    name="Score Cumulatif"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-blue-50/20 px-3 py-1.5 border-t border-blue-200">
+              <div className="flex justify-around text-center text-xs">
+                <div>
+                  <div className="font-bold text-blue-600">
+                    {scoresMecaCumulatifs[scoresMecaCumulatifs.length - 1]?.scoreCumulatif || 0}
+                  </div>
+                  <div className="text-blue-700 text-[10px]">Score Actuel</div>
+                </div>
+                <div>
+                  <div className="font-bold text-blue-600">
+                    {Math.max(...scoresMecaCumulatifs.map(s => s.scoreCumulatif))}
+                  </div>
+                  <div className="text-blue-700 text-[10px]">Max</div>
+                </div>
+                <div>
+                  <div className="font-bold text-blue-600">
+                    {Math.min(...scoresMecaCumulatifs.map(s => s.scoreCumulatif))}
+                  </div>
+                  <div className="text-blue-700 text-[10px]">Min</div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* GRAPHIQUE MÉCANIQUE - MODE SESSIONS */}
+        {scoreType === 'mecanique' && viewMode === 'sessions' && scoresParSessionMeca.length > 0 && (
+          <>
+            <div className="p-3 h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={scoresParSessionMeca}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                  <XAxis 
+                    dataKey="ordre" 
+                    stroke="#71717a"
+                    style={{ fontSize: '10px' }}
+                    label={{ value: 'Session', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+                  />
+                  <YAxis 
+                    stroke="#71717a"
+                    style={{ fontSize: '10px' }}
+                    domain={[0, 1.3]}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#fff',
+                      border: '1px solid #e4e4e7',
+                      borderRadius: '8px',
+                      fontSize: '11px'
+                    }}
+                    formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
+                    labelFormatter={(value: any, payload: any) => {
+                      const item = payload[0]?.payload;
+                      return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="scoreMoyen"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    dot={{ fill: '#3b82f6', r: 4 }}
+                    name="Score Moyen"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-blue-50/20 px-3 py-1.5 border-t border-blue-200">
+              <div className="flex justify-around text-center text-xs">
+                <div>
+                  <div className="font-bold text-blue-600">
+                    {(
+                      scoresParSessionMeca.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionMeca.length
+                    ).toFixed(2)}
+                  </div>
+                  <div className="text-blue-700 text-[10px]">Moyenne</div>
+                </div>
+                <div>
+                  <div className="font-bold text-blue-600">
+                    {Math.max(...scoresParSessionMeca.map(s => s.scoreMoyen)).toFixed(2)}
+                  </div>
+                  <div className="text-blue-700 text-[10px]">Max</div>
+                </div>
+                <div>
+                  <div className="font-bold text-blue-600">
+                    {Math.min(...scoresParSessionMeca.map(s => s.scoreMoyen)).toFixed(2)}
+                  </div>
+                  <div className="text-blue-700 text-[10px]">Min</div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* GRAPHIQUE CHAOTIQUE - MODE QUESTIONS */}
+        {scoreType === 'chaotique' && viewMode === 'questions' && scoresChaotiques.length > 0 && (
+          <>
+            <div className="p-3 h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={scoresChaotiques}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                  <XAxis 
+                    dataKey="ordre" 
+                    stroke="#71717a"
+                    style={{ fontSize: '10px' }}
+                    label={{ value: 'Question', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+                  />
+                  <YAxis 
+                    stroke="#71717a"
+                    style={{ fontSize: '10px' }}
+                    domain={[0, 1.3]}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#fff',
+                      border: '1px solid #e4e4e7',
+                      borderRadius: '8px',
+                      fontSize: '11px'
+                    }}
+                    formatter={(value: any) => [value.toFixed(2), 'Score']}
+                    labelFormatter={(value: any, payload: any) => {
+                      const item = payload[0]?.payload;
+                      return item ? `Q${value} - ${item.exercice} ${item.question}` : `Question ${value}`;
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="score"
+                    stroke="#a855f7"
+                    strokeWidth={2}
+                    dot={{ fill: '#a855f7', r: 4 }}
+                    name="Score Chaotique"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-purple-50/20 px-3 py-1.5 border-t border-purple-200">
+              <div className="flex justify-around text-center text-xs">
+                <div>
+                  <div className="font-bold text-purple-600">
+                    {Math.round(
+                      scoresChaotiques.reduce((acc, s) => acc + s.score, 0) / scoresChaotiques.length
+                    )}%
+                  </div>
+                  <div className="text-purple-700 text-[10px]">Moyenne</div>
+                </div>
+                <div>
+                  <div className="font-bold text-purple-600">
+                    {Math.max(...scoresChaotiques.map(s => s.score))}%
+                  </div>
+                  <div className="text-purple-700 text-[10px]">Max</div>
+                </div>
+                <div>
+                  <div className="font-bold text-purple-600">
+                    {Math.min(...scoresChaotiques.map(s => s.score))}%
+                  </div>
+                  <div className="text-purple-700 text-[10px]">Min</div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* GRAPHIQUE CHAOTIQUE - MODE SESSIONS */}
+        {scoreType === 'chaotique' && viewMode === 'sessions' && scoresParSessionChaos.length > 0 && (
+          <>
+            <div className="p-3 h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={scoresParSessionChaos}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                  <XAxis 
+                    dataKey="ordre" 
+                    stroke="#71717a"
+                    style={{ fontSize: '10px' }}
+                    label={{ value: 'Session', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+                  />
+                  <YAxis 
+                    domain={[0, 1.3]}
+                    stroke="#71717a"
+                    style={{ fontSize: '10px' }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#fff',
+                      border: '1px solid #e4e4e7',
+                      borderRadius: '8px',
+                      fontSize: '11px'
+                    }}
+                    formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
+                    labelFormatter={(value: any, payload: any) => {
+                      const item = payload[0]?.payload;
+                      return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="scoreMoyen"
+                    stroke="#a855f7"
+                    strokeWidth={2}
+                    dot={{ fill: '#a855f7', r: 4 }}
+                    name="Score Moyen"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-purple-50/20 px-3 py-1.5 border-t border-purple-200">
+              <div className="flex justify-around text-center text-xs">
+                <div>
+                  <div className="font-bold text-purple-600">
+                    {(
+                      scoresParSessionChaos.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionChaos.length
+                    ).toFixed(2)}
+                  </div>
+                  <div className="text-purple-700 text-[10px]">Moyenne</div>
+                </div>
+                <div>
+                  <div className="font-bold text-purple-600">
+                    {Math.max(...scoresParSessionChaos.map(s => s.scoreMoyen)).toFixed(2)}
+                  </div>
+                  <div className="text-purple-700 text-[10px]">Max</div>
+                </div>
+                <div>
+                  <div className="font-bold text-purple-600">
+                    {Math.min(...scoresParSessionChaos.map(s => s.scoreMoyen)).toFixed(2)}
+                  </div>
+                  <div className="text-purple-700 text-[10px]">Min</div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* GRAPHIQUE GLOBAL - CUMULATIF */}
+        {scoreType === 'global' && scoresGlobaux.length > 0 && (
+          <>
+            <div className="p-3 h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={scoresGlobaux}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                  <XAxis 
+                    dataKey="jour" 
+                    stroke="#71717a"
+                    style={{ fontSize: '10px' }}
+                    label={{ value: 'Jour du mois', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+                  />
+                  <YAxis 
+                    stroke="#71717a"
+                    style={{ fontSize: '10px' }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#fff',
+                      border: '1px solid #e4e4e7',
+                      borderRadius: '8px',
+                      fontSize: '11px'
+                    }}
+                    formatter={(value: any) => [value.toFixed(0), 'Score Global']}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="scoreCumulatif"
+                    stroke="#10b981"
+                    strokeWidth={2}
+                    dot={{ fill: '#10b981', r: 3 }}
+                    activeDot={{ r: 5 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-green-50/20 px-3 py-1.5 border-t border-green-200">
+              <div className="flex justify-around text-center text-xs">
+                <div>
+                  <div className="font-bold text-green-600">
+                    {scoresGlobaux[scoresGlobaux.length - 1].scoreCumulatif.toFixed(0)}
+                  </div>
+                  <div className="text-green-700 text-[10px]">Score Actuel</div>
+                </div>
+                <div>
+                  <div className="font-bold text-green-600">
+                    {Math.max(...scoresGlobaux.map(s => s.scoreCumulatif)).toFixed(0)}
+                  </div>
+                  <div className="text-green-700 text-[10px]">Max</div>
+                </div>
+                <div>
+                  <div className="font-bold text-green-600">
+                    {scoresGlobaux.length}
+                  </div>
+                  <div className="text-green-700 text-[10px]">Jours</div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+
+        {/* Messages si pas de données */}
+        {scoreType === 'mecanique' && scoresMecaCumulatifs.length === 0 && (
+          <div className="p-6 text-center text-gray-500 h-[300px] flex flex-col items-center justify-center">
+            <div className="text-2xl mb-1">📈</div>
+            <p className="text-xs">Aucun score mécanique enregistré</p>
+            <p className="text-[10px] text-gray-400 mt-1">Les scores sont créés lors des sessions mécaniques</p>
+          </div>
+        )}
+
+        {scoreType === 'chaotique' && scoresChaotiques.length === 0 && (
+          <div className="p-6 text-center text-gray-500 h-[300px] flex flex-col items-center justify-center">
+            <div className="text-2xl mb-1">📈</div>
+            <p className="text-xs">Aucun score chaotique enregistré</p>
+            <p className="text-[10px] text-gray-400 mt-1">Les scores sont créés lors des sessions chaotiques</p>
+          </div>
+        )}
+      </div>
+
+      {/* Graphique de concentration */}
+      <div className={`bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden ${fullscreenBlock === 'concentration' ? 'fixed inset-4 z-50' : ''}`}>
+        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-2 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-gray-900">Entraîner sa concentration</h2>
+            <p className="text-blue-100 text-xs">21 derniers jours</p>
+          </div>
+          <FullscreenButton blockId="concentration" />
+        </div>
+
+        {concentrationData.some(d => d.duree > 0) ? (
+          <>
+            <div className="p-3 h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={concentrationData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                  <XAxis 
+                    dataKey="date" 
+                    stroke="#71717a"
+                    style={{ fontSize: '9px' }}
+                    angle={-45}
+                    textAnchor="end"
+                    height={40}
+                    interval={6}
+                  />
+                  <YAxis 
+                    stroke="#71717a"
+                    style={{ fontSize: '10px' }}
+                    domain={[0, 1.3]}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#fff',
+                      border: '1px solid #e4e4e7',
+                      borderRadius: '8px',
+                      fontSize: '11px'
+                    }}
+                    formatter={(value: any, name: string, props: any) => [
+                      `${value} min (${props.payload.nbSessions} session${props.payload.nbSessions > 1 ? 's' : ''})`,
+                      'Temps'
+                    ]}
+                  />
+                  <Bar
+                    dataKey="duree"
+                    fill="#3b82f6"
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-blue-50/20 px-3 py-1.5 border-t border-blue-200">
+              <div className="flex justify-around text-center text-xs">
+                <div>
+                  <div className="font-bold text-blue-600">
+                    {Math.round(
+                      concentrationData.reduce((acc, d) => acc + d.duree, 0) / 
+                      concentrationData.filter(d => d.duree > 0).length || 0
+                    )} min
+                  </div>
+                  <div className="text-blue-700 text-[10px]">Moy/jour</div>
+                </div>
+                <div>
+                  <div className="font-bold text-blue-600">
+                    {concentrationData.reduce((acc, d) => acc + d.duree, 0)} min
+                  </div>
+                  <div className="text-blue-700 text-[10px]">Total</div>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="p-6 text-center text-gray-500 h-[300px] flex flex-col items-center justify-center">
+            <div className="text-2xl mb-1">⏱️</div>
+            <p className="text-xs">Aucune donnée</p>
+          </div>
+        )}
       </div>
     </div>
-      </div>
-    </div>
-  );
+  </div>
+  </div>
+</div>
+);
 }

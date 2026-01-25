@@ -42,13 +42,7 @@ type ScoreLocalHistorique = {
   session_numero: number;
 };
 
-type QuestionMecanique = {
-  tempId: string;
-  question: string;
-  succes: boolean;
-};
-
-type QuestionChaotique = {
+type Question = {
   tempId: string;
   exercice: string;
   question: string;
@@ -105,16 +99,14 @@ export default function SessionsPage() {
   });
   
   // Questions ajoutées
-  const [questionsMecaniques, setQuestionsMecaniques] = useState<QuestionMecanique[]>([]);
-  const [questionsChaotiques, setQuestionsChaotiques] = useState<QuestionChaotique[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
   
   // Formulaire d'ajout de question (inline)
   const [showAddQuestion, setShowAddQuestion] = useState(false);
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
-  const [questionFormData, setQuestionFormData] = useState<any>({
-    question: '',
-    succes: true,
+  const [questionFormData, setQuestionFormData] = useState({
     exercice: '',
+    question: '',
     comprehension: 0,
     savoir: 0,
     redaction: 0,
@@ -153,10 +145,11 @@ export default function SessionsPage() {
         .select(`
           feuille_id,
           statut,
+          en_cours,
           feuille_entrainement:feuille_entrainement(titre, type)
         `)
         .eq('user_id', user.id)
-        .eq('statut', 'en_cours')
+        .eq('en_cours', true)
         .in('feuille_entrainement.type', ['mecanique', 'chaotique']);
       
       if (feuillesError) throw feuillesError;
@@ -175,9 +168,11 @@ export default function SessionsPage() {
         setFeuilleMeca(meca || null);
         setFeuilleChaos(chaos || null);
       }
-
-      const { data: nextNum, error: nextNumError } = await supabase.rpc('get_next_session_number');
       
+      const { data: nextNum, error: nextNumError } = await supabase.rpc('get_next_session_number', {
+        p_user_id: user.id
+      });
+
       if (nextNumError) throw nextNumError;
       setNextSessionNum(nextNum || 1);
 
@@ -201,7 +196,7 @@ export default function SessionsPage() {
         `)
         .eq('user_id', user.id)
         .order('date_session', { ascending: false })
-        .order('numero_session', { ascending: false })
+        .order('heure_session', { ascending: false })
         .limit(50);
 
       if (sessionsError) throw sessionsError;
@@ -283,100 +278,70 @@ export default function SessionsPage() {
   }
 
   function addQuestion() {
-    if (typeEntrainement === 'mecanique') {
-      if (!questionFormData.question.trim()) {
-        alert('Veuillez renseigner la référence de la question');
-        return;
-      }
-      
-      const newQuestion: QuestionMecanique = {
-        tempId: editingQuestionId || `temp-${Date.now()}`,
-        question: questionFormData.question,
-        succes: questionFormData.succes,
-      };
-      
-      if (editingQuestionId) {
-        setQuestionsMecaniques(prev => 
-          prev.map(q => q.tempId === editingQuestionId ? newQuestion : q)
-        );
-      } else {
-        setQuestionsMecaniques(prev => [...prev, newQuestion]);
-      }
-    } else {
-      if (!questionFormData.exercice.trim() || !questionFormData.question.trim()) {
-        alert('Veuillez renseigner l\'exercice et la question');
-        return;
-      }
-      
-      const newQuestion: QuestionChaotique = {
-        tempId: editingQuestionId || `temp-${Date.now()}`,
-        exercice: questionFormData.exercice,
-        question: questionFormData.question,
-        comprehension: questionFormData.comprehension,
-        savoir: questionFormData.savoir,
-        redaction: questionFormData.redaction,
-        correction: questionFormData.correction,
-      };
-      
-      if (editingQuestionId) {
-        setQuestionsChaotiques(prev => 
-          prev.map(q => q.tempId === editingQuestionId ? newQuestion : q)
-        );
-      } else {
-        setQuestionsChaotiques(prev => [...prev, newQuestion]);
-      }
+    // Validation
+    if (!questionFormData.question.trim()) {
+      alert('Veuillez renseigner la question');
+      return;
     }
-    
+
+    if (typeEntrainement === 'chaotique' && !questionFormData.exercice.trim()) {
+      alert('Veuillez renseigner l\'exercice');
+      return;
+    }
+
+    if (editingQuestionId) {
+      // Édition
+      setQuestions(prev =>
+        prev.map(q => q.tempId === editingQuestionId
+          ? { ...questionFormData, tempId: editingQuestionId }
+          : q
+        )
+      );
+    } else {
+      // Ajout
+      const newQuestion = {
+        ...questionFormData,
+        tempId: Date.now().toString(),
+      };
+      
+      setQuestions(prev => [...prev, newQuestion]);
+    }
+
     resetQuestionForm();
   }
 
   function resetQuestionForm() {
     setQuestionFormData({
-      question: '',
-      succes: true,
       exercice: '',
+      question: '',
       comprehension: 0,
       savoir: 0,
       redaction: 0,
       correction: 0,
     });
-    setShowAddQuestion(false);
     setEditingQuestionId(null);
+    setShowAddQuestion(false);
   }
 
   function editQuestion(tempId: string) {
-    setEditingQuestionId(tempId);
-    setShowAddQuestion(true);
+    const question = questions.find(q => q.tempId === tempId);
     
-    if (typeEntrainement === 'mecanique') {
-      const question = questionsMecaniques.find(q => q.tempId === tempId);
-      if (question) {
-        setQuestionFormData({
-          question: question.question,
-          succes: question.succes,
-        });
-      }
-    } else {
-      const question = questionsChaotiques.find(q => q.tempId === tempId);
-      if (question) {
-        setQuestionFormData({
-          exercice: question.exercice,
-          question: question.question,
-          comprehension: question.comprehension,
-          savoir: question.savoir,
-          redaction: question.redaction,
-          correction: question.correction,
-        });
-      }
+    if (question) {
+      setQuestionFormData({
+        exercice: question.exercice,
+        question: question.question,
+        comprehension: question.comprehension,
+        savoir: question.savoir,
+        redaction: question.redaction,
+        correction: question.correction,
+      });
+      setEditingQuestionId(tempId);
+      setShowAddQuestion(true);
     }
   }
 
   function deleteQuestion(tempId: string) {
-    if (typeEntrainement === 'mecanique') {
-      setQuestionsMecaniques(prev => prev.filter(q => q.tempId !== tempId));
-    } else {
-      setQuestionsChaotiques(prev => prev.filter(q => q.tempId !== tempId));
-    }
+    setQuestions(prev => prev.filter(q => q.tempId !== tempId));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -392,7 +357,7 @@ export default function SessionsPage() {
       return;
     }
 
-    const questions = typeEntrainement === 'mecanique' ? questionsMecaniques : questionsChaotiques;
+    
     
     if (questions.length === 0) {
       alert('Veuillez ajouter au moins une question');
@@ -430,30 +395,17 @@ export default function SessionsPage() {
 
       if (sessionError) throw sessionError;
 
+
       // Créer les scores locaux
-      const scoresLocaux = questions.map((q: any) => {
-        if (typeEntrainement === 'mecanique') {
-          return {
-            session_id: newSession.id,
-            exercice: '',
-            question: q.question,
-            comprehension: q.succes ? 100 : 0,
-            savoir: 0,
-            redaction: 0,
-            correction: 0,
-          };
-        } else {
-          return {
-            session_id: newSession.id,
-            exercice: q.exercice,
-            question: q.question,
-            comprehension: q.comprehension,
-            savoir: q.savoir,
-            redaction: q.redaction,
-            correction: q.correction,
-          };
-        }
-      });
+      const scoresLocaux = questions.map((q: any) => ({
+        session_id: newSession.id,
+        exercice: q.exercice || '',
+        question: q.question,
+        comprehension: q.comprehension,
+        savoir: q.savoir,
+        redaction: q.redaction,
+        correction: q.correction,
+      }));
 
       const { error: scoresError } = await supabase
         .from('score_local')
@@ -461,11 +413,16 @@ export default function SessionsPage() {
 
       if (scoresError) throw scoresError;
 
-      // Recharger et reset
-      await loadData();
+      // Incrémenter le numéro localement (évite la race condition)
+      setNextSessionNum(prev => prev + 1);
+
+      // Reset et notification
       resetForm();
       setSaving(false);
       alert('✅ Session enregistrée avec succès !');
+
+      // Recharger en arrière-plan (sans bloquer)
+      loadData();
 
     } catch (err: any) {
       console.error('Erreur:', err);
@@ -481,8 +438,7 @@ export default function SessionsPage() {
       temps: '',
     });
     setFeuilleSelectionnee('');
-    setQuestionsMecaniques([]);
-    setQuestionsChaotiques([]);
+    setQuestions([]);
     resetQuestionForm();
   }
 
@@ -670,7 +626,7 @@ export default function SessionsPage() {
     );
   }
 
-  const questionsActuelles = typeEntrainement === 'mecanique' ? questionsMecaniques : questionsChaotiques;
+  const questionsActuelles = questions;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-teal-50 p-4">
@@ -856,49 +812,9 @@ export default function SessionsPage() {
                       {editingQuestionId ? '✏️ Modifier la question' : '➕ Nouvelle question'}
                     </h4>
                     
-                    {typeEntrainement === 'mecanique' ? (
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Ref Question
-                          </label>
-                          <input
-                            type="text"
-                            value={questionFormData.question}
-                            onChange={(e) => handleQuestionFormChange('question', e.target.value)}
-                            placeholder="Ex: Question 5"
-                            className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-3">
-                            Résultat
-                          </label>
-                          <div className="flex gap-4">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="radio"
-                                checked={questionFormData.succes === true}
-                                onChange={() => handleQuestionFormChange('succes', true)}
-                                className="w-4 h-4"
-                              />
-                              <span className="text-green-700 font-medium">✓ Succès</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="radio"
-                                checked={questionFormData.succes === false}
-                                onChange={() => handleQuestionFormChange('succes', false)}
-                                className="w-4 h-4"
-                              />
-                              <span className="text-red-700 font-medium">✗ Échec</span>
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-4">
+                      <div className={`grid ${typeEntrainement === 'chaotique' ? 'grid-cols-2' : 'grid-cols-1'} gap-4`}>
+                        {typeEntrainement === 'chaotique' && (
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                               Ref Exercice
@@ -911,80 +827,80 @@ export default function SessionsPage() {
                               className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
                             />
                           </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Ref Question
-                            </label>
-                            <input
-                              type="text"
-                              value={questionFormData.question}
-                              onChange={(e) => handleQuestionFormChange('question', e.target.value)}
-                              placeholder="Ex: Question 2.a"
-                              className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                            />
-                          </div>
-                        </div>
-
+                        )}
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            🧠 Compréhension
+                            Ref Question
                           </label>
-                          <select
-                            value={questionFormData.comprehension}
-                            onChange={(e) => handleQuestionFormChange('comprehension', parseInt(e.target.value))}
-                            className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                          >
-                            <option value={0}>0 - Pas compris</option>
-                            <option value={25}>25 - Compréhension minimale</option>
-                            <option value={50}>50 - Compréhension partielle</option>
-                            <option value={75}>75 - Bonne compréhension</option>
-                            <option value={100}>100 - Compréhension totale</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            🛠️ Savoir-faire
-                          </label>
-                          <select
-                            value={questionFormData.savoir}
-                            onChange={(e) => handleQuestionFormChange('savoir', parseInt(e.target.value))}
-                            className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                          >
-                            <option value={0}>0 - Non maîtrisé</option>
-                            <option value={50}>50 - Partiellement maîtrisé</option>
-                            <option value={100}>100 - Maîtrisé</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            ✍️ Rédaction
-                          </label>
-                          <select
-                            value={questionFormData.redaction}
-                            onChange={(e) => handleQuestionFormChange('redaction', parseInt(e.target.value))}
-                            className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
-                          >
-                            <option value={0}>0 - Rédaction insuffisante</option>
-                            <option value={50}>50 - Rédaction partielle</option>
-                            <option value={100}>100 - Rédaction satisfaisante</option>
-                          </select>
-                        </div>
-
-                        <div className="flex items-center gap-3 p-4 bg-green-50 border-2 border-green-200 rounded-xl">
                           <input
-                            type="checkbox"
-                            checked={questionFormData.correction === 1}
-                            onChange={(e) => handleQuestionFormChange('correction', e.target.checked ? 1 : 0)}
-                            className="w-5 h-5 text-green-600 rounded"
+                            type="text"
+                            value={questionFormData.question}
+                            onChange={(e) => handleQuestionFormChange('question', e.target.value)}
+                            placeholder="Ex: Question 2.a"
+                            className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
                           />
-                          <label className="text-sm font-medium text-gray-700">
-                            ✅ Correction effectuée (+30% de bonus)
-                          </label>
                         </div>
                       </div>
-                    )}
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          🧠 Compréhension
+                        </label>
+                        <select
+                          value={questionFormData.comprehension}
+                          onChange={(e) => handleQuestionFormChange('comprehension', parseInt(e.target.value))}
+                          className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+                        >
+                          <option value={0}>0 - Pas compris</option>
+                          <option value={25}>25 - Compréhension minimale</option>
+                          <option value={50}>50 - Compréhension partielle</option>
+                          <option value={75}>75 - Bonne compréhension</option>
+                          <option value={100}>100 - Compréhension totale</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          🛠️ Savoir-faire
+                        </label>
+                        <select
+                          value={questionFormData.savoir}
+                          onChange={(e) => handleQuestionFormChange('savoir', parseInt(e.target.value))}
+                          className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+                        >
+                          <option value={0}>0 - Non maîtrisé</option>
+                          <option value={50}>50 - Partiellement maîtrisé</option>
+                          <option value={100}>100 - Maîtrisé</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          ✍️ Rédaction
+                        </label>
+                        <select
+                          value={questionFormData.redaction}
+                          onChange={(e) => handleQuestionFormChange('redaction', parseInt(e.target.value))}
+                          className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg bg-white text-gray-900"
+                        >
+                          <option value={0}>0 - Rédaction insuffisante</option>
+                          <option value={50}>50 - Rédaction partielle</option>
+                          <option value={100}>100 - Rédaction satisfaisante</option>
+                        </select>
+                      </div>
+
+                      <div className="flex items-center gap-3 p-4 bg-green-50 border-2 border-green-200 rounded-xl">
+                        <input
+                          type="checkbox"
+                          checked={questionFormData.correction === 1}
+                          onChange={(e) => handleQuestionFormChange('correction', e.target.checked ? 1 : 0)}
+                          className="w-5 h-5 text-green-600 rounded"
+                        />
+                        <label className="text-sm font-medium text-gray-700">
+                          ✅ Correction effectuée (+30% de bonus)
+                        </label>
+                      </div>
+                    </div>
 
                     <div className="flex gap-2 mt-4">
                       <button
@@ -1006,67 +922,46 @@ export default function SessionsPage() {
                 )}
 
                 {/* Liste des questions ajoutées */}
-                {questionsActuelles.length > 0 && (
+                {questions.length > 0 && (
                   <div className="space-y-2">
-                    {typeEntrainement === 'mecanique' ? (
-                      questionsMecaniques.map((q, index) => (
-                        <div key={q.tempId} className="bg-white border-2 border-blue-200 rounded-lg p-3 flex items-center justify-between">
-                          <div>
-                            <span className="font-bold text-blue-600">Question {index + 1}:</span>
-                            <span className="ml-2 text-gray-900">{q.question}</span>
-                            <span className={`ml-3 px-2 py-0.5 rounded text-xs font-bold ${
-                              q.succes ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                            }`}>
-                              {q.succes ? '✓ Succès' : '✗ Échec'}
-                            </span>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => editQuestion(q.tempId)}
-                              className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs font-medium rounded transition"
-                            >
-                              ✏️
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteQuestion(q.tempId)}
-                              className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium rounded transition"
-                            >
-                              🗑️
-                            </button>
+                    {questions.map((q, index) => (
+                      <div key={q.tempId} className={`bg-white border-2 rounded-lg p-3 flex items-center justify-between ${
+                        typeEntrainement === 'mecanique' ? 'border-blue-200' : 'border-purple-200'
+                      }`}>
+                        <div>
+                          <span className={`font-bold ${typeEntrainement === 'mecanique' ? 'text-blue-600' : 'text-purple-600'}`}>
+                            Question {index + 1}:
+                          </span>
+                          <span className="ml-2 text-gray-900">
+                            {typeEntrainement === 'chaotique' && q.exercice && `${q.exercice} - `}
+                            {q.question}
+                          </span>
+                          <div className="text-xs text-gray-600 mt-1">
+                            C: {q.comprehension} | S: {q.savoir} | R: {q.redaction} | Corr: {q.correction ? '✓' : '✗'}
                           </div>
                         </div>
-                      ))
-                    ) : (
-                      questionsChaotiques.map((q, index) => (
-                        <div key={q.tempId} className="bg-white border-2 border-purple-200 rounded-lg p-3 flex items-center justify-between">
-                          <div>
-                            <span className="font-bold text-purple-600">Question {index + 1}:</span>
-                            <span className="ml-2 text-gray-900">{q.exercice} - {q.question}</span>
-                            <div className="text-xs text-gray-600 mt-1">
-                              C: {q.comprehension} | S: {q.savoir} | R: {q.redaction} | Corr: {q.correction ? '✓' : '✗'}
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => editQuestion(q.tempId)}
-                              className="px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 text-xs font-medium rounded transition"
-                            >
-                              ✏️
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteQuestion(q.tempId)}
-                              className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium rounded transition"
-                            >
-                              🗑️
-                            </button>
-                          </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => editQuestion(q.tempId)}
+                            className={`px-3 py-1 text-xs font-medium rounded transition ${
+                              typeEntrainement === 'mecanique'
+                                ? 'bg-blue-100 hover:bg-blue-200 text-blue-700'
+                                : 'bg-purple-100 hover:bg-purple-200 text-purple-700'
+                            }`}
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteQuestion(q.tempId)}
+                            className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium rounded transition"
+                          >
+                            🗑️
+                          </button>
                         </div>
-                      ))
-                    )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
