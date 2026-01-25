@@ -1204,7 +1204,7 @@ export default function SessionsPage() {
                           </div>
                           <div className="text-right">
                             <div className="text-3xl font-bold text-purple-600">
-                              {Math.round(score.score_calcule)}%
+                              {Math.round(score.score_calcule * 100)}%
                             </div>
                             <div className="text-xs text-gray-500">Score final</div>
                           </div>

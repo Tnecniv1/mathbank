@@ -75,7 +75,7 @@ type ScoreParSession = {
   date: string;
 };
 
-const MAX_FEUILLES_PAR_LIGNE = 30;
+const MAX_FEUILLES_PAR_LIGNE = 20;
 const COLONNES_AFFICHEES = 20;
 
 export default function TableauProgression() {
@@ -336,7 +336,7 @@ export default function TableauProgression() {
           
           if (isMecanique) {
             const scoreValue = parseFloat(score.score_calcule) || 0;
-            const isSucces = scoreValue === 100;
+            const isSucces = scoreValue >= 1;
             
             // Score normal
             const scoreLocal: ScoreLocal = {
@@ -406,7 +406,7 @@ export default function TableauProgression() {
           scoresSessionChaos.push({
             ordre: ordreChaos++,
             session_numero: scores[0].session_numero || 0,
-            scoreMoyen: Math.round(scoreMoyen),
+            scoreMoyen: scoreMoyen,
             nbQuestions: scores.length,
             date: scores[0].date
           });
@@ -1011,7 +1011,7 @@ export default function TableauProgression() {
                       borderRadius: '8px',
                       fontSize: '11px'
                     }}
-                    formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
+                    formatter={(value: any) => [`${Math.round(value * 100)}%`, 'Moyenne']}
                     labelFormatter={(value: any, payload: any) => {
                       const item = payload[0]?.payload;
                       return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;
@@ -1104,20 +1104,20 @@ export default function TableauProgression() {
                 <div>
                   <div className="font-bold text-purple-600">
                     {Math.round(
-                      scoresChaotiques.reduce((acc, s) => acc + s.score, 0) / scoresChaotiques.length
+                      (scoresChaotiques.reduce((acc, s) => acc + s.score, 0) / scoresChaotiques.length) * 100
                     )}%
                   </div>
                   <div className="text-purple-700 text-[10px]">Moyenne</div>
                 </div>
                 <div>
                   <div className="font-bold text-purple-600">
-                    {Math.max(...scoresChaotiques.map(s => s.score))}%
+                    {Math.round(Math.max(...scoresChaotiques.map(s => s.score)) * 100)}%
                   </div>
                   <div className="text-purple-700 text-[10px]">Max</div>
                 </div>
                 <div>
                   <div className="font-bold text-purple-600">
-                    {Math.min(...scoresChaotiques.map(s => s.score))}%
+                    {Math.round(Math.min(...scoresChaotiques.map(s => s.score)) * 100)}%
                   </div>
                   <div className="text-purple-700 text-[10px]">Min</div>
                 </div>
@@ -1151,7 +1151,7 @@ export default function TableauProgression() {
                       borderRadius: '8px',
                       fontSize: '11px'
                     }}
-                    formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
+                    formatter={(value: any) => [`${Math.round(value * 100)}%`, 'Moyenne']}
                     labelFormatter={(value: any, payload: any) => {
                       const item = payload[0]?.payload;
                       return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;

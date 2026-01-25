@@ -76,7 +76,7 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
     try {
       setLoading(true);
 
-      // 1. Charger toute la structure hiérarchique
+      // 1. Charger la structure hiérarchique SANS les feuilles
       const { data: niveauxData } = await supabase
         .from('niveau')
         .select(`
@@ -84,21 +84,29 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
           sujets:sujet (
             id, titre, ordre,
             chapitres:chapitre (
-              id, titre, ordre,
-              feuilles:feuille_entrainement (
-                id, titre, ordre, type, difficulte
-              )
+              id, titre, ordre
             )
           )
         `)
         .order('ordre');
 
-      if (!niveauxData) {
-        setNiveaux([]);
-        return;
-      }
+      // 2. Charger TOUTES les feuilles séparément
+      const { data: toutesLesFeuilles } = await supabase
+        .from('feuille_entrainement')
+        .select('id, titre, ordre, type, difficulte, chapitre_id')
+        .not('type', 'is', null)
+        .order('ordre');
 
-      // 2. Charger les feuilles validées par ce membre
+      // 3. Organiser les feuilles par chapitre
+      const feuillesParChapitre = new Map<string, any[]>();
+      toutesLesFeuilles?.forEach((f: any) => {
+        if (!feuillesParChapitre.has(f.chapitre_id)) {
+          feuillesParChapitre.set(f.chapitre_id, []);
+        }
+        feuillesParChapitre.get(f.chapitre_id)!.push(f);
+      });
+
+      // 4. Charger les feuilles validées
       const { data: feuillesValidees } = await supabase
         .from('progression_feuille')
         .select('feuille_id')
@@ -107,7 +115,7 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
 
       const idsValidees = new Set(feuillesValidees?.map(p => p.feuille_id) || []);
 
-      // 3. Charger les feuilles actuellement autorisées
+      // 5. Charger les feuilles autorisées
       const { data: feuillesAutorisees } = await supabase
         .from('feuilles_autorisees')
         .select('feuille_id')
@@ -115,8 +123,8 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
 
       const idsAutorisees = new Set(feuillesAutorisees?.map(f => f.feuille_id) || []);
 
-      // 4. Enrichir les données avec les statuts
-      const niveauxEnrichis: Niveau[] = niveauxData.map((n: any) => ({
+      // 6. Enrichir avec les feuilles
+      const niveauxEnrichis: Niveau[] = (niveauxData || []).map((n: any) => ({
         id: n.id,
         titre: n.titre,
         ordre: n.ordre,
@@ -128,8 +136,7 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
             id: c.id,
             titre: c.titre,
             ordre: c.ordre,
-            feuilles: (c.feuilles || [])
-              .filter((f: any) => f.type)
+            feuilles: (feuillesParChapitre.get(c.id) || [])
               .map((f: any) => ({
                 id: f.id,
                 titre: f.titre,
@@ -157,7 +164,7 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
         setNiveauSelectionne(niveauxEnrichis[0].id);
       }
 
-      // 5. Identifier les feuilles autorisées
+      // 7. Identifier les feuilles autorisées
       let mecaAutorisee: Feuille | null = null;
       let chaosAutorisee: Feuille | null = null;
 
@@ -215,6 +222,8 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
   }
 
   async function handleRetirer(feuilleId: string) {
+    if (!confirm('Retirer cette feuille des autorisations ?')) return;
+
     try {
       setSaving(true);
 
@@ -226,6 +235,10 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
 
       if (error) throw error;
 
+      if (data && !data.success) {
+        throw new Error(data.error || 'Erreur lors du retrait');
+      }
+
       await loadData();
       onUpdate();
     } catch (error: any) {
@@ -236,192 +249,157 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
     }
   }
 
-  function toggleNiveau(niveauId: string, type: 'mecanique' | 'chaotique') {
-    if (type === 'mecanique') {
-      const newSet = new Set(expandedNiveauxMeca);
-      newSet.has(niveauId) ? newSet.delete(niveauId) : newSet.add(niveauId);
-      setExpandedNiveauxMeca(newSet);
-    } else {
-      const newSet = new Set(expandedNiveauxChaos);
-      newSet.has(niveauId) ? newSet.delete(niveauId) : newSet.add(niveauId);
-      setExpandedNiveauxChaos(newSet);
-    }
+  function renderDifficulte(diff: number) {
+    const colors = {
+      1: 'text-green-600',
+      2: 'text-yellow-600',
+      3: 'text-orange-600',
+      4: 'text-red-600',
+      5: 'text-red-800'
+    };
+    const labels = {
+      1: '⭐',
+      2: '⭐⭐',
+      3: '⭐⭐⭐',
+      4: '⭐⭐⭐⭐',
+      5: '⭐⭐⭐⭐⭐'
+    };
+    return <span className={colors[diff as keyof typeof colors] || 'text-gray-600'}>{labels[diff as keyof typeof labels] || diff}</span>;
   }
 
-  function toggleSujet(sujetId: string, type: 'mecanique' | 'chaotique') {
-    if (type === 'mecanique') {
-      const newSet = new Set(expandedSujetsMeca);
-      newSet.has(sujetId) ? newSet.delete(sujetId) : newSet.add(sujetId);
-      setExpandedSujetsMeca(newSet);
-    } else {
-      const newSet = new Set(expandedSujetsChaos);
-      newSet.has(sujetId) ? newSet.delete(sujetId) : newSet.add(sujetId);
-      setExpandedSujetsChaos(newSet);
-    }
-  }
+  function renderAccordeon(typeFiltre: 'mecanique' | 'chaotique') {
+    const expandedNiveaux = typeFiltre === 'mecanique' ? expandedNiveauxMeca : expandedNiveauxChaos;
+    const expandedSujets = typeFiltre === 'mecanique' ? expandedSujetsMeca : expandedSujetsChaos;
+    const expandedChapitres = typeFiltre === 'mecanique' ? expandedChapitresMeca : expandedChapitresChaos;
 
-  function toggleChapitre(chapitreId: string, type: 'mecanique' | 'chaotique') {
-    if (type === 'mecanique') {
-      const newSet = new Set(expandedChapitresMeca);
-      newSet.has(chapitreId) ? newSet.delete(chapitreId) : newSet.add(chapitreId);
-      setExpandedChapitresMeca(newSet);
-    } else {
-      const newSet = new Set(expandedChapitresChaos);
-      newSet.has(chapitreId) ? newSet.delete(chapitreId) : newSet.add(chapitreId);
-      setExpandedChapitresChaos(newSet);
-    }
-  }
-
-  function compterFeuilles(sujets: Sujet[], type: 'mecanique' | 'chaotique'): number {
-    return sujets.reduce((acc, s) => 
-      acc + s.chapitres.reduce((acc2, c) => 
-        acc2 + c.feuilles.filter(f => 
-          !f.est_validee && f.type === type
-        ).length
-      , 0)
-    , 0);
-  }
-
-  function compterFeuillesSujet(chapitres: Chapitre[], type: 'mecanique' | 'chaotique'): number {
-    return chapitres.reduce((acc, c) => 
-      acc + c.feuilles.filter(f => 
-        !f.est_validee && f.type === type
-      ).length
-    , 0);
-  }
-
-  function compterFeuillesChapitre(feuilles: Feuille[], type: 'mecanique' | 'chaotique'): number {
-    return feuilles.filter(f => 
-      !f.est_validee && f.type === type
-    ).length;
-  }
-
-  function renderDifficulte(difficulte: number | null) {
-    if (difficulte === null) return null;
-    
-    const rows = 2;
-    const cols = 3;
-    
-    return (
-      <div className="inline-flex gap-0.5">
-        {Array.from({ length: rows }).map((_, rowIdx) => (
-          <div key={rowIdx} className="flex flex-col gap-0.5">
-            {Array.from({ length: cols }).map((_, colIdx) => {
-              const index = rowIdx * cols + colIdx;
-              const isFilled = index < difficulte;
-              return (
-                <div
-                  key={colIdx}
-                  className={`w-1.5 h-1.5 rounded-sm ${
-                    isFilled ? 'bg-orange-500' : 'bg-gray-300'
-                  }`}
-                />
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  function renderAccordeon(type: 'mecanique' | 'chaotique') {
-    const expandedNiveaux = type === 'mecanique' ? expandedNiveauxMeca : expandedNiveauxChaos;
-    const expandedSujets = type === 'mecanique' ? expandedSujetsMeca : expandedSujetsChaos;
-    const expandedChapitres = type === 'mecanique' ? expandedChapitresMeca : expandedChapitresChaos;
+    const setExpandedNiveaux = typeFiltre === 'mecanique' ? setExpandedNiveauxMeca : setExpandedNiveauxChaos;
+    const setExpandedSujets = typeFiltre === 'mecanique' ? setExpandedSujetsMeca : setExpandedSujetsChaos;
+    const setExpandedChapitres = typeFiltre === 'mecanique' ? setExpandedChapitresMeca : setExpandedChapitresChaos;
 
     return (
       <div className="space-y-2">
-        {niveaux.map(niveau => {
-          const nbFeuilles = compterFeuilles(niveau.sujets, type);
-          if (nbFeuilles === 0) return null;
+        {niveaux.map((niveau) => {
+          const sujetsFiltres = niveau.sujets.map(s => ({
+            ...s,
+            chapitres: s.chapitres.map(c => ({
+              ...c,
+              feuilles: c.feuilles.filter(f => f.type === typeFiltre)
+            })).filter(c => c.feuilles.length > 0)
+          })).filter(s => s.chapitres.length > 0);
+
+          if (sujetsFiltres.length === 0) return null;
+
+          const totalFeuilles = sujetsFiltres.reduce((acc, s) => 
+            acc + s.chapitres.reduce((acc2, c) => acc2 + c.feuilles.length, 0), 0
+          );
 
           return (
             <div key={niveau.id} className="border-2 border-gray-200 rounded-lg overflow-hidden">
               <button
-                onClick={() => toggleNiveau(niveau.id, type)}
-                className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between text-left transition-colors"
+                onClick={() => {
+                  const newSet = new Set(expandedNiveaux);
+                  if (newSet.has(niveau.id)) {
+                    newSet.delete(niveau.id);
+                  } else {
+                    newSet.add(niveau.id);
+                  }
+                  setExpandedNiveaux(newSet);
+                }}
+                className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
               >
-                <span className="font-semibold text-gray-900">
-                  📚 {niveau.titre} ({nbFeuilles} feuille{nbFeuilles > 1 ? 's' : ''})
-                </span>
-                <span className="text-gray-500">
-                  {expandedNiveaux.has(niveau.id) ? '▼' : '▶'}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">{expandedNiveaux.has(niveau.id) ? '▼' : '▶'}</span>
+                  <span className="font-semibold text-gray-900">
+                    🎓 {niveau.titre} ({totalFeuilles} feuille{totalFeuilles > 1 ? 's' : ''})
+                  </span>
+                </div>
               </button>
 
               {expandedNiveaux.has(niveau.id) && (
                 <div className="p-2 space-y-2 bg-white">
-                  {niveau.sujets.map(sujet => {
-                    const nbFeuillesSujet = compterFeuillesSujet(sujet.chapitres, type);
-                    if (nbFeuillesSujet === 0) return null;
-
+                  {sujetsFiltres.map((sujet) => {
+                    const totalFeuillesSujet = sujet.chapitres.reduce((acc, c) => acc + c.feuilles.length, 0);
+                    
                     return (
                       <div key={sujet.id} className="border border-gray-200 rounded-lg overflow-hidden">
                         <button
-                          onClick={() => toggleSujet(sujet.id, type)}
-                          className="w-full px-3 py-2 bg-gray-50 hover:bg-gray-100 flex items-center justify-between text-left text-sm transition-colors"
+                          onClick={() => {
+                            const newSet = new Set(expandedSujets);
+                            if (newSet.has(sujet.id)) {
+                              newSet.delete(sujet.id);
+                            } else {
+                              newSet.add(sujet.id);
+                            }
+                            setExpandedSujets(newSet);
+                          }}
+                          className="w-full px-4 py-2 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
                         >
-                          <span className="font-medium text-gray-800">
-                            📖 {sujet.titre} ({nbFeuillesSujet})
-                          </span>
-                          <span className="text-gray-400">
-                            {expandedSujets.has(sujet.id) ? '▼' : '▶'}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm">{expandedSujets.has(sujet.id) ? '▼' : '▶'}</span>
+                            <span className="font-medium text-gray-800">
+                              📚 {sujet.titre} ({totalFeuillesSujet})
+                            </span>
+                          </div>
                         </button>
 
                         {expandedSujets.has(sujet.id) && (
-                          <div className="p-2 space-y-1 bg-white">
-                            {sujet.chapitres.map(chapitre => {
-                              const nbFeuillesChapitre = compterFeuillesChapitre(chapitre.feuilles, type);
-                              if (nbFeuillesChapitre === 0) return null;
-
+                          <div className="p-2 space-y-1.5 bg-white">
+                            {sujet.chapitres.map((chapitre) => {
                               return (
-                                <div key={chapitre.id} className="border border-gray-100 rounded overflow-hidden">
+                                <div key={chapitre.id} className="border border-gray-200 rounded overflow-hidden">
                                   <button
-                                    onClick={() => toggleChapitre(chapitre.id, type)}
-                                    className="w-full px-3 py-2 bg-gray-50 hover:bg-gray-100 flex items-center justify-between text-left text-sm transition-colors"
+                                    onClick={() => {
+                                      const newSet = new Set(expandedChapitres);
+                                      if (newSet.has(chapitre.id)) {
+                                        newSet.delete(chapitre.id);
+                                      } else {
+                                        newSet.add(chapitre.id);
+                                      }
+                                      setExpandedChapitres(newSet);
+                                    }}
+                                    className="w-full px-3 py-2 flex items-center justify-between hover:bg-gray-50 transition-colors"
                                   >
-                                    <span className="text-gray-700">
-                                      📑 {chapitre.titre} ({nbFeuillesChapitre})
-                                    </span>
-                                    <span className="text-gray-400 text-xs">
-                                      {expandedChapitres.has(chapitre.id) ? '▼' : '▶'}
-                                    </span>
+                                    <div className="flex items-center gap-2 text-left">
+                                      <span className="text-xs">{expandedChapitres.has(chapitre.id) ? '▼' : '▶'}</span>
+                                      <span className="text-sm font-medium text-gray-700">
+                                        📖 {chapitre.titre} ({chapitre.feuilles.length})
+                                      </span>
+                                    </div>
                                   </button>
 
                                   {expandedChapitres.has(chapitre.id) && (
-                                    <div className="p-2 space-y-1 bg-white">
+                                    <div className="px-3 py-2 space-y-1.5 bg-gray-50/30">
                                       {chapitre.feuilles
-                                        .filter(f => f.type === type && !f.est_validee)
-                                        .map(feuille => (
+                                        .map((feuille) => (
                                           <div
                                             key={feuille.id}
-                                            className={`flex items-center justify-between p-2 rounded text-sm ${
-                                              feuille.est_autorisee
-                                                ? 'bg-green-50 border border-green-200'
-                                                : 'bg-white border border-gray-200 hover:bg-gray-50'
+                                            className={`flex items-center justify-between py-2 px-3 rounded border transition-colors ${
+                                              feuille.est_validee
+                                                ? 'bg-[#ffd93d]/30 border-[#ffd93d] hover:border-[#ffd93d]'
+                                                : 'bg-white border-gray-200 hover:border-blue-400'
                                             }`}
                                           >
-                                            <div className="flex items-center gap-2">
-                                              {feuille.est_autorisee ? (
-                                                <span className="text-green-600">🟢</span>
-                                              ) : (
-                                                <span className="text-gray-400">⚪</span>
-                                              )}
-                                              <span className="text-gray-900">
-                                                #{feuille.ordre} - {feuille.titre}
-                                              </span>
-                                              {feuille.difficulte && renderDifficulte(feuille.difficulte)}
+                                            <div className="flex-1 text-sm">
+                                              <div className="font-medium text-gray-800 flex items-center gap-2">
+                                                {typeFiltre === 'mecanique' ? '🔧' : '🎲'} #{feuille.ordre} - {feuille.titre}
+                                                {feuille.difficulte && renderDifficulte(feuille.difficulte)}
+                                                {feuille.est_validee && (
+                                                  <span className="px-2 py-0.5 bg-[#ffd93d] text-gray-900 text-xs font-bold rounded">
+                                                    ✓ Validée
+                                                  </span>
+                                                )}
+                                              </div>
                                             </div>
-                                            {!feuille.est_autorisee ? (
+                                            {!feuille.est_autorisee && !feuille.est_validee && (
                                               <button
-                                                onClick={() => handleAutoriser(feuille.id, type)}
+                                                onClick={() => handleAutoriser(feuille.id, typeFiltre)}
                                                 disabled={saving}
-                                                className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white text-xs font-medium rounded transition-colors"
+                                                className="px-3 py-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white text-xs font-medium rounded transition-colors"
                                               >
                                                 Autoriser
                                               </button>
-                                            ) : (
+                                            )}
+                                            {feuille.est_autorisee && (
                                               <button
                                                 onClick={() => handleRetirer(feuille.id)}
                                                 disabled={saving}
