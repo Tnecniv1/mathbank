@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tree:*)",
+      "WebFetch(domain:www.readthesequences.com)",
+      "Bash(powershell -Command:*)",
+      "Bash(node -e:*)",
+      "Bash(npm run build:*)",
+      "Bash(pnpm build:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(done)"
+    ]
+  }
+}

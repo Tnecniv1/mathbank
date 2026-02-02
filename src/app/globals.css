@@ -1,26 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f1e8;
+  --foreground: #1a1a1a;
+
+  /* Palette beige/crème chaleureuse */
+  --cream-50: #faf8f3;
+  --cream-100: #f5f1e8;
+  --cream-200: #ebe4d4;
+  --cream-300: #ddd3bf;
+
+  --ink: #1a1a1a;
+  --ink-light: #525252;
+  --ink-muted: #737373;
+
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-light: #eff6ff;
+
+  --border: #e5e5e5;
+  --border-dark: #d4d4d4;
+
+  /* Statuts */
+  --status-success: #15803d;
+  --status-warning: #b45309;
+  --status-neutral: #a3a3a3;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --font-sans: 'Lora', Georgia, serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --font-serif: 'Lora', Georgia, serif;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Couleurs custom */
+  --color-cream-50: var(--cream-50);
+  --color-cream-100: var(--cream-100);
+  --color-cream-200: var(--cream-200);
+  --color-cream-300: var(--cream-300);
+
+  --color-ink: var(--ink);
+  --color-ink-light: var(--ink-light);
+  --color-ink-muted: var(--ink-muted);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-light: var(--accent-light);
+
+  --color-border: var(--border);
+  --color-border-dark: var(--border-dark);
+
+  --color-status-success: var(--status-success);
+  --color-status-warning: var(--status-warning);
+  --color-status-neutral: var(--status-neutral);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Lora', Georgia, serif;
+  font-size: 18px;
+  line-height: 1.65;
+  letter-spacing: -0.01em;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Lora', Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+/* Utilitaires */
+.font-mono {
+  font-family: 'IBM Plex Mono', monospace;
 }
