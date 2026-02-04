@@ -16,6 +16,15 @@ import {
 } from 'recharts';
 
 /* ---------- Types ---------- */
+type RapportArchive = {
+  id: string;
+  trimestre: number;
+  annee: number;
+  titre: string;
+  periode_debut: string;
+  periode_fin: string;
+};
+
 type Analytics = {
   user_id: string;
   generated_at: string;
@@ -91,6 +100,20 @@ const IconArrowLeft = () => (
   </svg>
 );
 
+const IconCalendar = () => (
+  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+    <rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2"/>
+    <path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+  </svg>
+);
+
+const IconRefresh = () => (
+  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+    <path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M21 3v5h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
 const Loader = () => (
   <svg className="w-8 h-8 animate-spin" viewBox="0 0 24 24" fill="none">
     <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
@@ -118,6 +141,65 @@ function prepareMonthlyData(analytics: Analytics): MonthlyData[] {
 }
 
 /* ---------- Composants ---------- */
+
+function SelectorRapport({
+  rapports,
+  selectedId,
+  onSelect,
+  onRefresh,
+  isRefreshing
+}: {
+  rapports: RapportArchive[];
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  onRefresh: () => void;
+  isRefreshing: boolean;
+}) {
+  return (
+    <div className="bg-cream-50 border border-border rounded-lg p-4 mb-6">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold text-ink flex items-center gap-2">
+          <IconCalendar />
+          Historique des rapports
+        </h3>
+        <button
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          className="flex items-center gap-2 px-3 py-1.5 text-sm bg-accent hover:bg-accent/80 text-white rounded-lg transition-colors disabled:opacity-50"
+        >
+          <IconRefresh />
+          {isRefreshing ? 'Chargement...' : 'Actualiser'}
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => onSelect(null)}
+          className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+            selectedId === null
+              ? 'bg-accent text-white'
+              : 'bg-cream-100 text-ink hover:bg-cream-200'
+          }`}
+        >
+          Temps réel
+        </button>
+        {rapports.map((r) => (
+          <button
+            key={r.id}
+            onClick={() => onSelect(r.id)}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              selectedId === r.id
+                ? 'bg-accent text-white'
+                : 'bg-cream-100 text-ink hover:bg-cream-200'
+            }`}
+          >
+            Q{r.trimestre} {r.annee}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function TableauPerformance({ data }: { data: Analytics }) {
   const { trois_mois } = data;
@@ -596,11 +678,14 @@ export default function RapportMembrePage() {
   const [error, setError] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [membreInfo, setMembreInfo] = useState<MembreInfo | null>(null);
+  const [rapportsArchives, setRapportsArchives] = useState<RapportArchive[]>([]);
+  const [selectedRapportId, setSelectedRapportId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const equipeId = searchParams.get('id');
+  const membreId = searchParams.get('membre');
 
   useEffect(() => {
-    const equipeId = searchParams.get('id');
-    const membreId = searchParams.get('membre');
-
     if (!equipeId || !membreId) {
       setError('Paramètres manquants');
       setLoading(false);
@@ -659,6 +744,15 @@ export default function RapportMembrePage() {
         equipe_nom: equipeData.nom
       });
 
+      // Charger les rapports archivés
+      const { data: rapports } = await supabase
+        .rpc('get_user_reports', {
+          p_user_id: membreId,
+          p_equipe_id: equipeId
+        });
+      setRapportsArchives(rapports || []);
+
+      // Charger les analytics temps réel
       const { data: analyticsData, error: analyticsError } = await supabase
         .rpc('get_user_analytics', { p_user_id: membreId });
 
@@ -679,12 +773,72 @@ export default function RapportMembrePage() {
   }
 
   function handleRetour() {
-    const equipeId = searchParams.get('id');
     if (equipeId) {
       router.push(`/gestion-equipe?id=${equipeId}`);
     } else {
       router.back();
     }
+  }
+
+  async function handleSelectRapport(rapportId: string | null) {
+    if (rapportId === null) {
+      // Charger les données temps réel
+      if (!membreId) return;
+      setIsRefreshing(true);
+      const { data: analyticsData } = await supabase
+        .rpc('get_user_analytics', { p_user_id: membreId });
+      setAnalytics(analyticsData);
+      setSelectedRapportId(null);
+      setIsRefreshing(false);
+    } else {
+      // Charger le rapport archivé
+      setIsRefreshing(true);
+      const { data: rapportData } = await supabase
+        .from('rapport_trimestriel')
+        .select('donnees')
+        .eq('id', rapportId)
+        .single();
+      if (rapportData) {
+        setAnalytics(rapportData.donnees as Analytics);
+        setSelectedRapportId(rapportId);
+      }
+      setIsRefreshing(false);
+    }
+  }
+
+  async function handleRefresh() {
+    if (!membreId) return;
+    setIsRefreshing(true);
+    const { data: analyticsData } = await supabase
+      .rpc('get_user_analytics', { p_user_id: membreId });
+    setAnalytics(analyticsData);
+    setSelectedRapportId(null);
+    setIsRefreshing(false);
+  }
+
+  function formatPeriode(): string {
+    const formatDate = (d: string) => new Date(d).toLocaleDateString('fr-FR');
+
+    // Si rapport archivé sélectionné
+    if (selectedRapportId) {
+      const rapport = rapportsArchives.find(r => r.id === selectedRapportId);
+      if (rapport?.periode_debut && rapport?.periode_fin) {
+        return `${formatDate(rapport.periode_debut)} - ${formatDate(rapport.periode_fin)}`;
+      }
+    }
+
+    // Sinon, utiliser les données temps réel
+    if (!analytics?.periode_analyse) return '';
+    const { debut_3_mois, fin } = analytics.periode_analyse;
+    return `${formatDate(debut_3_mois)} - ${formatDate(fin)}`;
+  }
+
+  function getRapportTitre(): string {
+    if (selectedRapportId) {
+      const rapport = rapportsArchives.find(r => r.id === selectedRapportId);
+      return rapport?.titre || 'Rapport archivé';
+    }
+    return 'Temps réel';
   }
 
   if (loading) {
@@ -732,10 +886,27 @@ export default function RapportMembrePage() {
               📋 Rapport de {membreInfo.full_name}
             </h1>
             <p className="text-sm text-ink-light">
-              {membreInfo.equipe_nom} • Généré le {new Date().toLocaleDateString('fr-FR')}
+              {membreInfo.equipe_nom} • {getRapportTitre()}
+              {selectedRapportId === null && (
+                <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                  En direct
+                </span>
+              )}
+            </p>
+            <p className="text-xs text-ink-muted mt-1">
+              📅 Période : {formatPeriode()}
             </p>
           </div>
         </div>
+
+        {/* Sélecteur de rapports */}
+        <SelectorRapport
+          rapports={rapportsArchives}
+          selectedId={selectedRapportId}
+          onSelect={handleSelectRapport}
+          onRefresh={handleRefresh}
+          isRefreshing={isRefreshing}
+        />
 
         {/* Sections */}
         <div className="grid gap-6">
