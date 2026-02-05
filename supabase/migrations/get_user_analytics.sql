@@ -17,12 +17,17 @@ DECLARE
     v_1_month_ago TIMESTAMP := NOW() - INTERVAL '1 month';
     v_12_weeks_ago TIMESTAMP := NOW() - INTERVAL '12 weeks';
 
-    -- Variables pour les calculs
+    -- Variables pour les calculs (3 mois)
     v_score_now NUMERIC := 0;
     v_score_3_months_ago NUMERIC := 0;
     v_score_progression NUMERIC := 0;
     v_total_minutes NUMERIC := 0;
     v_total_questions INTEGER := 0;
+
+    -- Variables pour les calculs GLOBAUX (tout l'historique)
+    v_global_minutes NUMERIC := 0;
+    v_global_questions INTEGER := 0;
+    v_global_score_progression NUMERIC := 0;
 
     -- Résultats JSON
     v_temps_par_mois JSONB;
@@ -76,6 +81,26 @@ BEGIN
     INNER JOIN session_entrainement se ON sl.session_id = se.id
     WHERE se.user_id = p_user_id
       AND se.date_session >= v_3_months_ago::DATE;
+
+    -- ═══════════════════════════════════════════════════════════════════════
+    -- MÉTRIQUES GLOBALES (tout l'historique)
+    -- ═══════════════════════════════════════════════════════════════════════
+
+    -- Minutes de concentration GLOBAL (tout l'historique)
+    SELECT COALESCE(SUM(COALESCE(temps_mecanique, 0) + COALESCE(temps_chaotique, 0)), 0)
+    INTO v_global_minutes
+    FROM session_entrainement
+    WHERE user_id = p_user_id;
+
+    -- Questions travaillées GLOBAL (tout l'historique)
+    SELECT COUNT(*)
+    INTO v_global_questions
+    FROM score_local sl
+    INNER JOIN session_entrainement se ON sl.session_id = se.id
+    WHERE se.user_id = p_user_id;
+
+    -- Score progression GLOBAL = score actuel (car c'est le cumul depuis le début)
+    v_global_score_progression := v_score_now;
 
     -- ═══════════════════════════════════════════════════════════════════════
     -- MÉTRIQUE 4: Volume moyen de temps par mois (3 derniers mois)
@@ -245,6 +270,13 @@ BEGIN
             'minutes_concentration', v_total_minutes,
             'heures_concentration', ROUND(v_total_minutes / 60.0, 1),
             'questions_travaillees', v_total_questions
+        ),
+
+        -- Métriques GLOBALES (tout l'historique)
+        'global', jsonb_build_object(
+            'score_progression', ROUND(v_global_score_progression, 1),
+            'minutes_concentration', v_global_minutes,
+            'questions_travaillees', v_global_questions
         ),
 
         -- Évolutions temporelles

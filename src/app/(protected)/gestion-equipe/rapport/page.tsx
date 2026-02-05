@@ -42,6 +42,12 @@ type Analytics = {
     heures_concentration: number;
     questions_travaillees: number;
   };
+  // Statistiques globales (tout l'historique)
+  global?: {
+    score_progression: number;
+    minutes_concentration: number;
+    questions_travaillees: number;
+  };
   evolution: {
     temps_par_mois: Array<{
       mois: string;
@@ -123,10 +129,14 @@ const Loader = () => (
 
 /* ---------- Fonction de préparation des données ---------- */
 function prepareMonthlyData(analytics: Analytics): MonthlyData[] {
-  const { evolution, feuilles } = analytics;
+  const evolution = analytics?.evolution;
+  const feuilles = analytics?.feuilles;
+
+  // Vérification de sécurité pour les rapports archivés
+  if (!evolution?.temps_par_mois) return [];
 
   return evolution.temps_par_mois.map((m) => {
-    const feuillesMois = feuilles.par_mois.find(
+    const feuillesMois = feuilles?.par_mois?.find(
       (f) => f.mois_num === m.mois_num && f.annee === m.annee
     );
 
@@ -202,10 +212,18 @@ function SelectorRapport({
 }
 
 function TableauPerformance({ data }: { data: Analytics }) {
-  const { trois_mois } = data;
+  // Récupérer les stats avec fallback pour les rapports archivés qui peuvent avoir une structure différente
+  const troisMois = data.trois_mois || (data as any).trimestre_stats || {};
+  const globalStats = data.global || {};
 
-  const heures = Math.floor(trois_mois.minutes_concentration / 60);
-  const minutes = Math.round(trois_mois.minutes_concentration % 60);
+  // Utiliser les stats globales pour les 3 métriques principales, sinon fallback sur trois_mois
+  const scoreProgression = globalStats.score_progression ?? troisMois.score_progression ?? 0;
+  const minutesConcentration = globalStats.minutes_concentration ?? troisMois.minutes_concentration ?? 0;
+  const questionsTravaillees = globalStats.questions_travaillees ?? troisMois.questions_travaillees ?? 0;
+  const scoreActuel = troisMois.score_actuel ?? 0;
+
+  const heures = Math.floor(minutesConcentration / 60);
+  const minutes = Math.round(minutesConcentration % 60);
   const tempsFormate = heures > 0
     ? `${heures}h ${minutes}min`
     : `${minutes} min`;
@@ -214,7 +232,7 @@ function TableauPerformance({ data }: { data: Analytics }) {
     <div className="bg-cream-50 border border-border rounded-lg overflow-hidden">
       <div className="bg-cream-100 px-4 py-3 border-b border-border">
         <h3 className="font-semibold text-ink flex items-center gap-2">
-          <span>📈</span> Performance sur 3 mois
+          <span>📈</span> Performance globale
         </h3>
       </div>
       <table className="w-full">
@@ -222,8 +240,8 @@ function TableauPerformance({ data }: { data: Analytics }) {
           <tr>
             <td className="px-4 py-3 text-ink-light">Score progression</td>
             <td className="px-4 py-3 text-right font-semibold text-ink">
-              <span className={trois_mois.score_progression >= 0 ? 'text-status-success' : 'text-status-error'}>
-                {trois_mois.score_progression >= 0 ? '+' : ''}{Math.round(trois_mois.score_progression)} points
+              <span className={scoreProgression >= 0 ? 'text-status-success' : 'text-status-error'}>
+                {scoreProgression >= 0 ? '+' : ''}{Math.round(scoreProgression)} points
               </span>
             </td>
           </tr>
@@ -236,13 +254,13 @@ function TableauPerformance({ data }: { data: Analytics }) {
           <tr>
             <td className="px-4 py-3 text-ink-light">Questions travaillées</td>
             <td className="px-4 py-3 text-right font-semibold text-ink">
-              {trois_mois.questions_travaillees} questions
+              {questionsTravaillees} questions
             </td>
           </tr>
           <tr>
             <td className="px-4 py-3 text-ink-light">Score actuel</td>
             <td className="px-4 py-3 text-right font-semibold text-accent">
-              {Math.round(trois_mois.score_actuel)} pts
+              {Math.round(scoreActuel)} pts
             </td>
           </tr>
         </tbody>
@@ -386,11 +404,11 @@ function EvolutionCompetences({ composantes }: {
 /* ---------- Section Tendances avec graphiques ---------- */
 function SectionTendancesGraphiques({ data }: { data: Analytics }) {
   const monthlyData = prepareMonthlyData(data);
-  const score12Semaines = data.evolution.score_12_semaines;
+  const score12Semaines = data?.evolution?.score_12_semaines || [];
 
-  // Calculer les feuilles validées durant les 3 derniers mois
-  const valideesDerniers3Mois = data.feuilles.par_mois.reduce(
-    (acc, m) => acc + m.nb_feuilles_validees,
+  // Calculer les feuilles validées durant les 3 derniers mois (avec vérification)
+  const valideesDerniers3Mois = (data?.feuilles?.par_mois || []).reduce(
+    (acc, m) => acc + (m.nb_feuilles_validees || 0),
     0
   );
 
@@ -532,7 +550,7 @@ function SectionTendancesGraphiques({ data }: { data: Analytics }) {
             <span>📄</span> Progression dans le parcours
           </h4>
           <ProgressionGrid
-            totalValidees={data.feuilles.total_validees}
+            totalValidees={data?.feuilles?.total_validees || 0}
             valideesDerniers3Mois={valideesDerniers3Mois}
           />
         </div>
@@ -542,7 +560,7 @@ function SectionTendancesGraphiques({ data }: { data: Analytics }) {
           <h4 className="text-sm font-medium text-ink mb-3 flex items-center gap-2">
             <span>📈</span> Évolution des compétences
           </h4>
-          <EvolutionCompetences composantes={data.evolution.composantes_dernier_mois} />
+          <EvolutionCompetences composantes={data?.evolution?.composantes_dernier_mois || []} />
         </div>
 
         {/* 5. Tableau récapitulatif mensuel - INCHANGÉ */}
@@ -583,13 +601,17 @@ function SectionTendancesGraphiques({ data }: { data: Analytics }) {
 }
 
 function TableauPointsAttention({ data }: { data: Analytics }) {
-  const { evolution, feuilles } = data;
+  // Accès sécurisé aux données (pour les rapports archivés)
+  const evolution = data?.evolution;
+  const feuilles = data?.feuilles;
+  const composantes = evolution?.composantes_dernier_mois || [];
+  const parMois = feuilles?.par_mois || [];
 
   const points: Array<{ type: 'warning' | 'success' | 'info'; message: string }> = [];
 
   // Analyser les composantes du dernier mois
-  if (evolution.composantes_dernier_mois.length > 0) {
-    const derniereSemaine = evolution.composantes_dernier_mois[evolution.composantes_dernier_mois.length - 1];
+  if (composantes.length > 0) {
+    const derniereSemaine = composantes[composantes.length - 1];
 
     if (derniereSemaine.comprehension_moy < 50) {
       points.push({ type: 'warning', message: `Compréhension à renforcer (${derniereSemaine.comprehension_moy.toFixed(0)}%)` });
@@ -611,9 +633,9 @@ function TableauPointsAttention({ data }: { data: Analytics }) {
   }
 
   // Analyser l'évolution des feuilles validées
-  if (feuilles.par_mois.length >= 2) {
-    const dernierMois = feuilles.par_mois[feuilles.par_mois.length - 1];
-    const avantDernier = feuilles.par_mois[feuilles.par_mois.length - 2];
+  if (parMois.length >= 2) {
+    const dernierMois = parMois[parMois.length - 1];
+    const avantDernier = parMois[parMois.length - 2];
 
     if (dernierMois.nb_feuilles_validees < avantDernier.nb_feuilles_validees) {
       points.push({
@@ -817,7 +839,7 @@ export default function RapportMembrePage() {
   }
 
   function formatPeriode(): string {
-    const formatDate = (d: string) => new Date(d).toLocaleDateString('fr-FR');
+    const formatDate = (d: string | Date) => new Date(d).toLocaleDateString('fr-FR');
 
     // Si rapport archivé sélectionné
     if (selectedRapportId) {
@@ -827,10 +849,16 @@ export default function RapportMembrePage() {
       }
     }
 
-    // Sinon, utiliser les données temps réel
-    if (!analytics?.periode_analyse) return '';
-    const { debut_3_mois, fin } = analytics.periode_analyse;
-    return `${formatDate(debut_3_mois)} - ${formatDate(fin)}`;
+    // Mode temps réel : du début du trimestre actuel jusqu'à aujourd'hui
+    const now = new Date();
+    const currentMonth = now.getMonth(); // 0-11
+    const currentYear = now.getFullYear();
+
+    // Calculer le premier mois du trimestre actuel (0=jan, 3=avr, 6=juil, 9=oct)
+    const quarterStartMonth = Math.floor(currentMonth / 3) * 3;
+    const quarterStart = new Date(currentYear, quarterStartMonth, 1);
+
+    return `${formatDate(quarterStart)} - ${formatDate(now)}`;
   }
 
   function getRapportTitre(): string {
