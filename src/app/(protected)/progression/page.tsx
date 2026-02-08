@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import GridObjectifs, { GridData } from '@/components/GridObjectifs';
 
 // Types
 type Niveau = {
@@ -94,6 +95,7 @@ export default function TableauProgression() {
  const [scoresParSessionMeca, setScoresParSessionMeca] = useState<ScoreParSession[]>([]);
  const [scoresParSessionChaos, setScoresParSessionChaos] = useState<ScoreParSession[]>([]);
  const [scoresGlobaux, setScoresGlobaux] = useState<{ jour: string; scoreCumulatif: number }[]>([]);
+ const [gridObjectifs, setGridObjectifs] = useState<GridData[]>([]);
 
  useEffect(() => {
  loadNiveaux();
@@ -154,6 +156,7 @@ export default function TableauProgression() {
 
  await loadScoresLocauxAvecType(niveauId, userId);
  await loadConcentrationData(niveauId, userId);
+ await loadGridObjectifs(userId);
 
  setLoading(false);
  } catch (err: any) {
@@ -540,6 +543,33 @@ export default function TableauProgression() {
  }
  }
 
+ async function loadGridObjectifs(userId: string) {
+ try {
+   // Trouver l'équipe du membre
+   const { data: membreData } = await supabase
+     .from('membre_equipe')
+     .select('equipe_id')
+     .eq('user_id', userId)
+     .limit(1)
+     .single();
+
+   if (!membreData) {
+     setGridObjectifs([]);
+     return;
+   }
+
+   const { data: gridData } = await supabase.rpc('get_objectifs_grid_data', {
+     p_equipe_id: membreData.equipe_id,
+     p_membre_user_id: userId,
+     p_nb_semaines: 24,
+   });
+   setGridObjectifs(gridData || []);
+ } catch (err) {
+   console.error('Erreur chargement grille objectifs:', err);
+   setGridObjectifs([]);
+ }
+ }
+
  function processData(rawData: any[]) {
  console.log('🔍 DONNÉES BRUTES REÇUES:', rawData[0]);
  if (!rawData || rawData.length === 0) {
@@ -713,10 +743,10 @@ export default function TableauProgression() {
  body { font-family: 'Lora', serif; }
  p, span, div { font-family: 'Lora', serif; }
  `}</style>
- <div className="max-w-4xl mx-auto">
- <div className="space-y-3">
+ <div className="max-w-7xl mx-auto">
+ <div className="space-y-6">
  {niveaux.length > 1 && (
- <div className="bg-cream-50 rounded-lg border border-border p-3 shadow-sm">
+ <div className="bg-cream-50 rounded-xl border border-border p-3 shadow-sm">
  <label className="block text-xs font-medium text-ink mb-1.5">
  Niveau
  </label>
@@ -734,7 +764,7 @@ export default function TableauProgression() {
  </div>
  )}
 
- <div className="bg-cream-50 rounded-lg border border-border shadow-sm overflow-hidden">
+ <div className="bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden">
  <div className="bg-accent px-4 py-2.5 flex items-center justify-between">
  <div>
  <h2 className="text-base font-bold text-ink">Parcours d'apprentissage</h2>
@@ -862,9 +892,9 @@ export default function TableauProgression() {
  </div>
  </div>
 
- <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+ <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
  {/* Graphique des scores avec toggle */}
- <div className={`bg-cream-50 rounded-lg border border-border shadow-sm overflow-hidden ${fullscreenBlock === 'scores' ? 'fixed inset-4 z-50' : ''}`}>
+ <div className={`bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden aspect-square flex flex-col ${fullscreenBlock === 'scores' ? 'fixed inset-4 z-50 aspect-auto' : ''}`}>
  <div className="px-3 py-2 flex items-center justify-between">
  <div>
  <h2 className="text-sm font-bold text-ink">Progresser en mathématique</h2>
@@ -921,7 +951,7 @@ export default function TableauProgression() {
  {/* GRAPHIQUE MÉCANIQUE - MODE QUESTIONS (Cumulatif) */}
  {scoreType === 'mecanique' && viewMode === 'questions' && scoresMecaCumulatifs.length > 0 && (
  <>
- <div className="p-3 h-[300px]">
+ <div className="p-3 flex-1 min-h-0">
  <ResponsiveContainer width="100%" height="100%">
  <LineChart data={scoresMecaCumulatifs}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
@@ -989,7 +1019,7 @@ export default function TableauProgression() {
  {/* GRAPHIQUE MÉCANIQUE - MODE SESSIONS */}
  {scoreType === 'mecanique' && viewMode === 'sessions' && scoresParSessionMeca.length > 0 && (
  <>
- <div className="p-3 h-[300px]">
+ <div className="p-3 flex-1 min-h-0">
  <ResponsiveContainer width="100%" height="100%">
  <LineChart data={scoresParSessionMeca}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
@@ -1059,7 +1089,7 @@ export default function TableauProgression() {
  {/* GRAPHIQUE CHAOTIQUE - MODE QUESTIONS */}
  {scoreType === 'chaotique' && viewMode === 'questions' && scoresChaotiques.length > 0 && (
  <>
- <div className="p-3 h-[300px]">
+ <div className="p-3 flex-1 min-h-0">
  <ResponsiveContainer width="100%" height="100%">
  <LineChart data={scoresChaotiques}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
@@ -1129,7 +1159,7 @@ export default function TableauProgression() {
  {/* GRAPHIQUE CHAOTIQUE - MODE SESSIONS */}
  {scoreType === 'chaotique' && viewMode === 'sessions' && scoresParSessionChaos.length > 0 && (
  <>
- <div className="p-3 h-[300px]">
+ <div className="p-3 flex-1 min-h-0">
  <ResponsiveContainer width="100%" height="100%">
  <LineChart data={scoresParSessionChaos}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
@@ -1199,7 +1229,7 @@ export default function TableauProgression() {
  {/* GRAPHIQUE GLOBAL - CUMULATIF */}
  {scoreType === 'global' && scoresGlobaux.length > 0 && (
  <>
- <div className="p-3 h-[300px]">
+ <div className="p-3 flex-1 min-h-0">
  <ResponsiveContainer width="100%" height="100%">
  <LineChart data={scoresGlobaux}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
@@ -1262,7 +1292,7 @@ export default function TableauProgression() {
 
  {/* Messages si pas de données */}
  {scoreType === 'mecanique' && scoresMecaCumulatifs.length === 0 && (
- <div className="p-6 text-center text-ink-muted h-[300px] flex flex-col items-center justify-center">
+ <div className="p-6 text-center text-ink-muted flex-1 min-h-0 flex flex-col items-center justify-center">
  <div className="text-2xl mb-1">📈</div>
  <p className="text-xs">Aucun score mécanique enregistré</p>
  <p className="text-[10px] text-gray-400 mt-1">Les scores sont créés lors des sessions mécaniques</p>
@@ -1270,7 +1300,7 @@ export default function TableauProgression() {
  )}
 
  {scoreType === 'chaotique' && scoresChaotiques.length === 0 && (
- <div className="p-6 text-center text-ink-muted h-[300px] flex flex-col items-center justify-center">
+ <div className="p-6 text-center text-ink-muted flex-1 min-h-0 flex flex-col items-center justify-center">
  <div className="text-2xl mb-1">📈</div>
  <p className="text-xs">Aucun score chaotique enregistré</p>
  <p className="text-[10px] text-gray-400 mt-1">Les scores sont créés lors des sessions chaotiques</p>
@@ -1279,7 +1309,7 @@ export default function TableauProgression() {
  </div>
 
  {/* Graphique de concentration */}
- <div className={`bg-cream-50 rounded-lg border border-border shadow-sm overflow-hidden ${fullscreenBlock === 'concentration' ? 'fixed inset-4 z-50' : ''}`}>
+ <div className={`bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden aspect-square flex flex-col ${fullscreenBlock === 'concentration' ? 'fixed inset-4 z-50 aspect-auto' : ''}`}>
  <div className="px-3 py-2 flex items-center justify-between">
  <div>
  <h2 className="text-sm font-bold text-ink">Entraîner sa concentration</h2>
@@ -1290,7 +1320,7 @@ export default function TableauProgression() {
 
  {concentrationData.some(d => d.duree > 0) ? (
  <>
- <div className="p-3 h-[300px]">
+ <div className="p-3 flex-1 min-h-0">
  <ResponsiveContainer width="100%" height="100%">
  <BarChart data={concentrationData}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
@@ -1350,12 +1380,15 @@ export default function TableauProgression() {
  </div>
  </>
  ) : (
- <div className="p-6 text-center text-ink-muted h-[300px] flex flex-col items-center justify-center">
+ <div className="p-6 text-center text-ink-muted flex-1 min-h-0 flex flex-col items-center justify-center">
  <div className="text-2xl mb-1">⏱️</div>
  <p className="text-xs">Aucune donnée</p>
  </div>
  )}
  </div>
+
+ {/* Grille objectifs hebdomadaires */}
+ <GridObjectifs data={gridObjectifs} />
  </div>
  </div>
  </div>

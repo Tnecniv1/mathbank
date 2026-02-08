@@ -950,14 +950,14 @@ export default function TableauProgression() {
  </div>
  <FullscreenButton blockId="grille" />
  </div>
- 
+
  <div className="p-3">
  <div className="grid grid-cols-4 gap-1.5">
  {Array.from({ length: 12 }, (_, i) => (
  <div
  key={i}
  className={`aspect-square rounded-lg border flex items-center justify-center font-bold text-base ${
- i % 3 === 0 
+ i % 3 === 0
  ? 'border-status-success bg-green-50/20 text-status-success'
  : 'border-red-500 bg-red-50/20 text-red-600'
  }`}

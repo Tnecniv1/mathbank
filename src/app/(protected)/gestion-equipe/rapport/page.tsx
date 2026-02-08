@@ -499,7 +499,7 @@ function SectionTendancesGraphiques({ data }: { data: Analytics }) {
             <h4 className="text-sm font-medium text-ink mb-3 flex items-center gap-2">
               <span>🎯</span> Score moyen par semaine ({scoreParSemaine.length} semaines)
             </h4>
-            <div className="h-56">
+            <div className="h-[500px]">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={scoreParSemaine} margin={{ top: 10, right: 30, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
@@ -786,6 +786,7 @@ export default function RapportMembrePage() {
       }
 
       setAnalytics(analyticsData);
+
       setLoading(false);
     } catch (err) {
       console.error('Erreur:', err);
@@ -938,10 +939,10 @@ export default function RapportMembrePage() {
 
         {/* Sections */}
         <div className="grid gap-6">
-          {/* Section 1 : Performance sur 3 mois - INCHANGÉE */}
+          {/* Section 1 : Performance sur 3 mois */}
           <TableauPerformance data={analytics} />
 
-          {/* Section 2 : Tendances avec graphiques - AMÉLIORÉE */}
+          {/* Section 2 : Tendances */}
           <SectionTendancesGraphiques data={analytics} />
 
           {/* Section 3 : Points d'attention */}

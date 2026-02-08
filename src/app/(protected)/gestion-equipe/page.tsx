@@ -545,9 +545,6 @@ export default function GestionEquipePage() {
  <main className="min-h-screen bg-cream-50 p-4 md:p-8">
  <div className="max-w-6xl mx-auto space-y-6">
 
-
-
-
  {/* Liste des membres */}
  <div className="bg-cream-50 rounded-lg p-6 border border-border">
  <h2 className="text-xl font-bold text-ink mb-4">
@@ -592,6 +589,12 @@ export default function GestionEquipePage() {
  className="px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors"
  >
  📋 Rapport
+ </button>
+ <button
+ onClick={() => router.push(`/gestion-equipe/objectifs?id=${equipeId}&membre=${membre.user_id}`)}
+ className="px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors"
+ >
+ 🎯 Objectifs
  </button>
  </div>
  </div>
