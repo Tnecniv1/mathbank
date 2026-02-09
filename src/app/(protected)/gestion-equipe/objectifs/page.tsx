@@ -30,6 +30,7 @@ export default function ObjectifsPage() {
   const [equipeNom, setEquipeNom] = useState('');
   const [objectifs, setObjectifs] = useState<ObjectifData[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [isChef, setIsChef] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -54,14 +55,23 @@ export default function ObjectifsPage() {
         return;
       }
 
-      // Charger le nom de l'equipe
+      // Charger l'equipe et vérifier le rôle
       const { data: equipeData } = await supabase
         .from('equipe')
-        .select('nom')
+        .select('nom, chef_id')
         .eq('id', eqId)
         .single();
 
-      if (equipeData) setEquipeNom(equipeData.nom);
+      if (equipeData) {
+        setEquipeNom(equipeData.nom);
+        setIsChef(equipeData.chef_id === session.user.id);
+
+        // Vérifier que l'utilisateur est chef OU le membre concerné
+        if (equipeData.chef_id !== session.user.id && userId !== session.user.id) {
+          setLoading(false);
+          return;
+        }
+      }
 
       // Charger le nom du membre
       const { data: profileData } = await supabase
@@ -174,12 +184,14 @@ export default function ObjectifsPage() {
               <p className="text-sm text-ink-light">{equipeNom}</p>
             )}
           </div>
-          <button
-            onClick={() => setShowModal(true)}
-            className="px-4 py-2 bg-accent hover:bg-accent/80 text-white font-medium rounded-lg transition-colors"
-          >
-            + Nouvel objectif
-          </button>
+          {isChef && (
+            <button
+              onClick={() => setShowModal(true)}
+              className="px-4 py-2 bg-accent hover:bg-accent/80 text-white font-medium rounded-lg transition-colors"
+            >
+              + Nouvel objectif
+            </button>
+          )}
         </div>
 
         {/* Liste des objectifs */}
@@ -195,7 +207,7 @@ export default function ObjectifsPage() {
               <ObjectifCard
                 key={obj.id}
                 objectif={obj}
-                onCloturer={handleCloturer}
+                onCloturer={isChef ? handleCloturer : undefined}
               />
             ))}
           </div>

@@ -544,10 +544,10 @@ export default function PersonnelPage() {
  </div>
  </div>
  <button
- onClick={() => router.push('/entrainement')}
+ onClick={() => router.push(`/gestion-equipe?id=${monEquipe.id}`)}
  className="px-4 py-2 bg-accent hover:bg-accent-hover text-ink font-semibold rounded-lg transition-all shadow-sm"
  >
- Accéder à l'entraînement →
+ Voir mon équipe →
  </button>
  </div>
  </div>

@@ -728,15 +728,25 @@ export default function RapportMembrePage() {
         return;
       }
 
+      // Charger l'équipe sans filtrer par chef_id
       const { data: equipeData, error: equipeError } = await supabase
         .from('equipe')
         .select('id, nom, chef_id')
         .eq('id', equipeId)
-        .eq('chef_id', session.user.id)
         .single();
 
       if (equipeError || !equipeData) {
-        setError('Équipe introuvable ou vous n\'êtes pas le chef');
+        setError('Équipe introuvable');
+        setLoading(false);
+        return;
+      }
+
+      // Vérifier que l'utilisateur est chef OU le membre concerné
+      const isChefUser = equipeData.chef_id === session.user.id;
+      const isSelf = membreId === session.user.id;
+
+      if (!isChefUser && !isSelf) {
+        setError('Vous n\'avez pas accès à ce rapport');
         setLoading(false);
         return;
       }

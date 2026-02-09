@@ -131,6 +131,7 @@ export default function GestionEquipePage() {
  const [showObserverModal, setShowObserverModal] = useState(false);
  const [scoreGlobalEquipe, setScoreGlobalEquipe] = useState<number>(0);
  const [contributionsMembres, setContributionsMembres] = useState<{user_id: string, nom: string, score: number}[]>([]);
+ const [isChef, setIsChef] = useState(false);
 
  const [showRejetModal, setShowRejetModal] = useState(false);
  const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
@@ -166,27 +167,55 @@ export default function GestionEquipePage() {
 
  setUserId(session.user.id);
 
- // Charger l'équipe spécifique
- const { data: equipeDataArray, error: equipeError } = await supabase
+ // Charger l'équipe — d'abord essayer en tant que chef
+ const { data: equipeChefData } = await supabase
  .from('equipe')
  .select('*')
  .eq('id', equipeIdParam)
  .eq('chef_id', session.user.id);
 
- if (equipeError) {
- console.error('Erreur équipe:', equipeError);
+ let equipeData: Equipe | null = null;
+
+ if (equipeChefData && equipeChefData.length > 0) {
+ equipeData = equipeChefData[0];
+ setIsChef(true);
+ } else {
+ // Vérifier si l'utilisateur est membre de cette équipe
+ const { data: membreCheck } = await supabase
+ .from('membre_equipe')
+ .select('equipe_id')
+ .eq('equipe_id', equipeIdParam)
+ .eq('user_id', session.user.id)
+ .single();
+
+ if (!membreCheck) {
+ alert('Équipe introuvable ou vous n\'y avez pas accès');
+ router.push('/classement');
+ return;
+ }
+
+ // Charger l'équipe sans filtre chef_id
+ const { data: equipePublicData } = await supabase
+ .from('equipe')
+ .select('*')
+ .eq('id', equipeIdParam)
+ .single();
+
+ if (!equipePublicData) {
  alert('Erreur lors du chargement de l\'équipe');
  router.push('/classement');
  return;
  }
 
- if (!equipeDataArray || equipeDataArray.length === 0) {
- alert('Équipe introuvable ou vous n\'êtes pas le chef');
+ equipeData = equipePublicData;
+ setIsChef(false);
+ }
+
+ if (!equipeData) {
  router.push('/classement');
  return;
  }
 
- const equipeData = equipeDataArray[0];
  setEquipe(equipeData);
 
  // Charger les membres de l'équipe
@@ -545,7 +574,45 @@ export default function GestionEquipePage() {
  <main className="min-h-screen bg-cream-50 p-4 md:p-8">
  <div className="max-w-6xl mx-auto space-y-6">
 
- {/* Liste des membres */}
+ {/* Vue membre (non-chef) */}
+ {!isChef && (
+ <div className="bg-cream-50 rounded-lg p-6 border border-border">
+ <h2 className="text-xl font-bold text-ink mb-4">
+ 👤 Mon espace dans l'équipe {equipe.nom}
+ </h2>
+ <div className="space-y-3">
+ <button
+ onClick={() => router.push(`/gestion-equipe/rapport?id=${equipeId}&membre=${userId}`)}
+ className="w-full p-4 border border-border rounded-lg hover:border-accent transition-all flex items-center justify-between"
+ >
+ <div className="flex items-center gap-3">
+ <span className="text-2xl">📋</span>
+ <div className="text-left">
+ <div className="font-semibold text-ink">Mon rapport</div>
+ <div className="text-sm text-ink-light">Consulter mes statistiques et ma progression</div>
+ </div>
+ </div>
+ <span className="text-ink-light">→</span>
+ </button>
+ <button
+ onClick={() => router.push(`/gestion-equipe/objectifs?id=${equipeId}&membre=${userId}`)}
+ className="w-full p-4 border border-border rounded-lg hover:border-accent transition-all flex items-center justify-between"
+ >
+ <div className="flex items-center gap-3">
+ <span className="text-2xl">🎯</span>
+ <div className="text-left">
+ <div className="font-semibold text-ink">Mes objectifs</div>
+ <div className="text-sm text-ink-light">Voir mes objectifs fixés par le chef d'équipe</div>
+ </div>
+ </div>
+ <span className="text-ink-light">→</span>
+ </button>
+ </div>
+ </div>
+ )}
+
+ {/* Liste des membres (chef uniquement) */}
+ {isChef && (
  <div className="bg-cream-50 rounded-lg p-6 border border-border">
  <h2 className="text-xl font-bold text-ink mb-4">
  👥 Membres de l'équipe ({membres.length})
@@ -602,6 +669,7 @@ export default function GestionEquipePage() {
  </div>
  )}
  </div>
+ )}
 
 
  {/* Score Global de l'Équipe */}
@@ -666,7 +734,8 @@ export default function GestionEquipePage() {
  )}
  </div>
 
- {/* Notifications de cette équipe */}
+ {/* Notifications de cette équipe (chef uniquement) */}
+ {isChef && (
  <div className="bg-cream-50 rounded-lg p-6 border border-border">
  <h2 className="text-xl font-bold text-ink mb-4">
  🔔 Notifications de l'équipe
@@ -745,6 +814,7 @@ export default function GestionEquipePage() {
  </div>
  )}
  </div>
+ )}
  </div>
 
  {/* Modal Gestion Feuilles (Vue Scope) */}
