@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 // Types
@@ -80,8 +81,11 @@ const Loader = () => (
 );
 
 export default function SessionsPage() {
+ const router = useRouter();
  const [loading, setLoading] = useState(true);
  const [saving, setSaving] = useState(false);
+ const [showLiveModal, setShowLiveModal] = useState(false);
+ const [startingLive, setStartingLive] = useState(false);
  
  // Feuilles en progression
  const [feuilles, setFeuilles] = useState<FeuilleProgression[]>([]);
@@ -618,6 +622,47 @@ export default function SessionsPage() {
  link.click();
  }
 
+ async function demarrerSessionLive(feuilleId: string, type: 'mecanique' | 'chaotique') {
+ setStartingLive(true);
+ try {
+   const { data: { user } } = await supabase.auth.getUser();
+   if (!user) throw new Error('Non connecté');
+
+   const { data: nextNum } = await supabase.rpc('get_next_session_number', {
+     p_user_id: user.id
+   });
+
+   const sessionData: any = {
+     user_id: user.id,
+     numero_session: nextNum || 1,
+     date_session: new Date().toISOString().split('T')[0],
+     heure_session: new Date().toTimeString().slice(0, 5),
+     statut: 'en_cours',
+     started_at: new Date().toISOString(),
+   };
+
+   if (type === 'mecanique') {
+     sessionData.feuille_mecanique_id = feuilleId;
+   } else {
+     sessionData.feuille_chaotique_id = feuilleId;
+   }
+
+   const { data: session, error } = await supabase
+     .from('session_entrainement')
+     .insert([sessionData])
+     .select()
+     .single();
+
+   if (error) throw error;
+
+   router.push(`/library/sessions/live/${session.id}`);
+ } catch (err: any) {
+   console.error('Erreur démarrage live:', err);
+   alert('Erreur: ' + err.message);
+   setStartingLive(false);
+ }
+ }
+
  if (loading) {
  return (
  <div className="min-h-screen flex items-center justify-center">
@@ -631,9 +676,55 @@ export default function SessionsPage() {
  return (
  <main className="min-h-screen p-4">
  <div className="max-w-6xl mx-auto space-y-6">
- <h1 className="text-3xl font-black text-ink text-center mb-8">
+ <div className="flex items-center justify-between mb-8">
+ <h1 className="text-3xl font-black text-ink">
  ⏱️ Gestion des Sessions
  </h1>
+ {feuilles.length > 0 && (
+ <button
+   onClick={() => setShowLiveModal(true)}
+   className="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 font-bold transition-colors shadow-lg"
+ >
+   <span className="w-3 h-3 bg-white rounded-full animate-pulse" />
+   Démarrer Session LIVE
+ </button>
+ )}
+ </div>
+
+ {/* Modal sélection feuille pour session live */}
+ {showLiveModal && (
+ <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowLiveModal(false)}>
+   <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+     <h2 className="text-xl font-bold text-gray-800 mb-4">Démarrer une session live</h2>
+     <p className="text-sm text-gray-500 mb-6">Sélectionnez la feuille de travail pour cette session :</p>
+     <div className="space-y-3">
+       {feuilles.map((f) => (
+         <button
+           key={f.feuille_id}
+           onClick={() => {
+             setShowLiveModal(false);
+             demarrerSessionLive(f.feuille_id, f.type);
+           }}
+           disabled={startingLive}
+           className="w-full p-4 border-2 border-gray-200 hover:border-purple-400 hover:bg-purple-50 rounded-lg text-left transition-all flex items-center gap-3 disabled:opacity-50"
+         >
+           <span className="text-2xl">{f.type === 'mecanique' ? '🔧' : '🎲'}</span>
+           <div>
+             <div className="font-bold text-gray-800">{f.titre}</div>
+             <div className="text-xs text-gray-500 capitalize">{f.type}</div>
+           </div>
+         </button>
+       ))}
+     </div>
+     <button
+       onClick={() => setShowLiveModal(false)}
+       className="w-full mt-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition"
+     >
+       Annuler
+     </button>
+   </div>
+ </div>
+ )}
 
  {/* Formulaire Unifié */}
  {feuilles.length === 0 ? (
