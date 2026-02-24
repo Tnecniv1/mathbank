@@ -61,13 +61,6 @@ type ScoreLocal = {
  session_numero?: number;
 };
 
-type ScoreMecaCumulatif = {
- ordre: number;
- scoreCumulatif: number;
- question: string;
- date: string;
-};
-
 type ScoreParSession = {
  ordre: number;
  session_numero: number;
@@ -79,6 +72,10 @@ type ScoreParSession = {
 const MAX_FEUILLES_PAR_LIGNE = 20;
 const COLONNES_AFFICHEES = 20;
 
+// Score brut par question : [0, 100] sans correction | [0, 130] avec correction
+const calcScore = (comp: number, sav: number, red: number, corr: number): number =>
+ ((50 * comp + 25 * sav + 25 * red) * (1 + 0.3 * corr)) / 100;
+
 export default function TableauProgression() {
  const [niveaux, setNiveaux] = useState<Niveau[]>([]);
  const [niveauSelectionne, setNiveauSelectionne] = useState<string | null>(null);
@@ -87,14 +84,10 @@ export default function TableauProgression() {
  const [loading, setLoading] = useState(true);
  const [error, setError] = useState<string | null>(null);
  const [fullscreenBlock, setFullscreenBlock] = useState<string | null>(null);
- const [scoresMecaniques, setScoresMecaniques] = useState<ScoreLocal[]>([]);
- const [scoresChaotiques, setScoresChaotiques] = useState<ScoreLocal[]>([]);
  const [scoreType, setScoreType] = useState<'mecanique' | 'chaotique' | 'global'>('mecanique');
- const [viewMode, setViewMode] = useState<'questions' | 'sessions'>('sessions');
- const [scoresMecaCumulatifs, setScoresMecaCumulatifs] = useState<ScoreMecaCumulatif[]>([]);
  const [scoresParSessionMeca, setScoresParSessionMeca] = useState<ScoreParSession[]>([]);
  const [scoresParSessionChaos, setScoresParSessionChaos] = useState<ScoreParSession[]>([]);
- const [scoresGlobaux, setScoresGlobaux] = useState<{ jour: string; scoreCumulatif: number }[]>([]);
+ const [scoresGlobaux, setScoresGlobaux] = useState<{ date: string; scoreCumulatif: number }[]>([]);
  const [gridObjectifs, setGridObjectifs] = useState<GridData[]>([]);
 
  useEffect(() => {
@@ -260,9 +253,6 @@ export default function TableauProgression() {
  .eq('chapitre.sujet.niveau_id', niveauId);
 
  if (!feuillesData || feuillesData.length === 0) {
- setScoresMecaniques([]);
- setScoresChaotiques([]);
- setScoresMecaCumulatifs([]);
  setScoresParSessionMeca([]);
  setScoresParSessionChaos([]);
  return;
@@ -277,7 +267,10 @@ export default function TableauProgression() {
  id,
  exercice,
  question,
- score_calcule,
+ comprehension,
+ savoir,
+ redaction,
+ correction,
  created_at,
  session_id,
  session_entrainement!inner(
@@ -294,18 +287,12 @@ export default function TableauProgression() {
 
  if (error) {
  console.error('Erreur chargement scores locaux:', error);
- setScoresMecaniques([]);
- setScoresChaotiques([]);
- setScoresMecaCumulatifs([]);
  setScoresParSessionMeca([]);
  setScoresParSessionChaos([]);
  return;
  }
 
  if (!scoresData || scoresData.length === 0) {
- setScoresMecaniques([]);
- setScoresChaotiques([]);
- setScoresMecaCumulatifs([]);
  setScoresParSessionMeca([]);
  setScoresParSessionChaos([]);
  return;
@@ -319,15 +306,7 @@ export default function TableauProgression() {
  });
 
 
- // Séparer les scores mécaniques et chaotiques
- const scoresMeca: ScoreLocal[] = [];
- const scoresChaos: ScoreLocal[] = [];
- let indexMeca = 1;
- let indexChaos = 1;
- let scoreCumulatif = 0;
- const scoresCumulatifs: ScoreMecaCumulatif[] = [];
-
- // Map pour regrouper par session
+ // Regrouper par session
  const sessionsMeca = new Map<string, ScoreLocal[]>();
  const sessionsChaos = new Map<string, ScoreLocal[]>();
 
@@ -335,54 +314,25 @@ export default function TableauProgression() {
  const isMecanique = score.session_entrainement.feuille_mecanique_id !== null;
  const sessionId = score.session_id;
  const sessionNumero = score.session_entrainement.numero_session;
- const dateSession = score.session_entrainement.date_session;
- 
- if (isMecanique) {
- const scoreValue = parseFloat(score.score_calcule) || 0;
- const isSucces = scoreValue >= 1;
- 
- // Score normal
+
+ const rawScore = calcScore(score.comprehension, score.savoir, score.redaction, score.correction);
+ const scoreNorm = rawScore / 1.3; // normalise [0, 130] → [0, 100]
+
  const scoreLocal: ScoreLocal = {
- ordre: indexMeca++,
- score: scoreValue,
+ ordre: 0,
+ score: scoreNorm,
  exercice: score.exercice,
  question: score.question,
  date: new Date(score.session_entrainement.date_session).toLocaleDateString('fr-FR'),
  session_id: sessionId,
  session_numero: sessionNumero
  };
- scoresMeca.push(scoreLocal);
 
- // Score cumulatif
- scoreCumulatif += isSucces ? 1 : -1;
- scoresCumulatifs.push({
- ordre: indexMeca - 1,
- scoreCumulatif: scoreCumulatif,
- question: score.question,
- date: new Date(score.session_entrainement.date_session).toLocaleDateString('fr-FR')
- });
-
- // Regrouper par session
- if (!sessionsMeca.has(sessionId)) {
- sessionsMeca.set(sessionId, []);
- }
+ if (isMecanique) {
+ if (!sessionsMeca.has(sessionId)) sessionsMeca.set(sessionId, []);
  sessionsMeca.get(sessionId)!.push(scoreLocal);
  } else {
- const scoreLocal: ScoreLocal = {
- ordre: indexChaos++,
- score: parseFloat(score.score_calcule) || 0,
- exercice: score.exercice,
- question: score.question,
- date: new Date(score.session_entrainement.date_session).toLocaleDateString('fr-FR'),
- session_id: sessionId,
- session_numero: sessionNumero
- };
- scoresChaos.push(scoreLocal);
-
- // Regrouper par session
- if (!sessionsChaos.has(sessionId)) {
- sessionsChaos.set(sessionId, []);
- }
+ if (!sessionsChaos.has(sessionId)) sessionsChaos.set(sessionId, []);
  sessionsChaos.get(sessionId)!.push(scoreLocal);
  }
  });
@@ -416,41 +366,37 @@ export default function TableauProgression() {
  });
 
 
- // Calculer le score global cumulatif
+ // Calculer le score global cumulatif pondéré (25% méca, 75% chaos)
  const scoresGlobauxMap = new Map<string, number>();
- let cumulatifGlobal = 0;
+ let cumulatifMeca = 0;
+ let cumulatifChaos = 0;
 
  scoresData.forEach((score: any) => {
+ const isMecanique = score.session_entrainement.feuille_mecanique_id !== null;
  const dateSession = score.session_entrainement.date_session;
- const scoreMultiplied = parseFloat(score.score_calcule) * 100; // Score brut
- 
- cumulatifGlobal += scoreMultiplied;
- 
- if (!scoresGlobauxMap.has(dateSession)) {
- scoresGlobauxMap.set(dateSession, cumulatifGlobal);
+ const rawScore = calcScore(score.comprehension, score.savoir, score.redaction, score.correction);
+
+ if (isMecanique) {
+ cumulatifMeca += rawScore / 130; // ratio [0, 1] ajouté à chaque question mécanique
  } else {
- scoresGlobauxMap.set(dateSession, cumulatifGlobal);
+ cumulatifChaos += rawScore / 130; // ratio [0, 1] ajouté à chaque question chaotique
  }
+
+ scoresGlobauxMap.set(dateSession, 100 * (0.25 * cumulatifMeca + 0.75 * cumulatifChaos));
  });
 
  const scoresGlobauxArray = Array.from(scoresGlobauxMap.entries())
  .map(([date, score]) => ({
- jour: new Date(date).getDate().toString(), // Jour du mois (1, 2, 3...)
+ date,
  scoreCumulatif: score
  }))
- .sort((a, b) => parseInt(a.jour) - parseInt(b.jour));
+ .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
  setScoresGlobaux(scoresGlobauxArray);
- setScoresMecaniques(scoresMeca);
- setScoresChaotiques(scoresChaos);
- setScoresMecaCumulatifs(scoresCumulatifs);
  setScoresParSessionMeca(scoresSessionMeca);
  setScoresParSessionChaos(scoresSessionChaos);
  } catch (err: any) {
  console.error('Erreur chargement scores locaux:', err);
- setScoresMecaniques([]);
- setScoresChaotiques([]);
- setScoresMecaCumulatifs([]);
  setScoresParSessionMeca([]);
  setScoresParSessionChaos([]);
  }
@@ -900,11 +846,7 @@ export default function TableauProgression() {
  <h2 className="text-sm font-bold text-ink">Progresser en mathématique</h2>
  <p className="text-purple-100 text-xs">
  {scoreType === 'mecanique'
- ? viewMode === 'questions'
- ? `${scoresMecaniques.length} question${scoresMecaniques.length > 1 ? 's' : ''}`
- : `${scoresParSessionMeca.length} session${scoresParSessionMeca.length > 1 ? 's' : ''}`
- : viewMode === 'questions'
- ? `${scoresChaotiques.length} question${scoresChaotiques.length > 1 ? 's' : ''}`
+ ? `${scoresParSessionMeca.length} session${scoresParSessionMeca.length > 1 ? 's' : ''}`
  : `${scoresParSessionChaos.length} session${scoresParSessionChaos.length > 1 ? 's' : ''}`
  }
  </p>
@@ -948,91 +890,23 @@ export default function TableauProgression() {
  </div>
  </div>
 
- {/* GRAPHIQUE MÉCANIQUE - MODE QUESTIONS (Cumulatif) */}
- {scoreType === 'mecanique' && viewMode === 'questions' && scoresMecaCumulatifs.length > 0 && (
- <>
- <div className="p-3 flex-1 min-h-0">
- <ResponsiveContainer width="100%" height="100%">
- <LineChart data={scoresMecaCumulatifs}>
- <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
- <XAxis 
- dataKey="ordre" 
- stroke="#71717a"
- style={{ fontSize: '10px' }}
- label={{ value: 'Question', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
- />
- <YAxis 
- stroke="#71717a"
- style={{ fontSize: '10px' }}
- domain={[0, 1.3]}
- />
- <Tooltip
- contentStyle={{
- backgroundColor: '#fff',
- border: '1px solid #e4e4e7',
- borderRadius: '8px',
- fontSize: '11px'
- }}
- formatter={(value: any) => [`Score: ${value}`, 'Cumulatif']}
- labelFormatter={(value: any, payload: any) => {
- const item = payload[0]?.payload;
- return item ? `Q${value} - ${item.question}` : `Question ${value}`;
- }}
- />
- <Line
- type="monotone"
- dataKey="scoreCumulatif"
- stroke="#3b82f6"
- strokeWidth={2}
- dot={{ fill: '#3b82f6', r: 4 }}
- name="Score Cumulatif"
- />
- </LineChart>
- </ResponsiveContainer>
- </div>
-
- <div className="bg-accent-light/20 px-3 py-1.5 border-t border-border">
- <div className="flex justify-around text-center text-xs">
- <div>
- <div className="font-bold text-accent">
- {scoresMecaCumulatifs[scoresMecaCumulatifs.length - 1]?.scoreCumulatif || 0}
- </div>
- <div className="text-accent text-[10px]">Score Actuel</div>
- </div>
- <div>
- <div className="font-bold text-accent">
- {Math.max(...scoresMecaCumulatifs.map(s => s.scoreCumulatif))}
- </div>
- <div className="text-accent text-[10px]">Max</div>
- </div>
- <div>
- <div className="font-bold text-accent">
- {Math.min(...scoresMecaCumulatifs.map(s => s.scoreCumulatif))}
- </div>
- <div className="text-accent text-[10px]">Min</div>
- </div>
- </div>
- </div>
- </>
- )}
-
  {/* GRAPHIQUE MÉCANIQUE - MODE SESSIONS */}
- {scoreType === 'mecanique' && viewMode === 'sessions' && scoresParSessionMeca.length > 0 && (
+ {scoreType === 'mecanique' && scoresParSessionMeca.length > 0 && (
  <>
  <div className="p-3 flex-1 min-h-0">
  <ResponsiveContainer width="100%" height="100%">
  <LineChart data={scoresParSessionMeca}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
- <XAxis 
- dataKey="ordre" 
+ <XAxis
+ dataKey="ordre"
  stroke="#71717a"
  style={{ fontSize: '10px' }}
  label={{ value: 'Session', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
  />
- <YAxis 
+ <YAxis
  stroke="#71717a"
  style={{ fontSize: '10px' }}
- domain={[0, 1.3]}
+ domain={[0, 100]}
  />
  <Tooltip
  contentStyle={{
@@ -1041,7 +915,7 @@ export default function TableauProgression() {
  borderRadius: '8px',
  fontSize: '11px'
  }}
- formatter={(value: any) => [`${Math.round(value * 100)}%`, 'Moyenne']}
+ formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
  labelFormatter={(value: any, payload: any) => {
  const item = payload[0]?.payload;
  return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;
@@ -1063,93 +937,21 @@ export default function TableauProgression() {
  <div className="flex justify-around text-center text-xs">
  <div>
  <div className="font-bold text-accent">
- {(
- scoresParSessionMeca.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionMeca.length
- ).toFixed(2)}
+ {Math.round(scoresParSessionMeca.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionMeca.length)}%
  </div>
  <div className="text-accent text-[10px]">Moyenne</div>
  </div>
  <div>
  <div className="font-bold text-accent">
- {Math.max(...scoresParSessionMeca.map(s => s.scoreMoyen)).toFixed(2)}
+ {Math.round(Math.max(...scoresParSessionMeca.map(s => s.scoreMoyen)))}%
  </div>
  <div className="text-accent text-[10px]">Max</div>
  </div>
  <div>
  <div className="font-bold text-accent">
- {Math.min(...scoresParSessionMeca.map(s => s.scoreMoyen)).toFixed(2)}
+ {Math.round(Math.min(...scoresParSessionMeca.map(s => s.scoreMoyen)))}%
  </div>
  <div className="text-accent text-[10px]">Min</div>
- </div>
- </div>
- </div>
- </>
- )}
-
- {/* GRAPHIQUE CHAOTIQUE - MODE QUESTIONS */}
- {scoreType === 'chaotique' && viewMode === 'questions' && scoresChaotiques.length > 0 && (
- <>
- <div className="p-3 flex-1 min-h-0">
- <ResponsiveContainer width="100%" height="100%">
- <LineChart data={scoresChaotiques}>
- <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
- <XAxis 
- dataKey="ordre" 
- stroke="#71717a"
- style={{ fontSize: '10px' }}
- label={{ value: 'Question', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
- />
- <YAxis 
- stroke="#71717a"
- style={{ fontSize: '10px' }}
- domain={[0, 1.3]}
- />
- <Tooltip
- contentStyle={{
- backgroundColor: '#fff',
- border: '1px solid #e4e4e7',
- borderRadius: '8px',
- fontSize: '11px'
- }}
- formatter={(value: any) => [value.toFixed(2), 'Score']}
- labelFormatter={(value: any, payload: any) => {
- const item = payload[0]?.payload;
- return item ? `Q${value} - ${item.exercice} ${item.question}` : `Question ${value}`;
- }}
- />
- <Line
- type="monotone"
- dataKey="score"
- stroke="var(--accent)"
- strokeWidth={2}
- dot={{ fill: 'var(--accent)', r: 4 }}
- name="Score Chaotique"
- />
- </LineChart>
- </ResponsiveContainer>
- </div>
-
- <div className="bg-purple-50/20 px-3 py-1.5 border-t border-purple-200">
- <div className="flex justify-around text-center text-xs">
- <div>
- <div className="font-bold text-accent">
- {Math.round(
- (scoresChaotiques.reduce((acc, s) => acc + s.score, 0) / scoresChaotiques.length) * 100
- )}%
- </div>
- <div className="text-purple-700 text-[10px]">Moyenne</div>
- </div>
- <div>
- <div className="font-bold text-accent">
- {Math.round(Math.max(...scoresChaotiques.map(s => s.score)) * 100)}%
- </div>
- <div className="text-purple-700 text-[10px]">Max</div>
- </div>
- <div>
- <div className="font-bold text-accent">
- {Math.round(Math.min(...scoresChaotiques.map(s => s.score)) * 100)}%
- </div>
- <div className="text-purple-700 text-[10px]">Min</div>
  </div>
  </div>
  </div>
@@ -1157,20 +959,20 @@ export default function TableauProgression() {
  )}
 
  {/* GRAPHIQUE CHAOTIQUE - MODE SESSIONS */}
- {scoreType === 'chaotique' && viewMode === 'sessions' && scoresParSessionChaos.length > 0 && (
+ {scoreType === 'chaotique' && scoresParSessionChaos.length > 0 && (
  <>
  <div className="p-3 flex-1 min-h-0">
  <ResponsiveContainer width="100%" height="100%">
  <LineChart data={scoresParSessionChaos}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
- <XAxis 
- dataKey="ordre" 
+ <XAxis
+ dataKey="ordre"
  stroke="#71717a"
  style={{ fontSize: '10px' }}
  label={{ value: 'Session', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
  />
- <YAxis 
- domain={[0, 1.3]}
+ <YAxis
+ domain={[0, 100]}
  stroke="#71717a"
  style={{ fontSize: '10px' }}
  />
@@ -1181,7 +983,7 @@ export default function TableauProgression() {
  borderRadius: '8px',
  fontSize: '11px'
  }}
- formatter={(value: any) => [`${Math.round(value * 100)}%`, 'Moyenne']}
+ formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
  labelFormatter={(value: any, payload: any) => {
  const item = payload[0]?.payload;
  return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;
@@ -1203,21 +1005,19 @@ export default function TableauProgression() {
  <div className="flex justify-around text-center text-xs">
  <div>
  <div className="font-bold text-accent">
- {(
- scoresParSessionChaos.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionChaos.length
- ).toFixed(2)}
+ {Math.round(scoresParSessionChaos.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionChaos.length)}%
  </div>
  <div className="text-purple-700 text-[10px]">Moyenne</div>
  </div>
  <div>
  <div className="font-bold text-accent">
- {Math.max(...scoresParSessionChaos.map(s => s.scoreMoyen)).toFixed(2)}
+ {Math.round(Math.max(...scoresParSessionChaos.map(s => s.scoreMoyen)))}%
  </div>
  <div className="text-purple-700 text-[10px]">Max</div>
  </div>
  <div>
  <div className="font-bold text-accent">
- {Math.min(...scoresParSessionChaos.map(s => s.scoreMoyen)).toFixed(2)}
+ {Math.round(Math.min(...scoresParSessionChaos.map(s => s.scoreMoyen)))}%
  </div>
  <div className="text-purple-700 text-[10px]">Min</div>
  </div>
@@ -1233,11 +1033,11 @@ export default function TableauProgression() {
  <ResponsiveContainer width="100%" height="100%">
  <LineChart data={scoresGlobaux}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
- <XAxis 
- dataKey="jour" 
+ <XAxis
+ dataKey="date"
  stroke="#71717a"
  style={{ fontSize: '10px' }}
- label={{ value: 'Jour du mois', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+ label={{ value: 'Date', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
  />
  <YAxis 
  stroke="#71717a"
@@ -1291,7 +1091,7 @@ export default function TableauProgression() {
 
 
  {/* Messages si pas de données */}
- {scoreType === 'mecanique' && scoresMecaCumulatifs.length === 0 && (
+ {scoreType === 'mecanique' && scoresParSessionMeca.length === 0 && (
  <div className="p-6 text-center text-ink-muted flex-1 min-h-0 flex flex-col items-center justify-center">
  <div className="text-2xl mb-1">📈</div>
  <p className="text-xs">Aucun score mécanique enregistré</p>
@@ -1299,7 +1099,7 @@ export default function TableauProgression() {
  </div>
  )}
 
- {scoreType === 'chaotique' && scoresChaotiques.length === 0 && (
+ {scoreType === 'chaotique' && scoresParSessionChaos.length === 0 && (
  <div className="p-6 text-center text-ink-muted flex-1 min-h-0 flex flex-col items-center justify-center">
  <div className="text-2xl mb-1">📈</div>
  <p className="text-xs">Aucun score chaotique enregistré</p>
