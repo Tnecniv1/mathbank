@@ -90,9 +90,10 @@ export default function SessionLivePage() {
     };
 
     // Mettre à jour le temps sur la bonne colonne
-    if (sessionData?.feuille_mecanique_id) {
+    // Note : le select avec join remplace feuille_*_id par l'objet feuille_*
+    if (sessionData?.feuille_mecanique) {
       updateData.temps_mecanique = tempsMinutes;
-    } else if (sessionData?.feuille_chaotique_id) {
+    } else if (sessionData?.feuille_chaotique) {
       updateData.temps_chaotique = tempsMinutes;
     }
 
