@@ -1,113 +1,130 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 
 export interface GridData {
   semaine_debut: string;
   semaine_fin: string;
-  statut: 'succes' | 'echec' | 'non_fixe';
+  statut: 'succes' | 'echec' | 'en_cours' | 'non_fixe';
 }
 
 interface GridObjectifsProps {
   data: GridData[];
 }
 
-function getColor(statut: string): string {
-  switch (statut) {
-    case 'succes': return 'bg-purple-500';
-    case 'echec': return 'bg-red-500';
-    case 'non_fixe': return 'bg-cream-200';
-    default: return 'bg-gray-300';
-  }
-}
+const COLS = 4;
 
-function getLabel(statut: string): string {
+function getCellConfig(statut: string): { bg: string; label: string } {
   switch (statut) {
-    case 'succes': return 'Objectif reussi';
-    case 'echec': return 'Objectif echoue';
-    case 'non_fixe': return 'Pas d\'objectif';
-    default: return '';
+    case 'succes':   return { bg: 'bg-yellow-400',                       label: 'Objectif réussi' };
+    case 'echec':    return { bg: 'bg-gray-900',                         label: 'Objectif échoué' };
+    case 'en_cours': return { bg: 'bg-blue-400',                         label: 'En cours' };
+    case 'non_fixe': return { bg: 'bg-gray-100 border border-gray-200',  label: "Pas d'objectif" };
+    default:         return { bg: 'bg-gray-100',                         label: '' };
   }
 }
 
 function formatPeriode(debut: string, fin: string): string {
-  const d = new Date(debut);
-  const f = new Date(fin);
-  return `${d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} au ${f.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}`;
+  const opt: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
+  return `${new Date(debut).toLocaleDateString('fr-FR', opt)} — ${new Date(fin).toLocaleDateString('fr-FR', opt)}`;
 }
 
+type TooltipState = { x: number; y: number; ligne1: string; ligne2: string };
+
+/* ---------------------------------------------------------------
+   Composant — rend uniquement le contenu (grille + légende).
+   Le wrapper card et le header sont gérés par le parent (page.tsx).
+   --------------------------------------------------------------- */
 export default function GridObjectifs({ data }: GridObjectifsProps) {
-  const nbReussis = data.filter(d => d.statut === 'succes').length;
-  const nbEchoues = data.filter(d => d.statut === 'echec').length;
-  const nbTotal = data.filter(d => d.statut !== 'non_fixe').length;
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+
+  if (data.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-2 p-6 text-center">
+        <div className="text-2xl">🎯</div>
+        <p className="text-xs text-ink-muted">Aucun objectif fixé pour le moment</p>
+      </div>
+    );
+  }
+
+  // Compléter la dernière ligne jusqu'à un multiple de COLS
+  const padded: (GridData | null)[] = [...data];
+  const remainder = padded.length % COLS;
+  if (remainder !== 0) {
+    for (let i = 0; i < COLS - remainder; i++) {
+      padded.push(null);
+    }
+  }
 
   return (
-    <div className="bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden aspect-square flex flex-col">
-      {/* Header */}
-      <div className="px-3 py-2 flex items-center justify-between flex-shrink-0">
-        <div>
-          <h2 className="text-sm font-bold text-ink">Objectifs hebdomadaires</h2>
-          <p className="text-ink-light text-xs">
-            {nbTotal > 0 ? `${nbReussis}/${nbTotal} reussi${nbReussis > 1 ? 's' : ''}` : 'Aucun objectif'}
-          </p>
+    <>
+      {/* Tooltip fixed — échappe à tout overflow:hidden parent */}
+      {tooltip && (
+        <div
+          className="fixed z-[9999] pointer-events-none bg-gray-900 text-white text-[11px] rounded-lg px-2.5 py-1.5 shadow-lg text-center whitespace-nowrap"
+          style={{ left: tooltip.x, top: tooltip.y - 8, transform: 'translate(-50%, -100%)' }}
+        >
+          <div className="font-medium leading-tight">{tooltip.ligne1}</div>
+          <div className="text-gray-400 text-[10px] mt-0.5">{tooltip.ligne2}</div>
         </div>
-      </div>
+      )}
 
-      {/* Grille */}
-      <div className="flex-1 min-h-0 p-3 flex items-center justify-center">
-        {data.length === 0 ? (
-          <div className="text-center text-ink-muted">
-            <div className="text-2xl mb-1">🎯</div>
-            <p className="text-xs">Aucune donnee</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-6 gap-1.5 w-full">
-            {data.map((item, index) => (
+      {/* Grille 4 colonnes — flex-1 pour remplir le parent */}
+      <div className="flex-1 p-3 min-h-0 overflow-y-auto">
+        <div className="grid grid-cols-4 gap-1.5">
+          {padded.map((item, index) => {
+            if (item === null) {
+              return (
+                <div
+                  key={`pad-${index}`}
+                  className="aspect-square rounded-md bg-gray-100 border border-gray-200 opacity-40"
+                />
+              );
+            }
+
+            const { bg, label } = getCellConfig(item.statut);
+
+            return (
               <div
                 key={index}
-                className={`
-                  ${getColor(item.statut)}
-                  aspect-square rounded-md
-                  cursor-pointer
-                  transition-all duration-200
-                  hover:scale-110 hover:shadow-lg
-                  group relative
-                `}
-              >
-                <div className="
-                  absolute bottom-full left-1/2 -translate-x-1/2 mb-2
-                  hidden group-hover:block
-                  bg-gray-900 text-white text-xs rounded px-2 py-1
-                  whitespace-nowrap z-10
-                  pointer-events-none
-                ">
-                  {formatPeriode(item.semaine_debut, item.semaine_fin)}
-                  <br />
-                  {getLabel(item.statut)}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+                className={`aspect-square rounded-md ${bg} cursor-default`}
+                onMouseEnter={item.semaine_debut ? (e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setTooltip({
+                    x: r.left + r.width / 2,
+                    y: r.top,
+                    ligne1: formatPeriode(item.semaine_debut, item.semaine_fin),
+                    ligne2: label,
+                  });
+                } : undefined}
+                onMouseLeave={() => setTooltip(null)}
+              />
+            );
+          })}
+        </div>
       </div>
 
-      {/* Footer / Legende */}
-      <div className="px-3 py-1.5 border-t border-border flex-shrink-0">
-        <div className="flex justify-around text-center text-xs">
+      {/* Légende */}
+      <div className="px-3 py-2 border-t border-border flex-shrink-0">
+        <div className="flex flex-wrap justify-around gap-x-2 gap-y-1">
           <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 bg-purple-500 rounded-sm" />
-            <span className="text-ink-light">Reussi</span>
+            <div className="w-2.5 h-2.5 bg-yellow-400 rounded-sm flex-shrink-0" />
+            <span className="text-ink-light text-[10px]">Réussi</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 bg-red-500 rounded-sm" />
-            <span className="text-ink-light">Echoue</span>
+            <div className="w-2.5 h-2.5 bg-blue-400 rounded-sm flex-shrink-0" />
+            <span className="text-ink-light text-[10px]">En cours</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 bg-cream-200 rounded-sm" />
-            <span className="text-ink-light">Non fixe</span>
+            <div className="w-2.5 h-2.5 bg-gray-900 rounded-sm flex-shrink-0" />
+            <span className="text-ink-light text-[10px]">Échoué</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 bg-gray-100 border border-gray-300 rounded-sm flex-shrink-0" />
+            <span className="text-ink-light text-[10px]">Non fixé</span>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

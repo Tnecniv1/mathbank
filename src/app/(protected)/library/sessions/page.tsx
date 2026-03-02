@@ -34,9 +34,9 @@ type ScoreLocalHistorique = {
  session_id: string;
  exercice: string;
  question: string;
- comprehension: number;
- savoir: number;
- redaction: number;
+ comprehension: number | null;
+ savoir: number | null;
+ redaction: number | null;
  correction: number;
  score_calcule: number;
  created_at: string;
@@ -47,9 +47,9 @@ type Question = {
  tempId: string;
  exercice: string;
  question: string;
- comprehension: number;
- savoir: number;
- redaction: number;
+ comprehension: number | null;
+ savoir: number | null; // chaotique : 0-100 | mécanique : 0 (FAUX) ou 100 (VRAI)
+ redaction: number | null;
  correction: number;
 };
 
@@ -108,13 +108,20 @@ export default function SessionsPage() {
  // Formulaire d'ajout de question (inline)
  const [showAddQuestion, setShowAddQuestion] = useState(false);
  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
- const [questionFormData, setQuestionFormData] = useState({
- exercice: '',
- question: '',
- comprehension: 0,
- savoir: 0,
- redaction: 0,
- correction: 0,
+ const [questionFormData, setQuestionFormData] = useState<{
+   exercice: string;
+   question: string;
+   comprehension: number | null;
+   savoir: number | null;
+   redaction: number | null;
+   correction: number;
+ }>({
+   exercice: '',
+   question: '',
+   comprehension: 0,
+   savoir: null,
+   redaction: 0,
+   correction: 0,
  });
  
  // Historique
@@ -288,6 +295,11 @@ export default function SessionsPage() {
  return;
  }
 
+ if (typeEntrainement === 'mecanique' && questionFormData.savoir === null) {
+ alert('Veuillez sélectionner Réussi ou Échoué');
+ return;
+ }
+
  if (typeEntrainement === 'chaotique' && !questionFormData.exercice.trim()) {
  alert('Veuillez renseigner l\'exercice');
  return;
@@ -316,12 +328,12 @@ export default function SessionsPage() {
 
  function resetQuestionForm() {
  setQuestionFormData({
- exercice: '',
- question: '',
- comprehension: 0,
- savoir: 0,
- redaction: 0,
- correction: 0,
+   exercice: '',
+   question: '',
+   comprehension: typeEntrainement === 'mecanique' ? null : 0,
+   savoir: null,
+   redaction: typeEntrainement === 'mecanique' ? null : 0,
+   correction: 0,
  });
  setEditingQuestionId(null);
  setShowAddQuestion(false);
@@ -804,8 +816,7 @@ export default function SessionsPage() {
  onChange={() => {
  setTypeEntrainement('mecanique');
  setFeuilleSelectionnee('');
- setQuestionsMecaniques([]);
- setQuestionsChaotiques([]);
+ setQuestions([]);
  resetQuestionForm();
  }}
  className="w-4 h-4 text-accent"
@@ -824,8 +835,7 @@ export default function SessionsPage() {
  onChange={() => {
  setTypeEntrainement('chaotique');
  setFeuilleSelectionnee('');
- setQuestionsMecaniques([]);
- setQuestionsChaotiques([]);
+ setQuestions([]);
  resetQuestionForm();
  }}
  className="w-4 h-4 text-accent"
@@ -933,12 +943,46 @@ export default function SessionsPage() {
  </div>
  </div>
 
+ {typeEntrainement === 'mecanique' ? (
+ /* ── Mécanique : VRAI / FAUX ── */
+ <div>
+   <label className="block text-sm font-medium text-ink mb-3">
+     Résultat
+   </label>
+   <div className="flex gap-4">
+     <button
+       type="button"
+       onClick={() => handleQuestionFormChange('savoir', 100)}
+       className={`flex-1 py-3 rounded-lg font-bold text-base transition border-2 ${
+         questionFormData.savoir === 100
+           ? 'bg-green-500 text-white border-green-500'
+           : 'bg-gray-50 text-gray-400 border-gray-200 hover:border-green-400 hover:text-green-600'
+       }`}
+     >
+       ✓ Réussi
+     </button>
+     <button
+       type="button"
+       onClick={() => handleQuestionFormChange('savoir', 0)}
+       className={`flex-1 py-3 rounded-lg font-bold text-base transition border-2 ${
+         questionFormData.savoir === 0
+           ? 'bg-red-500 text-white border-red-500'
+           : 'bg-gray-50 text-gray-400 border-gray-200 hover:border-red-400 hover:text-red-600'
+       }`}
+     >
+       ✗ Échoué
+     </button>
+   </div>
+ </div>
+ ) : (
+ /* ── Chaotique : 3 critères + correction ── */
+ <>
  <div>
  <label className="block text-sm font-medium text-ink mb-2">
  🧠 Compréhension
  </label>
  <select
- value={questionFormData.comprehension}
+ value={questionFormData.comprehension ?? 0}
  onChange={(e) => handleQuestionFormChange('comprehension', parseInt(e.target.value))}
  className="w-full px-4 py-2 border border-border rounded-lg bg-cream-50 text-ink"
  >
@@ -955,7 +999,7 @@ export default function SessionsPage() {
  🛠️ Savoir-faire
  </label>
  <select
- value={questionFormData.savoir}
+ value={questionFormData.savoir ?? 0}
  onChange={(e) => handleQuestionFormChange('savoir', parseInt(e.target.value))}
  className="w-full px-4 py-2 border border-border rounded-lg bg-cream-50 text-ink"
  >
@@ -972,7 +1016,7 @@ export default function SessionsPage() {
  ✍️ Rédaction
  </label>
  <select
- value={questionFormData.redaction}
+ value={questionFormData.redaction ?? 0}
  onChange={(e) => handleQuestionFormChange('redaction', parseInt(e.target.value))}
  className="w-full px-4 py-2 border border-border rounded-lg bg-cream-50 text-ink"
  >
@@ -995,6 +1039,8 @@ export default function SessionsPage() {
  ✅ Correction effectuée (+30% de bonus)
  </label>
  </div>
+ </>
+ )}
  </div>
 
  <div className="flex gap-2 mt-4">
@@ -1032,7 +1078,10 @@ export default function SessionsPage() {
  {q.question}
  </span>
  <div className="text-xs text-ink-light mt-1">
- C: {q.comprehension} | S: {q.savoir} | R: {q.redaction} | Corr: {q.correction ? '✓' : '✗'}
+ {typeEntrainement === 'mecanique'
+   ? `Résultat : ${q.savoir === 100 ? 'Réussi ✓' : 'Échoué ✗'}`
+   : `C: ${q.comprehension} | S: ${q.savoir} | R: ${q.redaction} | Corr: ${q.correction ? '✓' : '✗'}`
+ }
  </div>
  </div>
  <div className="flex gap-2">
@@ -1305,18 +1354,31 @@ export default function SessionsPage() {
  </div>
  </div>
 
+ {score.comprehension === null && score.redaction === null ? (
+ /* Mécanique : affichage binaire */
+ <div className="flex justify-center mb-3">
+   <div className={`px-8 py-4 rounded-lg text-2xl font-bold ${
+     score.savoir === 100
+       ? 'bg-green-100 text-green-700 border border-green-300'
+       : 'bg-red-100 text-red-700 border border-red-300'
+   }`}>
+     {score.savoir === 100 ? '✓ Réussi' : '✗ Échoué'}
+   </div>
+ </div>
+ ) : (
+ /* Chaotique : 4 critères */
  <div className="grid grid-cols-4 gap-3 mb-3">
  <div className="bg-cream-50 rounded-lg p-3 border border-purple-200">
  <div className="text-xs text-ink-light mb-1">Compréhension</div>
- <div className="text-lg font-bold text-purple-700">{score.comprehension}</div>
+ <div className="text-lg font-bold text-purple-700">{score.comprehension ?? '—'}</div>
  </div>
  <div className="bg-cream-50 rounded-lg p-3 border border-purple-200">
  <div className="text-xs text-ink-light mb-1">Savoir-faire</div>
- <div className="text-lg font-bold text-purple-700">{score.savoir}</div>
+ <div className="text-lg font-bold text-purple-700">{score.savoir ?? '—'}</div>
  </div>
  <div className="bg-cream-50 rounded-lg p-3 border border-purple-200">
  <div className="text-xs text-ink-light mb-1">Rédaction</div>
- <div className="text-lg font-bold text-purple-700">{score.redaction}</div>
+ <div className="text-lg font-bold text-purple-700">{score.redaction ?? '—'}</div>
  </div>
  <div className="bg-cream-50 rounded-lg p-3 border border-purple-200">
  <div className="text-xs text-ink-light mb-1">Correction</div>
@@ -1325,6 +1387,7 @@ export default function SessionsPage() {
  </div>
  </div>
  </div>
+ )}
 
  <div className="flex items-center justify-end gap-2 mt-3">
  <button

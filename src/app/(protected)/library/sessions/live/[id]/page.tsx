@@ -170,6 +170,7 @@ export default function SessionLivePage() {
       <div className="h-1/4 bg-white border-t-2 border-gray-200 overflow-hidden">
         <TableauNotation
           sessionId={sessionId}
+          type={sessionData?.feuille_mecanique ? 'mecanique' : 'chaotique'}
           onScoreInserted={handleScoreInserted}
         />
       </div>

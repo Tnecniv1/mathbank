@@ -1,16 +1,39 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
+
+/* ================================================================
+   Types
+   ================================================================ */
+
+export type JourDetail = {
+  date_jour: string;
+  /** Meilleure session mécanique du jour (la plus longue) */
+  meca_session_id: string | null;
+  meca_duree: number;
+  meca_nb_questions: number;
+  meca_valide: boolean;
+  /** Meilleure session chaotique du jour (la plus longue) */
+  chaos_session_id: string | null;
+  chaos_duree: number;
+  chaos_nb_questions: number;
+  chaos_valide: boolean;
+  /** Vrai si meca_valide ET chaos_valide */
+  jour_valide: boolean;
+};
 
 export type ProgressionMembre = {
   id: string;
   user_id: string;
   nom: string;
-  nb_sessions_realisees: number;
+  /** Nombre de jours VALIDES réalisés. */
+  nb_jours_valides: number;
   nb_exercices_mecanique_realises: number;
   nb_exercices_chaotique_realises: number;
   objectif_atteint: boolean;
   derniere_mise_a_jour: string;
+  /** Détail de chaque jour ayant au moins une session dans la semaine. */
+  jours: JourDetail[];
 };
 
 export type ObjectifData = {
@@ -18,7 +41,7 @@ export type ObjectifData = {
   equipe_id: string;
   date_debut: string;
   date_fin: string;
-  nb_sessions_min: number;
+  nb_jours_min: number;
   nb_exercices_mecanique: number;
   consignes_mecanique: string | null;
   nb_exercices_chaotique: number;
@@ -26,176 +49,370 @@ export type ObjectifData = {
   description: string | null;
   statut: 'en_cours' | 'succes' | 'echec';
   created_at: string;
+  /** Durée minimale pour qu'une session meca ou chaos soit comptée (minutes). */
+  duree_min_session: number;
+  /** 'auto' : calcul automatique | 'manuel' : le prof force le statut. */
+  validation_mode: 'auto' | 'manuel';
+  /** Note laissée par le prof lors d'une clôture manuelle. */
+  commentaire_manuel: string | null;
   progressions: ProgressionMembre[] | null;
 };
 
+/* ================================================================
+   Props du composant
+   ================================================================ */
+
 type Props = {
   objectif: ObjectifData;
-  onCloturer?: (objectifId: string, statut: 'succes' | 'echec') => void;
+  isChef: boolean;
+  onCloturer?: (
+    objectifId: string,
+    statut: 'succes' | 'echec',
+    commentaire?: string
+  ) => void;
+  onBasculerMode?: (objectifId: string, mode: 'auto' | 'manuel') => void;
 };
 
-function getStatutBadge(objectif: ObjectifData): { label: string; color: string; bg: string } {
-  if (objectif.statut === 'succes') {
-    return { label: 'SUCCES', color: 'text-green-700', bg: 'bg-green-100' };
-  }
-  if (objectif.statut === 'echec') {
-    return { label: 'ECHEC', color: 'text-red-700', bg: 'bg-red-100' };
-  }
+/* ================================================================
+   Helpers
+   ================================================================ */
 
-  const now = new Date();
+function getStatutBadge(objectif: ObjectifData): {
+  label: string;
+  color: string;
+  bg: string;
+} {
+  if (objectif.statut === 'succes')
+    return { label: 'SUCCÈS', color: 'text-green-700', bg: 'bg-green-100' };
+  if (objectif.statut === 'echec')
+    return { label: 'ÉCHEC', color: 'text-red-700', bg: 'bg-red-100' };
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const fin = new Date(objectif.date_fin);
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const finDate = new Date(fin.getFullYear(), fin.getMonth(), fin.getDate());
+  fin.setHours(0, 0, 0, 0);
 
-  if (finDate >= today) {
+  if (fin >= today)
     return { label: 'EN COURS', color: 'text-blue-700', bg: 'bg-blue-100' };
-  }
-  return { label: 'A CLOTURER', color: 'text-amber-700', bg: 'bg-amber-100' };
+  return { label: 'À CLÔTURER', color: 'text-amber-700', bg: 'bg-amber-100' };
 }
 
-function ProgressBar({ value, max, color }: { value: number; max: number; color: string }) {
-  if (max === 0) return null;
-  const pct = Math.min(100, Math.round((value / max) * 100));
-  return (
-    <div className="flex items-center gap-2 flex-1">
-      <div className="flex-1 bg-cream-200 rounded-full h-2 min-w-[60px]">
-        <div
-          className={`h-2 rounded-full transition-all ${color}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="text-xs text-ink-light whitespace-nowrap">{value}/{max}</span>
-    </div>
-  );
+function formatDate(d: string) {
+  return new Date(d).toLocaleDateString('fr-FR', {
+    day: 'numeric',
+    month: 'short',
+  });
 }
 
-function getMembreColor(progression: ProgressionMembre): string {
-  if (progression.objectif_atteint) return 'border-l-green-500';
-  const hasAny =
-    progression.nb_sessions_realisees > 0 ||
-    progression.nb_exercices_mecanique_realises > 0 ||
-    progression.nb_exercices_chaotique_realises > 0;
-  if (hasAny) return 'border-l-yellow-500';
-  return 'border-l-red-400';
+function formatDateCourt(d: string) {
+  return new Date(d).toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+  });
 }
 
-export default function ObjectifCard({ objectif, onCloturer }: Props) {
+/* ================================================================
+   Composant principal
+   ================================================================ */
+
+export default function ObjectifCard({
+  objectif,
+  isChef,
+  onCloturer,
+  onBasculerMode,
+}: Props) {
   const statut = getStatutBadge(objectif);
   const progressions = objectif.progressions || [];
-  const isExpire = objectif.statut === 'en_cours' && new Date(objectif.date_fin) < new Date();
-  const isCloture = objectif.statut === 'succes' || objectif.statut === 'echec';
+  const prog = progressions[0] ?? null;
+  const jours = prog?.jours ?? [];
 
-  const formatDate = (d: string) =>
-    new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+  const isCloture = objectif.statut === 'succes' || objectif.statut === 'echec';
+  const isExpire =
+    objectif.statut === 'en_cours' && new Date(objectif.date_fin) < new Date();
+  const isManuel = objectif.validation_mode === 'manuel';
+
+  // Peut clôturer si : chef + en_cours + (expiré en mode auto OU mode manuel)
+  const peutCloturer =
+    isChef && !isCloture && (isExpire || isManuel) && !!onCloturer;
+
+  // État local pour la clôture avec commentaire
+  const [pendingCloture, setPendingCloture] = useState<
+    'succes' | 'echec' | null
+  >(null);
+  const [commentaire, setCommentaire] = useState('');
+
+  function handleConfirmerCloture() {
+    if (!pendingCloture || !onCloturer) return;
+    onCloturer(objectif.id, pendingCloture, commentaire || undefined);
+    setPendingCloture(null);
+    setCommentaire('');
+  }
+
+  function handleAnnulerCloture() {
+    setPendingCloture(null);
+    setCommentaire('');
+  }
+
+  /* ──────────────────────────────────────────────────────────── */
 
   return (
-    <div className={`bg-cream-50 border rounded-lg overflow-hidden ${
-      isCloture ? 'border-border opacity-80' : isExpire ? 'border-amber-300' : 'border-border'
-    }`}>
-      {/* Header */}
-      <div className="px-5 py-4 flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-3">
+    <div
+      className={`bg-cream-50 border rounded-lg overflow-hidden ${
+        isCloture
+          ? 'border-border opacity-80'
+          : isExpire
+          ? 'border-amber-300'
+          : 'border-border'
+      }`}
+    >
+      {/* ── Header ── */}
+      <div className="px-5 py-4 flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-semibold text-ink">
               {formatDate(objectif.date_debut)} — {formatDate(objectif.date_fin)}
             </h3>
-            <span className={`px-2 py-0.5 text-xs font-bold rounded ${statut.bg} ${statut.color}`}>
+            <span
+              className={`px-2 py-0.5 text-xs font-bold rounded ${statut.bg} ${statut.color}`}
+            >
               {statut.label}
+            </span>
+            {/* Badge mode validation */}
+            <span
+              className={`px-2 py-0.5 text-xs font-semibold rounded ${
+                isManuel
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-slate-100 text-slate-500'
+              }`}
+            >
+              {isManuel ? 'MANUEL' : 'AUTO'}
             </span>
           </div>
           {objectif.description && (
             <p className="text-sm text-ink-light mt-1">{objectif.description}</p>
           )}
+          {/* Commentaire manuel affiché sous le titre */}
+          {objectif.commentaire_manuel && (
+            <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mt-2">
+              💬 {objectif.commentaire_manuel}
+            </p>
+          )}
         </div>
       </div>
 
-      {/* Criteres */}
+      {/* ── Critères ── */}
       <div className="px-5 py-3 bg-cream-100 border-t border-b border-border space-y-1">
-        <div className="flex flex-wrap gap-4 text-sm text-ink">
-          <span>📅 {objectif.nb_sessions_min} session{objectif.nb_sessions_min > 1 ? 's' : ''} min</span>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink">
+          <span>
+            📅 {objectif.nb_jours_min} jour
+            {objectif.nb_jours_min > 1 ? 's' : ''} valide
+            {objectif.nb_jours_min > 1 ? 's' : ''} min
+          </span>
+          <span>⏱ {objectif.duree_min_session} min/session</span>
           {objectif.nb_exercices_mecanique > 0 && (
-            <span>🔧 {objectif.nb_exercices_mecanique} exo{objectif.nb_exercices_mecanique > 1 ? 's' : ''} meca</span>
+            <span>
+              🔧 {objectif.nb_exercices_mecanique} exo
+              {objectif.nb_exercices_mecanique > 1 ? 's' : ''} meca/jour
+            </span>
           )}
           {objectif.nb_exercices_chaotique > 0 && (
-            <span>🌀 {objectif.nb_exercices_chaotique} exo{objectif.nb_exercices_chaotique > 1 ? 's' : ''} chaos</span>
+            <span>
+              🌀 {objectif.nb_exercices_chaotique} exo
+              {objectif.nb_exercices_chaotique > 1 ? 's' : ''} chaos/jour
+            </span>
           )}
         </div>
         {objectif.consignes_mecanique && (
-          <p className="text-xs text-ink-light">🔧 {objectif.consignes_mecanique}</p>
+          <p className="text-xs text-ink-light">
+            🔧 {objectif.consignes_mecanique}
+          </p>
         )}
         {objectif.consignes_chaotique && (
-          <p className="text-xs text-ink-light">🌀 {objectif.consignes_chaotique}</p>
+          <p className="text-xs text-ink-light">
+            🌀 {objectif.consignes_chaotique}
+          </p>
         )}
       </div>
 
-      {/* Progression par membre */}
-      <div className="px-5 py-3 space-y-3">
-        {progressions.length === 0 ? (
-          <p className="text-sm text-ink-muted text-center py-2">Aucun membre</p>
-        ) : (
-          progressions.map((prog) => (
+      {/* ── Détail des jours ── */}
+      {jours.length > 0 && (
+        <div className="px-5 py-3 border-b border-border space-y-3">
+
+          {/* En-tête colonnes */}
+          <div className="grid grid-cols-[3rem_1fr_1fr_1.5rem] gap-x-2 text-xs text-ink-light font-medium uppercase tracking-wide pb-1 border-b border-border/60">
+            <span>Date</span>
+            <span>🔧 Meca</span>
+            <span>🌀 Chaos</span>
+            <span className="text-center">Jour</span>
+          </div>
+
+          {/* Ligne par jour */}
+          {jours.map((j) => (
             <div
-              key={prog.id}
-              className={`border-l-4 pl-3 py-2 ${getMembreColor(prog)}`}
+              key={j.date_jour}
+              className="grid grid-cols-[3rem_1fr_1fr_1.5rem] gap-x-2 items-center text-sm"
             >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-medium text-ink text-sm">{prog.nom}</span>
-                {prog.objectif_atteint && (
-                  <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded">
-                    ATTEINT
+              {/* Date */}
+              <span className="text-ink-light text-xs shrink-0">
+                {formatDateCourt(j.date_jour)}
+              </span>
+
+              {/* Session mécanique */}
+              {j.meca_session_id ? (
+                <div className="flex items-center gap-1">
+                  <span
+                    className={`text-xs ${
+                      j.meca_valide ? 'text-ink' : 'text-ink-light'
+                    }`}
+                  >
+                    {j.meca_duree}min
+                    {j.meca_nb_questions > 0 && ` · ${j.meca_nb_questions}q`}
                   </span>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <div className="flex items-center gap-1 text-xs text-ink-light">
-                  <span>📅</span>
-                  <ProgressBar
-                    value={prog.nb_sessions_realisees}
-                    max={objectif.nb_sessions_min}
-                    color="bg-blue-500"
-                  />
+                  <span className="text-xs">{j.meca_valide ? '✅' : '❌'}</span>
                 </div>
-                {objectif.nb_exercices_mecanique > 0 && (
-                  <div className="flex items-center gap-1 text-xs text-ink-light">
-                    <span>🔧</span>
-                    <ProgressBar
-                      value={prog.nb_exercices_mecanique_realises}
-                      max={objectif.nb_exercices_mecanique}
-                      color="bg-amber-500"
-                    />
-                  </div>
-                )}
-                {objectif.nb_exercices_chaotique > 0 && (
-                  <div className="flex items-center gap-1 text-xs text-ink-light">
-                    <span>🌀</span>
-                    <ProgressBar
-                      value={prog.nb_exercices_chaotique_realises}
-                      max={objectif.nb_exercices_chaotique}
-                      color="bg-purple-500"
-                    />
-                  </div>
-                )}
+              ) : (
+                <span className="text-xs text-ink-muted italic">—</span>
+              )}
+
+              {/* Session chaotique */}
+              {j.chaos_session_id ? (
+                <div className="flex items-center gap-1">
+                  <span
+                    className={`text-xs ${
+                      j.chaos_valide ? 'text-ink' : 'text-ink-light'
+                    }`}
+                  >
+                    {j.chaos_duree}min
+                    {j.chaos_nb_questions > 0 && ` · ${j.chaos_nb_questions}q`}
+                  </span>
+                  <span className="text-xs">{j.chaos_valide ? '✅' : '❌'}</span>
+                </div>
+              ) : (
+                <span className="text-xs text-ink-muted italic">—</span>
+              )}
+
+              {/* Validité du jour */}
+              <span className="text-center text-base">
+                {j.jour_valide ? '✅' : '❌'}
+              </span>
+            </div>
+          ))}
+
+          {/* Barre de progression jours valides */}
+          {prog && (
+            <div className="pt-1">
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="text-ink-light">Jours valides</span>
+                <span className="font-semibold text-ink">
+                  {prog.nb_jours_valides} / {objectif.nb_jours_min}
+                </span>
+              </div>
+              <div className="w-full bg-cream-200 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full transition-all ${
+                    prog.objectif_atteint ? 'bg-green-500' : 'bg-accent'
+                  }`}
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      objectif.nb_jours_min > 0
+                        ? (prog.nb_jours_valides / objectif.nb_jours_min) * 100
+                        : 0
+                    )}%`,
+                  }}
+                />
               </div>
             </div>
-          ))
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
-      {/* Boutons de cloture pour les objectifs expires */}
-      {isExpire && onCloturer && (
-        <div className="px-5 py-3 border-t border-border flex gap-3">
-          <button
-            onClick={() => onCloturer(objectif.id, 'succes')}
-            className="flex-1 px-4 py-2 bg-green-500 hover:bg-green-600 text-white font-medium rounded-lg transition-colors text-sm"
-          >
-            ✓ Succes
-          </button>
-          <button
-            onClick={() => onCloturer(objectif.id, 'echec')}
-            className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-medium rounded-lg transition-colors text-sm"
-          >
-            ✗ Echec
-          </button>
+      {/* ── Pas encore d'activité ── */}
+      {jours.length === 0 && !isCloture && (
+        <div className="px-5 py-3 border-b border-border">
+          <p className="text-xs text-ink-muted text-center">
+            Aucune session terminée cette semaine
+          </p>
+        </div>
+      )}
+
+      {/* ── Contrôles chef ── */}
+      {isChef && !isCloture && (
+        <div className="px-5 py-3 space-y-3">
+          {/* Toggle auto / manuel */}
+          {onBasculerMode && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-ink-light">Mode validation</span>
+              <button
+                onClick={() =>
+                  onBasculerMode(
+                    objectif.id,
+                    isManuel ? 'auto' : 'manuel'
+                  )
+                }
+                className="text-xs text-accent hover:underline font-medium"
+              >
+                {isManuel ? '↩ Repasser en auto' : '✏ Passer en manuel'}
+              </button>
+            </div>
+          )}
+
+          {/* Boutons de clôture */}
+          {peutCloturer && !pendingCloture && (
+            <div className="flex gap-3">
+              <button
+                onClick={() => setPendingCloture('succes')}
+                className="flex-1 px-4 py-2 bg-green-500 hover:bg-green-600 text-white font-medium rounded-lg transition-colors text-sm"
+              >
+                ✓ Succès
+              </button>
+              <button
+                onClick={() => setPendingCloture('echec')}
+                className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-medium rounded-lg transition-colors text-sm"
+              >
+                ✗ Échec
+              </button>
+            </div>
+          )}
+
+          {/* Formulaire commentaire avant confirmation */}
+          {pendingCloture && (
+            <div className="space-y-2 border border-border rounded-lg p-3 bg-cream-100">
+              <p className="text-sm font-medium text-ink">
+                Clôturer comme{' '}
+                <span
+                  className={
+                    pendingCloture === 'succes'
+                      ? 'text-green-700'
+                      : 'text-red-600'
+                  }
+                >
+                  {pendingCloture === 'succes' ? 'Succès' : 'Échec'}
+                </span>
+              </p>
+              <textarea
+                value={commentaire}
+                onChange={(e) => setCommentaire(e.target.value)}
+                placeholder="Commentaire optionnel (visible par l'étudiant)…"
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-cream-50 text-ink resize-none focus:outline-none focus:ring-2 focus:ring-accent/20"
+                rows={2}
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleConfirmerCloture}
+                  className="flex-1 px-3 py-1.5 bg-accent hover:bg-accent/80 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                  Confirmer
+                </button>
+                <button
+                  onClick={handleAnnulerCloture}
+                  className="flex-1 px-3 py-1.5 bg-cream-200 hover:bg-cream-200/80 text-ink rounded-lg text-sm font-medium transition-colors"
+                >
+                  Annuler
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

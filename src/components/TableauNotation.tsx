@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 type QuestionRow = {
@@ -9,7 +9,7 @@ type QuestionRow = {
   exercice: string;
   question: string;
   comprehension: number | null;
-  savoir: number | null;
+  savoir: number | null; // chaotique : 0-100 | mécanique : 0 (FAUX) ou 100 (VRAI)
   redaction: number | null;
   correction: number;
   valide: boolean;
@@ -17,6 +17,7 @@ type QuestionRow = {
 
 type TableauNotationProps = {
   sessionId: string;
+  type: 'mecanique' | 'chaotique';
   onScoreInserted: () => void;
 };
 
@@ -58,7 +59,7 @@ function makeEmptyRow(numero: number): QuestionRow {
   };
 }
 
-export function TableauNotation({ sessionId, onScoreInserted }: TableauNotationProps) {
+export function TableauNotation({ sessionId, type, onScoreInserted }: TableauNotationProps) {
   const [rows, setRows] = useState<QuestionRow[]>(() => [makeEmptyRow(1)]);
   const tableRef = useRef<HTMLDivElement>(null);
 
@@ -72,36 +73,30 @@ export function TableauNotation({ sessionId, onScoreInserted }: TableauNotationP
     handleChange(tempId, champ as keyof QuestionRow, value === '' ? null : parseInt(value));
   };
 
+  // Navigation clavier pour le mode chaotique uniquement
   const handleKeyDown = (e: React.KeyboardEvent, tempId: string, champ: string) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-
       const ordre = ['comprehension', 'savoir', 'redaction'];
       const indexActuel = ordre.indexOf(champ);
-
       if (indexActuel < 2) {
-        // Colonne suivante
         const prochainChamp = ordre[indexActuel + 1];
         const input = document.querySelector(
           `select[data-question="${tempId}"][data-champ="${prochainChamp}"]`
         ) as HTMLSelectElement | null;
         input?.focus();
       } else {
-        // Valider la question
-        validerQuestion(tempId);
+        validerQuestionChaotique(tempId);
       }
     }
   };
 
-  const validerQuestion = async (tempId: string) => {
+  // Validation chaotique (via bouton ✓ ou Enter sur le dernier select)
+  const validerQuestionChaotique = async (tempId: string) => {
     const q = rows.find(x => x.tempId === tempId);
     if (!q) return;
+    if (q.comprehension === null && q.savoir === null && q.redaction === null) return;
 
-    if (q.comprehension === null || q.savoir === null || q.redaction === null) {
-      return; // Champs incomplets, ne rien faire
-    }
-
-    // score_calcule est une colonne générée en base, on ne l'insère pas
     const { error } = await supabase.from('score_local').insert({
       session_id: sessionId,
       exercice: q.exercice || '',
@@ -117,24 +112,64 @@ export function TableauNotation({ sessionId, onScoreInserted }: TableauNotationP
       return;
     }
 
-    // Marquer comme validé
     setRows(prev => prev.map(x =>
       x.tempId === tempId ? { ...x, valide: true } : x
     ));
-
     onScoreInserted();
+    ajouterNouvelleRangee();
+  };
 
-    // Ajouter automatiquement une nouvelle ligne et focus dessus
+  // Validation mécanique : clic sur VRAI ou FAUX → insertion immédiate
+  const handleVraiFaux = async (tempId: string, value: 0 | 100) => {
+    const q = rows.find(x => x.tempId === tempId);
+    if (!q || q.valide) return;
+
+    // Mettre à jour visuellement avant l'insert
+    setRows(prev => prev.map(x =>
+      x.tempId === tempId ? { ...x, savoir: value } : x
+    ));
+
+    const { error } = await supabase.from('score_local').insert({
+      session_id: sessionId,
+      exercice: '',
+      question: q.question,
+      comprehension: null,
+      savoir: value,
+      redaction: null,
+      correction: 0,
+    });
+
+    if (error) {
+      console.error('Erreur insertion score:', error.message, error.code);
+      // Remettre savoir à null si échec
+      setRows(prev => prev.map(x =>
+        x.tempId === tempId ? { ...x, savoir: null } : x
+      ));
+      return;
+    }
+
+    setRows(prev => prev.map(x =>
+      x.tempId === tempId ? { ...x, savoir: value, valide: true } : x
+    ));
+    onScoreInserted();
+    ajouterNouvelleRangee();
+  };
+
+  const ajouterNouvelleRangee = () => {
     const nouveauNumero = rows.length + 1;
     const newRow = makeEmptyRow(nouveauNumero);
     setRows(prev => [...prev, newRow]);
 
     setTimeout(() => {
-      const input = document.querySelector(
-        `select[data-question="${newRow.tempId}"][data-champ="comprehension"]`
-      ) as HTMLSelectElement | null;
-      input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      input?.focus();
+      let selector: string;
+      if (type === 'mecanique') {
+        selector = `button[data-question="${newRow.tempId}"][data-champ="vrai"]`;
+      } else {
+        selector = `select[data-question="${newRow.tempId}"][data-champ="comprehension"]`;
+      }
+      const el = document.querySelector(selector) as HTMLElement | null;
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el?.focus();
     }, 100);
   };
 
@@ -144,11 +179,15 @@ export function TableauNotation({ sessionId, onScoreInserted }: TableauNotationP
     setRows(prev => [...prev, newRow]);
 
     setTimeout(() => {
-      const input = document.querySelector(
-        `select[data-question="${newRow.tempId}"][data-champ="comprehension"]`
-      ) as HTMLSelectElement | null;
-      input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      input?.focus();
+      let selector: string;
+      if (type === 'mecanique') {
+        selector = `button[data-question="${newRow.tempId}"][data-champ="vrai"]`;
+      } else {
+        selector = `select[data-question="${newRow.tempId}"][data-champ="comprehension"]`;
+      }
+      const el = document.querySelector(selector) as HTMLElement | null;
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el?.focus();
     }, 100);
   };
 
@@ -156,23 +195,112 @@ export function TableauNotation({ sessionId, onScoreInserted }: TableauNotationP
     <div ref={tableRef} className="h-full overflow-y-auto">
       <table className="w-full border-collapse">
         <thead className="sticky top-0 bg-gray-50 border-b-2 border-gray-200 z-10">
-          <tr className="text-xs text-gray-500 uppercase tracking-wider">
-            <th className="p-2 text-center w-10">Q</th>
-            <th className="p-2 text-center w-24">Exercice</th>
-            <th className="p-2 text-center w-20">Question</th>
-            <th className="p-2 text-center w-28">Compréhension</th>
-            <th className="p-2 text-center w-24">Savoir</th>
-            <th className="p-2 text-center w-24">Rédaction</th>
-            <th className="p-2 text-center w-16">Corr.</th>
-            <th className="p-2 text-center w-20">Score</th>
-            <th className="p-2 text-center w-16">OK</th>
-          </tr>
+          {type === 'mecanique' ? (
+            <tr className="text-xs text-gray-500 uppercase tracking-wider">
+              <th className="p-2 text-center w-10">Q</th>
+              <th className="p-2 text-center w-32">Référence</th>
+              <th className="p-2 text-center">Résultat</th>
+              <th className="p-2 text-center w-16">OK</th>
+            </tr>
+          ) : (
+            <tr className="text-xs text-gray-500 uppercase tracking-wider">
+              <th className="p-2 text-center w-10">Q</th>
+              <th className="p-2 text-center w-24">Exercice</th>
+              <th className="p-2 text-center w-20">Question</th>
+              <th className="p-2 text-center w-28">Compréhension</th>
+              <th className="p-2 text-center w-24">Savoir</th>
+              <th className="p-2 text-center w-24">Rédaction</th>
+              <th className="p-2 text-center w-16">Corr.</th>
+              <th className="p-2 text-center w-20">Score</th>
+              <th className="p-2 text-center w-16">OK</th>
+            </tr>
+          )}
         </thead>
         <tbody>
           {rows.map((q) => {
-            const scoreDisplay = q.valide
-              ? Math.round(((q.comprehension! + q.savoir! + q.redaction!) / 300) * (q.correction === 1 ? 1.3 : 1) * 100)
-              : '-';
+            if (type === 'mecanique') {
+              return (
+                <tr
+                  key={q.tempId}
+                  className={`border-b transition-colors ${
+                    q.valide
+                      ? 'bg-green-50/50 text-gray-400'
+                      : 'hover:bg-blue-50/30'
+                  }`}
+                >
+                  {/* Numéro */}
+                  <td className="p-2 text-center font-mono text-sm font-bold text-blue-600">
+                    {q.numero}
+                  </td>
+
+                  {/* Question */}
+                  <td className="p-1">
+                    <input
+                      type="text"
+                      value={q.question}
+                      onChange={(e) => handleChange(q.tempId, 'question', e.target.value)}
+                      placeholder="Q1"
+                      className="w-full text-center text-sm border border-gray-200 rounded px-1 py-1 focus:ring-2 focus:ring-blue-400 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400"
+                      disabled={q.valide}
+                    />
+                  </td>
+
+                  {/* VRAI / FAUX */}
+                  <td className="p-2">
+                    <div className="flex gap-2 justify-center">
+                      <button
+                        data-question={q.tempId}
+                        data-champ="vrai"
+                        onClick={() => handleVraiFaux(q.tempId, 100)}
+                        disabled={q.valide}
+                        className={`px-4 py-1.5 rounded font-bold text-sm transition ${
+                          q.savoir === 100
+                            ? 'bg-green-500 text-white'
+                            : 'bg-gray-100 text-gray-400 hover:bg-green-100 hover:text-green-700'
+                        } disabled:cursor-default disabled:opacity-60`}
+                      >
+                        ✓ Réussi
+                      </button>
+                      <button
+                        data-question={q.tempId}
+                        data-champ="faux"
+                        onClick={() => handleVraiFaux(q.tempId, 0)}
+                        disabled={q.valide}
+                        className={`px-4 py-1.5 rounded font-bold text-sm transition ${
+                          q.valide && q.savoir === 0
+                            ? 'bg-red-500 text-white'
+                            : !q.valide && q.savoir === 0
+                            ? 'bg-red-500 text-white'
+                            : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-700'
+                        } disabled:cursor-default disabled:opacity-60`}
+                      >
+                        ✗ Échoué
+                      </button>
+                    </div>
+                  </td>
+
+                  {/* Statut */}
+                  <td className="p-2 text-center">
+                    {q.valide ? (
+                      <span className="text-lg">{q.savoir === 100 ? '✅' : '❌'}</span>
+                    ) : (
+                      <span className="text-gray-300 text-xs">—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            }
+
+            // ── Mode chaotique ─────────────────────────────────────────────
+            const scoreDisplay = (() => {
+              if (!q.valide) return '-';
+              let sum = 0, poids = 0;
+              if (q.comprehension !== null) { sum += 50 * q.comprehension; poids += 50; }
+              if (q.savoir !== null) { sum += 25 * q.savoir; poids += 25; }
+              if (q.redaction !== null) { sum += 25 * q.redaction; poids += 25; }
+              if (poids === 0) return '-';
+              return Math.round((sum / poids) * (1 + 0.3 * q.correction));
+            })();
 
             return (
               <tr
@@ -288,8 +416,8 @@ export function TableauNotation({ sessionId, onScoreInserted }: TableauNotationP
                     <span className="text-green-500 text-lg">✅</span>
                   ) : (
                     <button
-                      onClick={() => validerQuestion(q.tempId)}
-                      disabled={q.comprehension === null || q.savoir === null || q.redaction === null}
+                      onClick={() => validerQuestionChaotique(q.tempId)}
+                      disabled={q.comprehension === null && q.savoir === null && q.redaction === null}
                       className="px-2 py-1 bg-purple-500 hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded transition"
                     >
                       ✓

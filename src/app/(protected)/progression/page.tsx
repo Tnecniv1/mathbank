@@ -51,48 +51,61 @@ type ConcentrationData = {
  nbSessions: number;
 };
 
-type ScoreLocal = {
+type ScoreParPaquet = {
  ordre: number;
- score: number;
- exercice: string;
- question: string;
- date: string;
- session_id?: string;
- session_numero?: number;
-};
-
-type ScoreParSession = {
- ordre: number;
- session_numero: number;
+ label: string;      // ex : "1-30", "31-60"
  scoreMoyen: number;
  nbQuestions: number;
- date: string;
+ dateDebut: string;
+ dateFin: string;
 };
 
 const MAX_FEUILLES_PAR_LIGNE = 20;
 const COLONNES_AFFICHEES = 20;
 
-// Score brut par question : [0, 100] sans correction | [0, 130] avec correction
-const calcScore = (comp: number, sav: number, red: number, corr: number): number =>
- ((50 * comp + 25 * sav + 25 * red) * (1 + 0.3 * corr)) / 100;
+// Score brut par question : NULL = non évalué (exclu du calcul), 0 = évalué nul
+const calcScore = (comp: number | null, sav: number | null, red: number | null, corr: number): number => {
+ // Mécanique (VRAI/FAUX) : comp et red sont NULL, savoir = 0 ou 100
+ // On retourne 130 pour VRAI et 0 pour FAUX : après /1.3 = 0 ou 100
+ if (comp === null && red === null) {
+   return sav !== null && sav > 0 ? 130 : 0;
+ }
+ // Chaotique : formule pondérée
+ let sum = 0; let poids = 0;
+ if (comp !== null) { sum += 50 * comp; poids += 50; }
+ if (sav  !== null) { sum += 25 * sav;  poids += 25; }
+ if (red  !== null) { sum += 25 * red;  poids += 25; }
+ if (poids === 0) return 0;
+ return (sum / poids) * (1 + 0.3 * corr);
+};
 
 export default function TableauProgression() {
  const [niveaux, setNiveaux] = useState<Niveau[]>([]);
  const [niveauSelectionne, setNiveauSelectionne] = useState<string | null>(null);
  const [data, setData] = useState<TableauData | null>(null);
  const [concentrationData, setConcentrationData] = useState<ConcentrationData[]>([]);
+ const [concentrationDataAll, setConcentrationDataAll] = useState<ConcentrationData[]>([]);
  const [loading, setLoading] = useState(true);
  const [error, setError] = useState<string | null>(null);
  const [fullscreenBlock, setFullscreenBlock] = useState<string | null>(null);
  const [scoreType, setScoreType] = useState<'mecanique' | 'chaotique' | 'global'>('mecanique');
- const [scoresParSessionMeca, setScoresParSessionMeca] = useState<ScoreParSession[]>([]);
- const [scoresParSessionChaos, setScoresParSessionChaos] = useState<ScoreParSession[]>([]);
+ const [scoresParSessionMeca, setScoresParSessionMeca] = useState<ScoreParPaquet[]>([]);
+ const [scoresParSessionChaos, setScoresParSessionChaos] = useState<ScoreParPaquet[]>([]);
  const [scoresGlobaux, setScoresGlobaux] = useState<{ date: string; scoreCumulatif: number }[]>([]);
  const [gridObjectifs, setGridObjectifs] = useState<GridData[]>([]);
+ const [chartRenderKey, setChartRenderKey] = useState(0);
 
  useEffect(() => {
  loadNiveaux();
  }, []);
+
+ // Recharts : forcer le recalcul des dimensions après l'ouverture du plein écran
+ useEffect(() => {
+   if (fullscreenBlock !== null) {
+     const timer = setTimeout(() => setChartRenderKey(k => k + 1), 300);
+     return () => clearTimeout(timer);
+   }
+ }, [fullscreenBlock]);
 
  useEffect(() => {
  if (niveauSelectionne) {
@@ -305,65 +318,47 @@ export default function TableauProgression() {
  return dateA.getTime() - dateB.getTime();
  });
 
-
- // Regrouper par session
- const sessionsMeca = new Map<string, ScoreLocal[]>();
- const sessionsChaos = new Map<string, ScoreLocal[]>();
+ // Séparer les questions en deux listes chronologiques
+ const questionsMeca: { score: number; date: string }[] = [];
+ const questionsChaos: { score: number; date: string }[] = [];
 
  scoresData.forEach((score: any) => {
  const isMecanique = score.session_entrainement.feuille_mecanique_id !== null;
- const sessionId = score.session_id;
- const sessionNumero = score.session_entrainement.numero_session;
-
  const rawScore = calcScore(score.comprehension, score.savoir, score.redaction, score.correction);
- const scoreNorm = rawScore / 1.3; // normalise [0, 130] → [0, 100]
-
- const scoreLocal: ScoreLocal = {
- ordre: 0,
- score: scoreNorm,
- exercice: score.exercice,
- question: score.question,
- date: new Date(score.session_entrainement.date_session).toLocaleDateString('fr-FR'),
- session_id: sessionId,
- session_numero: sessionNumero
- };
+ const scoreNorm = rawScore / 1.3;
+ const date = score.session_entrainement.date_session;
 
  if (isMecanique) {
- if (!sessionsMeca.has(sessionId)) sessionsMeca.set(sessionId, []);
- sessionsMeca.get(sessionId)!.push(scoreLocal);
+   questionsMeca.push({ score: scoreNorm, date });
  } else {
- if (!sessionsChaos.has(sessionId)) sessionsChaos.set(sessionId, []);
- sessionsChaos.get(sessionId)!.push(scoreLocal);
+   questionsChaos.push({ score: scoreNorm, date });
  }
  });
 
- // Calculer les moyennes par session pour mécaniques
- const scoresSessionMeca: ScoreParSession[] = [];
- let ordreMeca = 1;
- sessionsMeca.forEach((scores, sessionId) => {
- const scoreMoyen = scores.reduce((acc, s) => acc + s.score, 0) / scores.length;
- scoresSessionMeca.push({
- ordre: ordreMeca++,
- session_numero: scores[0].session_numero || 0,
- scoreMoyen: scoreMoyen,
- nbQuestions: scores.length,
- date: scores[0].date
- });
- });
+ // Regrouper en paquets de 30 questions consécutives
+ const TAILLE_PAQUET = 30;
 
- // Calculer les moyennes par session pour chaotiques
- const scoresSessionChaos: ScoreParSession[] = [];
- let ordreChaos = 1;
- sessionsChaos.forEach((scores, sessionId) => {
- const scoreMoyen = scores.reduce((acc, s) => acc + s.score, 0) / scores.length;
- scoresSessionChaos.push({
- ordre: ordreChaos++,
- session_numero: scores[0].session_numero || 0,
- scoreMoyen: scoreMoyen,
- nbQuestions: scores.length,
- date: scores[0].date
- });
- });
+ function groupEnPaquets(questions: { score: number; date: string }[]): ScoreParPaquet[] {
+   const paquets: ScoreParPaquet[] = [];
+   for (let i = 0; i < questions.length; i += TAILLE_PAQUET) {
+     const chunk = questions.slice(i, i + TAILLE_PAQUET);
+     const debut = i + 1;
+     const fin = i + chunk.length;
+     const scoreMoyen = chunk.reduce((acc, q) => acc + q.score, 0) / chunk.length;
+     paquets.push({
+       ordre: paquets.length + 1,
+       label: `${debut}-${fin}`,
+       scoreMoyen,
+       nbQuestions: chunk.length,
+       dateDebut: new Date(chunk[0].date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+       dateFin:   new Date(chunk[chunk.length - 1].date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+     });
+   }
+   return paquets;
+ }
+
+ const scoresSessionMeca = groupEnPaquets(questionsMeca);
+ const scoresSessionChaos = groupEnPaquets(questionsChaos);
 
 
  // Calculer le score global cumulatif pondéré (25% méca, 75% chaos)
@@ -483,9 +478,35 @@ export default function TableauProgression() {
  }
 
  setConcentrationData(concentrationArray);
+
+ // All-time : toutes les sessions sans limite de date, regroupées par jour
+ const { data: allSessions } = await supabase
+   .from('session_entrainement')
+   .select('date_session, temps_mecanique, temps_chaotique')
+   .eq('user_id', userId)
+   .order('date_session', { ascending: true });
+
+ if (allSessions && allSessions.length > 0) {
+   const allTimeMap = new Map<string, { duree: number; nbSessions: number }>();
+   allSessions.forEach(s => {
+     const duree = (s.temps_mecanique || 0) + (s.temps_chaotique || 0);
+     const entry = allTimeMap.get(s.date_session) ?? { duree: 0, nbSessions: 0 };
+     entry.duree += duree;
+     entry.nbSessions += 1;
+     allTimeMap.set(s.date_session, entry);
+   });
+   setConcentrationDataAll(
+     Array.from(allTimeMap.entries()).map(([date, d]) => ({
+       date: new Date(date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+       duree: d.duree,
+       nbSessions: d.nbSessions,
+     }))
+   );
+ }
  } catch (err: any) {
  console.error('Erreur chargement concentration:', err);
  setConcentrationData([]);
+ setConcentrationDataAll([]);
  }
  }
 
@@ -507,7 +528,6 @@ export default function TableauProgression() {
    const { data: gridData } = await supabase.rpc('get_objectifs_grid_data', {
      p_equipe_id: membreData.equipe_id,
      p_membre_user_id: userId,
-     p_nb_semaines: 24,
    });
    setGridObjectifs(gridData || []);
  } catch (err) {
@@ -665,6 +685,21 @@ export default function TableauProgression() {
 
  if (!data) return null;
 
+ // Concentration : dataset selon le mode d'affichage
+ const concentrationDisplay =
+   fullscreenBlock === 'concentration' && concentrationDataAll.length > 0
+     ? concentrationDataAll
+     : concentrationData;
+
+ // Scores paquets : N derniers en vue normale, tous en plein écran
+ const PAQUETS_NORMAUX = 7;
+ const scoresDisplayMeca  = fullscreenBlock === 'scores'
+   ? scoresParSessionMeca
+   : scoresParSessionMeca.slice(-PAQUETS_NORMAUX);
+ const scoresDisplayChaos = fullscreenBlock === 'scores'
+   ? scoresParSessionChaos
+   : scoresParSessionChaos.slice(-PAQUETS_NORMAUX);
+
  const toggleFullscreen = (blockId: string) => {
  setFullscreenBlock(fullscreenBlock === blockId ? null : blockId);
  };
@@ -710,8 +745,8 @@ export default function TableauProgression() {
  </div>
  )}
 
- <div className="bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden">
- <div className="bg-accent px-4 py-2.5 flex items-center justify-between">
+ <div className={`bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden ${fullscreenBlock === 'tableau' ? 'fixed inset-4 z-50 h-full flex flex-col' : ''}`}>
+ <div className="bg-accent px-4 py-2.5 flex items-center justify-between flex-shrink-0">
  <div>
  <h2 className="text-base font-bold text-ink">Parcours d'apprentissage</h2>
  <p className="text-teal-100 text-xs">Ensemble des entrainement fait</p>
@@ -725,7 +760,7 @@ export default function TableauProgression() {
  </div>
  </div>
 
- <div className="overflow-x-auto max-h-[35vh] overflow-y-auto">
+ <div className={`overflow-x-auto overflow-y-auto ${fullscreenBlock === 'tableau' ? 'flex-1' : 'max-h-[35vh]'}`}>
  <table className="w-full text-xs">
  <thead>
  <tr className="border-b border-border">
@@ -815,7 +850,7 @@ export default function TableauProgression() {
  </table>
  </div>
 
- <div className="bg-cream-100/50 px-4 py-2 border-t border-border">
+ <div className="bg-cream-100/50 px-4 py-2 border-t border-border flex-shrink-0">
  <div className="flex items-center gap-4 text-xs">
  <span className="text-ink-light font-semibold">Légende :</span>
  <div className="flex items-center gap-1.5">
@@ -840,14 +875,14 @@ export default function TableauProgression() {
 
  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
  {/* Graphique des scores avec toggle */}
- <div className={`bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden aspect-square flex flex-col ${fullscreenBlock === 'scores' ? 'fixed inset-4 z-50 aspect-auto' : ''}`}>
+ <div className={`bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden aspect-square flex flex-col ${fullscreenBlock === 'scores' ? 'fixed inset-4 z-50 aspect-auto h-full' : ''}`}>
  <div className="px-3 py-2 flex items-center justify-between">
  <div>
  <h2 className="text-sm font-bold text-ink">Progresser en mathématique</h2>
  <p className="text-purple-100 text-xs">
  {scoreType === 'mecanique'
- ? `${scoresParSessionMeca.length} session${scoresParSessionMeca.length > 1 ? 's' : ''}`
- : `${scoresParSessionChaos.length} session${scoresParSessionChaos.length > 1 ? 's' : ''}`
+ ? `${scoresDisplayMeca.length}${fullscreenBlock !== 'scores' && scoresParSessionMeca.length > PAQUETS_NORMAUX ? `/${scoresParSessionMeca.length}` : ''} paquet${scoresDisplayMeca.length > 1 ? 's' : ''}`
+ : `${scoresDisplayChaos.length}${fullscreenBlock !== 'scores' && scoresParSessionChaos.length > PAQUETS_NORMAUX ? `/${scoresParSessionChaos.length}` : ''} paquet${scoresDisplayChaos.length > 1 ? 's' : ''}`
  }
  </p>
  </div>
@@ -890,18 +925,19 @@ export default function TableauProgression() {
  </div>
  </div>
 
- {/* GRAPHIQUE MÉCANIQUE - MODE SESSIONS */}
- {scoreType === 'mecanique' && scoresParSessionMeca.length > 0 && (
+ {/* GRAPHIQUE MÉCANIQUE - PAQUETS DE 30 */}
+ {scoreType === 'mecanique' && scoresDisplayMeca.length > 0 && (
  <>
  <div className="p-3 flex-1 min-h-0">
- <ResponsiveContainer width="100%" height="100%">
- <LineChart data={scoresParSessionMeca}>
+ <ResponsiveContainer key={chartRenderKey} width="100%" height="100%">
+ <LineChart data={scoresDisplayMeca}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
  <XAxis
- dataKey="ordre"
+ dataKey="label"
  stroke="#71717a"
- style={{ fontSize: '10px' }}
- label={{ value: 'Session', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+ style={{ fontSize: '9px' }}
+ label={{ value: 'Paquet', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+ interval="preserveStartEnd"
  />
  <YAxis
  stroke="#71717a"
@@ -915,10 +951,10 @@ export default function TableauProgression() {
  borderRadius: '8px',
  fontSize: '11px'
  }}
- formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
+ formatter={(value: any) => [`${Math.round(value)}%`, '% de réussite']}
  labelFormatter={(value: any, payload: any) => {
  const item = payload[0]?.payload;
- return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;
+ return item ? `Q${item.label} · ${item.nbQuestions} questions (${item.dateDebut}–${item.dateFin})` : `Paquet ${value}`;
  }}
  />
  <Line
@@ -937,19 +973,19 @@ export default function TableauProgression() {
  <div className="flex justify-around text-center text-xs">
  <div>
  <div className="font-bold text-accent">
- {Math.round(scoresParSessionMeca.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionMeca.length)}%
+ {Math.round(scoresDisplayMeca.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresDisplayMeca.length)}%
  </div>
  <div className="text-accent text-[10px]">Moyenne</div>
  </div>
  <div>
  <div className="font-bold text-accent">
- {Math.round(Math.max(...scoresParSessionMeca.map(s => s.scoreMoyen)))}%
+ {Math.round(Math.max(...scoresDisplayMeca.map(s => s.scoreMoyen)))}%
  </div>
  <div className="text-accent text-[10px]">Max</div>
  </div>
  <div>
  <div className="font-bold text-accent">
- {Math.round(Math.min(...scoresParSessionMeca.map(s => s.scoreMoyen)))}%
+ {Math.round(Math.min(...scoresDisplayMeca.map(s => s.scoreMoyen)))}%
  </div>
  <div className="text-accent text-[10px]">Min</div>
  </div>
@@ -958,18 +994,19 @@ export default function TableauProgression() {
  </>
  )}
 
- {/* GRAPHIQUE CHAOTIQUE - MODE SESSIONS */}
- {scoreType === 'chaotique' && scoresParSessionChaos.length > 0 && (
+ {/* GRAPHIQUE CHAOTIQUE - PAQUETS DE 30 */}
+ {scoreType === 'chaotique' && scoresDisplayChaos.length > 0 && (
  <>
  <div className="p-3 flex-1 min-h-0">
- <ResponsiveContainer width="100%" height="100%">
- <LineChart data={scoresParSessionChaos}>
+ <ResponsiveContainer key={chartRenderKey} width="100%" height="100%">
+ <LineChart data={scoresDisplayChaos}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
  <XAxis
- dataKey="ordre"
+ dataKey="label"
  stroke="#71717a"
- style={{ fontSize: '10px' }}
- label={{ value: 'Session', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+ style={{ fontSize: '9px' }}
+ label={{ value: 'Paquet', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
+ interval="preserveStartEnd"
  />
  <YAxis
  domain={[0, 100]}
@@ -986,7 +1023,7 @@ export default function TableauProgression() {
  formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
  labelFormatter={(value: any, payload: any) => {
  const item = payload[0]?.payload;
- return item ? `Session #${item.session_numero} (${item.nbQuestions} questions)` : `Session ${value}`;
+ return item ? `Q${item.label} · ${item.nbQuestions} questions (${item.dateDebut}–${item.dateFin})` : `Paquet ${value}`;
  }}
  />
  <Line
@@ -1005,19 +1042,19 @@ export default function TableauProgression() {
  <div className="flex justify-around text-center text-xs">
  <div>
  <div className="font-bold text-accent">
- {Math.round(scoresParSessionChaos.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresParSessionChaos.length)}%
+ {Math.round(scoresDisplayChaos.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresDisplayChaos.length)}%
  </div>
  <div className="text-purple-700 text-[10px]">Moyenne</div>
  </div>
  <div>
  <div className="font-bold text-accent">
- {Math.round(Math.max(...scoresParSessionChaos.map(s => s.scoreMoyen)))}%
+ {Math.round(Math.max(...scoresDisplayChaos.map(s => s.scoreMoyen)))}%
  </div>
  <div className="text-purple-700 text-[10px]">Max</div>
  </div>
  <div>
  <div className="font-bold text-accent">
- {Math.round(Math.min(...scoresParSessionChaos.map(s => s.scoreMoyen)))}%
+ {Math.round(Math.min(...scoresDisplayChaos.map(s => s.scoreMoyen)))}%
  </div>
  <div className="text-purple-700 text-[10px]">Min</div>
  </div>
@@ -1030,7 +1067,7 @@ export default function TableauProgression() {
  {scoreType === 'global' && scoresGlobaux.length > 0 && (
  <>
  <div className="p-3 flex-1 min-h-0">
- <ResponsiveContainer width="100%" height="100%">
+ <ResponsiveContainer key={chartRenderKey} width="100%" height="100%">
  <LineChart data={scoresGlobaux}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
  <XAxis
@@ -1109,20 +1146,22 @@ export default function TableauProgression() {
  </div>
 
  {/* Graphique de concentration */}
- <div className={`bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden aspect-square flex flex-col ${fullscreenBlock === 'concentration' ? 'fixed inset-4 z-50 aspect-auto' : ''}`}>
+ <div className={`bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden aspect-square flex flex-col ${fullscreenBlock === 'concentration' ? 'fixed inset-4 z-50 aspect-auto h-full' : ''}`}>
  <div className="px-3 py-2 flex items-center justify-between">
  <div>
  <h2 className="text-sm font-bold text-ink">Entraîner sa concentration</h2>
- <p className="text-blue-100 text-xs">21 derniers jours</p>
+ <p className="text-blue-100 text-xs">
+   {fullscreenBlock === 'concentration' ? 'Tout l\'historique' : '21 derniers jours'}
+ </p>
  </div>
  <FullscreenButton blockId="concentration" />
  </div>
 
- {concentrationData.some(d => d.duree > 0) ? (
+ {concentrationDisplay.some(d => d.duree > 0) ? (
  <>
  <div className="p-3 flex-1 min-h-0">
- <ResponsiveContainer width="100%" height="100%">
- <BarChart data={concentrationData}>
+ <ResponsiveContainer key={chartRenderKey} width="100%" height="100%">
+ <BarChart data={concentrationDisplay}>
  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
  <XAxis 
  dataKey="date" 
@@ -1164,15 +1203,15 @@ export default function TableauProgression() {
  <div>
  <div className="font-bold text-accent">
  {Math.round(
- concentrationData.reduce((acc, d) => acc + d.duree, 0) / 
- concentrationData.filter(d => d.duree > 0).length || 0
+ concentrationDisplay.reduce((acc, d) => acc + d.duree, 0) / 
+ concentrationDisplay.filter(d => d.duree > 0).length || 0
  )} min
  </div>
  <div className="text-accent text-[10px]">Moy/jour</div>
  </div>
  <div>
  <div className="font-bold text-accent">
- {concentrationData.reduce((acc, d) => acc + d.duree, 0)} min
+ {concentrationDisplay.reduce((acc, d) => acc + d.duree, 0)} min
  </div>
  <div className="text-accent text-[10px]">Total</div>
  </div>
@@ -1188,7 +1227,20 @@ export default function TableauProgression() {
  </div>
 
  {/* Grille objectifs hebdomadaires */}
- <GridObjectifs data={gridObjectifs} />
+ <div className={`bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden aspect-square flex flex-col ${fullscreenBlock === 'objectifs' ? 'fixed inset-4 z-50 aspect-auto h-full' : ''}`}>
+   <div className="px-3 py-2 flex items-center justify-between">
+     <div>
+       <h2 className="text-sm font-bold text-ink">Parcours hebdomadaire</h2>
+       <p className="text-ink-light text-xs">
+         {gridObjectifs.filter(d => d.statut !== 'non_fixe').length > 0
+           ? `${gridObjectifs.filter(d => d.statut === 'succes').length}/${gridObjectifs.filter(d => d.statut !== 'non_fixe').length} réussi(s)`
+           : 'Aucun objectif'}
+       </p>
+     </div>
+     <FullscreenButton blockId="objectifs" />
+   </div>
+   <GridObjectifs data={gridObjectifs} />
+ </div>
  </div>
  </div>
  </div>

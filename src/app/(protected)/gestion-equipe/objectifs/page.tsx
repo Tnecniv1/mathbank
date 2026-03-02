@@ -129,23 +129,40 @@ export default function ObjectifsPage() {
     }
   }
 
-  async function handleCloturer(objectifId: string, statut: 'succes' | 'echec') {
-    const label = statut === 'succes' ? 'Succes' : 'Echec';
-    if (!confirm(`Cloturer cet objectif comme "${label}" ?`)) return;
-
+  async function handleCloturer(
+    objectifId: string,
+    statut: 'succes' | 'echec',
+    commentaire?: string
+  ) {
     try {
       const { error } = await supabase.rpc('cloturer_objectif', {
         p_objectif_id: objectifId,
         p_statut: statut,
+        p_commentaire: commentaire || null,
       });
 
       if (error) throw error;
 
-      // Recharger
       if (equipeId && membreId) loadObjectifs(equipeId, membreId);
     } catch (err: any) {
       console.error(err);
       alert(err.message || 'Erreur lors de la cloture');
+    }
+  }
+
+  async function handleBasculerMode(objectifId: string, mode: 'auto' | 'manuel') {
+    try {
+      const { error } = await supabase.rpc('basculer_mode_objectif', {
+        p_objectif_id: objectifId,
+        p_mode: mode,
+      });
+
+      if (error) throw error;
+
+      if (equipeId && membreId) loadObjectifs(equipeId, membreId);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Erreur lors du changement de mode');
     }
   }
 
@@ -207,7 +224,9 @@ export default function ObjectifsPage() {
               <ObjectifCard
                 key={obj.id}
                 objectif={obj}
+                isChef={isChef}
                 onCloturer={isChef ? handleCloturer : undefined}
+                onBasculerMode={isChef ? handleBasculerMode : undefined}
               />
             ))}
           </div>
