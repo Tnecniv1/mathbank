@@ -249,6 +249,33 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
  }
  }
 
+ async function handleReviser(feuille: Feuille) {
+ if (!confirm(`Lancer une révision de cette feuille pour ${membre.membre_nom} ?`)) return;
+
+ try {
+ setSaving(true);
+
+ const { data, error } = await supabase.rpc('autoriser_revision_feuille', {
+ p_membre_id: membre.membre_id || membre.user_id,
+ p_feuille_id: feuille.id,
+ });
+
+ if (error) throw error;
+
+ if (data && !data.success) {
+ throw new Error(data.error || 'Erreur lors de la révision');
+ }
+
+ await loadData();
+ onUpdate();
+ } catch (error: any) {
+ console.error('Erreur révision:', error);
+ alert(error.message || 'Erreur lors de la révision');
+ } finally {
+ setSaving(false);
+ }
+ }
+
  function renderDifficulte(diff: number) {
  const colors = {
  1: 'text-status-success',
@@ -406,6 +433,15 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
  className="px-3 py-1 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 text-ink text-xs font-medium rounded transition-colors"
  >
  Retirer
+ </button>
+ )}
+ {feuille.est_validee && (
+ <button
+ onClick={() => handleReviser(feuille)}
+ disabled={saving}
+ className="px-3 py-1 bg-cream-200 hover:bg-cream-300 disabled:bg-gray-300 text-ink-light text-xs font-medium rounded transition-colors"
+ >
+ 🔁 Réviser
  </button>
  )}
  </div>
