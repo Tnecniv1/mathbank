@@ -701,29 +701,60 @@ export default function SessionsPage() {
       return;
     }
 
-    const mecaniques: { reference: string; reussi: boolean }[] =
-      Array.isArray(json.mecanique) && json.mecanique.length > 0
-        ? json.mecanique.map((m: any) => ({ reference: String(m.reference), reussi: !!m.reussi }))
-        : [];
-
+    let mecaniques: { reference: string; reussi: boolean }[] = [];
     let exo: string | null = null;
     let score: number | null = null;
     let bools: RoueApercu['bools'] = null;
-    const validated = json.validated;
-    const hasChaotique = validated && Object.keys(validated).length > 0;
-    if (hasChaotique) {
-      exo = json.meta?.exo ?? null;
-      if (!exo) { setRoueErreur('meta.exo manquant dans cette roue'); return; }
-      const v = validated;
-      bools = {
-        c1: !!(v.C1), c2: !!(v.C2), c3: !!(v.C3), c4: !!(v.C4),
-        s1: !!(v.S1), s2: !!(v.S2), s3: !!(v.S3), s4: !!(v.S4),
-        r1: !!(v.R1), r2: !!(v.R2), r3: !!(v.R3), r4: !!(v.R4),
-      };
-      const comp   = ([bools.c1, bools.c2, bools.c3, bools.c4].filter(Boolean).length / 4) * 100;
-      const savoir = ([bools.s1, bools.s2, bools.s3, bools.s4].filter(Boolean).length / 4) * 100;
-      const red    = ([bools.r1, bools.r2, bools.r3, bools.r4].filter(Boolean).length / 4) * 100;
-      score = (50 * comp + 25 * savoir + 25 * red) / 100;
+
+    if (Array.isArray(json.exercices)) {
+      // ── Nouveau format ──
+      const exosMeca = json.exercices.filter((e: any) => e.type === 'mecanique');
+      mecaniques = exosMeca.flatMap((e: any) =>
+        Array.isArray(e.observations)
+          ? e.observations.map((o: any) => ({ reference: String(o.reference ?? ''), reussi: !!o.reussi }))
+          : []
+      );
+
+      const exoChaotique = json.exercices.find((e: any) => e.type === 'chaotique');
+      const validated = exoChaotique?.validated;
+      const hasChaotique = validated && Object.keys(validated).length > 0;
+      if (hasChaotique) {
+        exo = exoChaotique.reference || json.meta?.exo || null;
+        if (!exo) { setRoueErreur('Référence manquante dans l\'exercice chaotique'); return; }
+        const v = validated;
+        bools = {
+          c1: !!(v.C1), c2: !!(v.C2), c3: !!(v.C3), c4: !!(v.C4),
+          s1: !!(v.S1), s2: !!(v.S2), s3: !!(v.S3), s4: !!(v.S4),
+          r1: !!(v.R1), r2: !!(v.R2), r3: !!(v.R3), r4: !!(v.R4),
+        };
+        const comp   = ([bools.c1, bools.c2, bools.c3, bools.c4].filter(Boolean).length / 4) * 100;
+        const savoir = ([bools.s1, bools.s2, bools.s3, bools.s4].filter(Boolean).length / 4) * 100;
+        const red    = ([bools.r1, bools.r2, bools.r3, bools.r4].filter(Boolean).length / 4) * 100;
+        score = (50 * comp + 25 * savoir + 25 * red) / 100;
+      }
+    } else {
+      // ── Ancien format ──
+      mecaniques =
+        Array.isArray(json.mecanique) && json.mecanique.length > 0
+          ? json.mecanique.map((m: any) => ({ reference: String(m.reference), reussi: !!m.reussi }))
+          : [];
+
+      const validated = json.validated;
+      const hasChaotique = validated && Object.keys(validated).length > 0;
+      if (hasChaotique) {
+        exo = json.meta?.exo ?? null;
+        if (!exo) { setRoueErreur('meta.exo manquant dans cette roue'); return; }
+        const v = validated;
+        bools = {
+          c1: !!(v.C1), c2: !!(v.C2), c3: !!(v.C3), c4: !!(v.C4),
+          s1: !!(v.S1), s2: !!(v.S2), s3: !!(v.S3), s4: !!(v.S4),
+          r1: !!(v.R1), r2: !!(v.R2), r3: !!(v.R3), r4: !!(v.R4),
+        };
+        const comp   = ([bools.c1, bools.c2, bools.c3, bools.c4].filter(Boolean).length / 4) * 100;
+        const savoir = ([bools.s1, bools.s2, bools.s3, bools.s4].filter(Boolean).length / 4) * 100;
+        const red    = ([bools.r1, bools.r2, bools.r3, bools.r4].filter(Boolean).length / 4) * 100;
+        score = (50 * comp + 25 * savoir + 25 * red) / 100;
+      }
     }
 
     if (mecaniques.length === 0 && !hasChaotique) {

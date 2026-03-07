@@ -14,7 +14,8 @@
       "Bash(xxd:*)",
       "Bash(node:*)",
       "Read(//c/Users/vince/Desktop/Monstro/**)",
-      "Read(//c/Users/vince/**)"
+      "Read(//c/Users/vince/**)",
+      "Bash(xargs grep:*)"
     ]
   }
 }
