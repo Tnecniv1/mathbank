@@ -67,6 +67,7 @@ function migrateSheet(sheet){
     reference: sheet.meta&&sheet.meta.exo ? sheet.meta.exo : '',
     crosses: sheet.crosses || {},
     validated: sheet.validated || {},
+    reussi: null,
   });
   if((sheet.mecanique||[]).length > 0){
     exercices.push({
@@ -199,7 +200,7 @@ function WheelEditor({sheet, onChange}){
   const addChaotiqueExo = () => {
     if(sheet.closed) return;
     const id = Date.now().toString();
-    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'chaotique',reference:'',crosses:{},validated:{}}]}));
+    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'chaotique',reference:'',crosses:{},validated:{},reussi:null}]}));
     setActiveExoId(id);
   };
 
@@ -359,6 +360,21 @@ function WheelEditor({sheet, onChange}){
           React.createElement("div",{style:{fontSize:26,fontWeight:"bold",color:s.color,fontFamily:"Georgia,serif"}},s.total),
           React.createElement("div",{style:{fontSize:9.5,color:"#8B7355",marginTop:2,fontFamily:"Georgia,serif"}},s.label),
         )),
+      ),
+
+      // Résultat global (chaotique)
+      activeExo.type==='chaotique' && React.createElement("div",{style:{background:"white",borderRadius:12,border:"1px solid #E8E0D4",padding:"14px 16px",display:"flex",alignItems:"center",gap:12}},
+        React.createElement("span",{style:{fontSize:12,color:"#8B7355",fontFamily:"Georgia,serif",flexShrink:0}},"Résultat global"),
+        React.createElement("button",{
+          onClick:()=>updateActiveExo(e=>({...e,reussi:true})),
+          disabled:sheet.closed,
+          style:{padding:"10px 20px",fontSize:14,borderRadius:8,border:"2px solid",borderColor:activeExo.reussi===true?"#3DAF6B":"#D0C5B5",background:activeExo.reussi===true?"#F0FBF4":"white",color:activeExo.reussi===true?"#2A8050":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"},
+        },"✓ Succès"),
+        React.createElement("button",{
+          onClick:()=>updateActiveExo(e=>({...e,reussi:false})),
+          disabled:sheet.closed,
+          style:{padding:"10px 20px",fontSize:14,borderRadius:8,border:"2px solid",borderColor:activeExo.reussi===false?"#D4503D":"#D0C5B5",background:activeExo.reussi===false?"#FFF0EE":"white",color:activeExo.reussi===false?"#C03020":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"},
+        },"✗ Échec"),
       ),
 
       // Note (chaotique)
