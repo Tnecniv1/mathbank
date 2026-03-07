@@ -10,7 +10,11 @@
       "Bash(find:*)",
       "Bash(ls:*)",
       "Bash(done)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(xxd:*)",
+      "Bash(node:*)",
+      "Read(//c/Users/vince/Desktop/Monstro/**)",
+      "Read(//c/Users/vince/**)"
     ]
   }
 }

@@ -358,6 +358,7 @@ function ItemForm({
  await onSave(data);
  } catch (error: any) {
  alert(error.message || 'Une erreur est survenue');
+ } finally {
  setSaving(false);
  setUploadProgress(null);
  }
@@ -1309,19 +1310,27 @@ export default function AdminPage() {
  }
 
  async function createItem(table: string, data: any) {
+ // Auto-calcul de l'ordre si non fourni
+ if (data.ordre === null || data.ordre === undefined) {
+  let query = supabase.from(table).select('ordre');
+  if (data.niveau_id) query = (query as any).eq('niveau_id', data.niveau_id);
+  else if (data.sujet_id) query = (query as any).eq('sujet_id', data.sujet_id);
+  else if (data.chapitre_id) query = (query as any).eq('chapitre_id', data.chapitre_id);
+  const { data: existing } = await query;
+  const maxOrdre = (existing as any[])?.reduce((max: number, item: any) => Math.max(max, item.ordre ?? 0), 0) ?? 0;
+  data.ordre = maxOrdre + 1;
+ }
  const { error } = await supabase.from(table).insert([data]);
- if (!error) {
+ if (error) throw new Error(error.message);
  await loadData();
  closeModal();
- }
  }
 
  async function updateItem(table: string, id: string, data: any) {
  const { error } = await supabase.from(table).update(data).eq('id', id);
- if (!error) {
+ if (error) throw new Error(error.message);
  await loadData();
  closeModal();
- }
  }
 
  async function deleteItem(table: string, id: string, confirmMsg: string) {

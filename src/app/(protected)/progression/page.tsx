@@ -252,7 +252,7 @@ export default function TableauProgression() {
 
  async function loadScoresLocauxAvecType(niveauId: string, userId: string) {
  try {
- // Récupérer d'abord toutes les feuilles du niveau
+ // Récupérer toutes les feuilles du niveau
  const { data: feuillesData } = await supabase
  .from('feuille_entrainement')
  .select(`
@@ -272,68 +272,98 @@ export default function TableauProgression() {
  }
 
  const feuilleIds = feuillesData.map((f: any) => f.id);
+ const feuilleIdsStr = feuilleIds.join(',');
 
- // Récupérer les scores locaux filtrés par niveau
- const { data: scoresData, error } = await supabase
+ // ── Archives : score_local + session_entrainement ──────────────────────
+ const { data: scoresData } = await supabase
  .from('score_local')
  .select(`
- id,
- exercice,
- question,
  comprehension,
  savoir,
  redaction,
  correction,
  created_at,
- session_id,
  session_entrainement!inner(
- user_id,
  feuille_mecanique_id,
  feuille_chaotique_id,
- numero_session,
  date_session,
  heure_session
  )
  `)
  .eq('session_entrainement.user_id', userId)
- .or(`feuille_mecanique_id.in.(${feuilleIds.join(',')}),feuille_chaotique_id.in.(${feuilleIds.join(',')})`, { foreignTable: 'session_entrainement' });
+ .or(`feuille_mecanique_id.in.(${feuilleIdsStr}),feuille_chaotique_id.in.(${feuilleIdsStr})`, { foreignTable: 'session_entrainement' });
 
- if (error) {
- console.error('Erreur chargement scores locaux:', error);
- setScoresParSessionMeca([]);
- setScoresParSessionChaos([]);
- return;
- }
+ // ── Nouvelles données : exercice + score_exercice + session ────────────
+ const { data: newExercicesData } = await supabase
+ .from('exercice')
+ .select(`
+ type,
+ created_at,
+ session!inner(
+ user_id,
+ date_session,
+ feuille_mecanique_id,
+ feuille_chaotique_id
+ ),
+ score_exercice(
+ reussi,
+ c1, c2, c3, c4,
+ s1, s2, s3, s4,
+ r1, r2, r3, r4,
+ correction
+ )
+ `)
+ .eq('session.user_id', userId)
+ .or(`feuille_mecanique_id.in.(${feuilleIdsStr}),feuille_chaotique_id.in.(${feuilleIdsStr})`, { foreignTable: 'session' });
 
- if (!scoresData || scoresData.length === 0) {
- setScoresParSessionMeca([]);
- setScoresParSessionChaos([]);
- return;
- }
+ // ── Construire la liste unifiée { score, date, isMecanique } ──────────
+ const allMeca:  { score: number; date: string; ts: number }[] = [];
+ const allChaos: { score: number; date: string; ts: number }[] = [];
 
- // Trier par date et heure réelles de session (chronologique)
- scoresData.sort((a: any, b: any) => {
- const dateA = new Date(`${a.session_entrainement.date_session}T${a.session_entrainement.heure_session}`);
- const dateB = new Date(`${b.session_entrainement.date_session}T${b.session_entrainement.heure_session}`);
- return dateA.getTime() - dateB.getTime();
+ // Archives
+ (scoresData || []).forEach((s: any) => {
+ const isMecanique = s.session_entrainement.feuille_mecanique_id !== null;
+ const rawScore    = calcScore(s.comprehension, s.savoir, s.redaction, s.correction);
+ const scoreNorm   = rawScore / 1.3;
+ const date        = s.session_entrainement.date_session;
+ const ts          = new Date(`${date}T${s.session_entrainement.heure_session || '00:00:00'}`).getTime();
+ if (isMecanique) allMeca.push({ score: scoreNorm, date, ts });
+ else             allChaos.push({ score: scoreNorm, date, ts });
  });
 
- // Séparer les questions en deux listes chronologiques
- const questionsMeca: { score: number; date: string }[] = [];
- const questionsChaos: { score: number; date: string }[] = [];
+ // Nouvelles données
+ (newExercicesData || []).forEach((ex: any) => {
+ const isMecanique = ex.type === 'mecanique';
+ const score_ex    = ex.score_exercice?.[0];
+ if (!score_ex) return;
 
- scoresData.forEach((score: any) => {
- const isMecanique = score.session_entrainement.feuille_mecanique_id !== null;
- const rawScore = calcScore(score.comprehension, score.savoir, score.redaction, score.correction);
- const scoreNorm = rawScore / 1.3;
- const date = score.session_entrainement.date_session;
-
+ let scoreNorm: number;
  if (isMecanique) {
-   questionsMeca.push({ score: scoreNorm, date });
+   scoreNorm = score_ex.reussi ? 100 : 0;
  } else {
-   questionsChaos.push({ score: scoreNorm, date });
+   const comp   = ([score_ex.c1, score_ex.c2, score_ex.c3, score_ex.c4].filter(Boolean).length / 4) * 100;
+   const savoir = ([score_ex.s1, score_ex.s2, score_ex.s3, score_ex.s4].filter(Boolean).length / 4) * 100;
+   const red    = ([score_ex.r1, score_ex.r2, score_ex.r3, score_ex.r4].filter(Boolean).length / 4) * 100;
+   const raw    = (50 * comp + 25 * savoir + 25 * red) / 100 * (1 + (score_ex.correction ? 0.3 : 0));
+   scoreNorm    = raw / 1.3;
  }
+
+ const date = ex.session.date_session;
+ const ts   = new Date(ex.created_at).getTime();
+ if (isMecanique) allMeca.push({ score: scoreNorm, date, ts });
+ else             allChaos.push({ score: scoreNorm, date, ts });
  });
+
+ // Trier chaque liste chronologiquement
+ allMeca.sort((a, b)  => a.ts - b.ts);
+ allChaos.sort((a, b) => a.ts - b.ts);
+
+ if (allMeca.length === 0 && allChaos.length === 0) {
+ setScoresParSessionMeca([]);
+ setScoresParSessionChaos([]);
+ setScoresGlobaux([]);
+ return;
+ }
 
  // Regrouper en paquets de 30 questions consécutives
  const TAILLE_PAQUET = 30;
@@ -343,55 +373,48 @@ export default function TableauProgression() {
    for (let i = 0; i < questions.length; i += TAILLE_PAQUET) {
      const chunk = questions.slice(i, i + TAILLE_PAQUET);
      const debut = i + 1;
-     const fin = i + chunk.length;
+     const fin   = i + chunk.length;
      const scoreMoyen = chunk.reduce((acc, q) => acc + q.score, 0) / chunk.length;
      paquets.push({
-       ordre: paquets.length + 1,
-       label: `${debut}-${fin}`,
+       ordre:      paquets.length + 1,
+       label:      `${debut}-${fin}`,
        scoreMoyen,
        nbQuestions: chunk.length,
-       dateDebut: new Date(chunk[0].date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
-       dateFin:   new Date(chunk[chunk.length - 1].date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+       dateDebut:  new Date(chunk[0].date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+       dateFin:    new Date(chunk[chunk.length - 1].date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
      });
    }
    return paquets;
  }
 
- const scoresSessionMeca = groupEnPaquets(questionsMeca);
- const scoresSessionChaos = groupEnPaquets(questionsChaos);
+ setScoresParSessionMeca(groupEnPaquets(allMeca));
+ setScoresParSessionChaos(groupEnPaquets(allChaos));
 
+ // Score global cumulatif pondéré (25% méca, 75% chaos)
+ // Fusionner et trier par ts
+ const allEntries = [
+ ...allMeca.map(e  => ({ ...e, isMecanique: true  })),
+ ...allChaos.map(e => ({ ...e, isMecanique: false })),
+ ].sort((a, b) => a.ts - b.ts);
 
- // Calculer le score global cumulatif pondéré (25% méca, 75% chaos)
  const scoresGlobauxMap = new Map<string, number>();
- let cumulatifMeca = 0;
+ let cumulatifMeca  = 0;
  let cumulatifChaos = 0;
 
- scoresData.forEach((score: any) => {
- const isMecanique = score.session_entrainement.feuille_mecanique_id !== null;
- const dateSession = score.session_entrainement.date_session;
- const rawScore = calcScore(score.comprehension, score.savoir, score.redaction, score.correction);
-
- if (isMecanique) {
- cumulatifMeca += rawScore / 130; // ratio [0, 1] ajouté à chaque question mécanique
- } else {
- cumulatifChaos += rawScore / 130; // ratio [0, 1] ajouté à chaque question chaotique
- }
-
- scoresGlobauxMap.set(dateSession, 100 * (0.25 * cumulatifMeca + 0.75 * cumulatifChaos));
+ allEntries.forEach(entry => {
+ const ratio = entry.score / 100; // normalise [0,1]
+ if (entry.isMecanique) cumulatifMeca  += ratio;
+ else                   cumulatifChaos += ratio;
+ scoresGlobauxMap.set(entry.date, 100 * (0.25 * cumulatifMeca + 0.75 * cumulatifChaos));
  });
 
  const scoresGlobauxArray = Array.from(scoresGlobauxMap.entries())
- .map(([date, score]) => ({
- date,
- scoreCumulatif: score
- }))
+ .map(([date, score]) => ({ date, scoreCumulatif: score }))
  .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
  setScoresGlobaux(scoresGlobauxArray);
- setScoresParSessionMeca(scoresSessionMeca);
- setScoresParSessionChaos(scoresSessionChaos);
  } catch (err: any) {
- console.error('Erreur chargement scores locaux:', err);
+ console.error('Erreur chargement scores:', err);
  setScoresParSessionMeca([]);
  setScoresParSessionChaos([]);
  }
@@ -435,12 +458,22 @@ export default function TableauProgression() {
  const date21JoursAvant = new Date();
  date21JoursAvant.setDate(date21JoursAvant.getDate() - 21);
 
- // Récupérer les sessions d'entraînement
+ const dateMin = date21JoursAvant.toISOString().split('T')[0];
+
+ // Archives
  const { data: sessions } = await supabase
  .from('session_entrainement')
- .select('date_session, temps_mecanique, temps_chaotique, user_id')
+ .select('date_session, temps_mecanique, temps_chaotique')
  .eq('user_id', userId)
- .gte('date_session', date21JoursAvant.toISOString().split('T')[0])
+ .gte('date_session', dateMin)
+ .order('date_session', { ascending: true });
+
+ // Nouvelles données
+ const { data: newSessions } = await supabase
+ .from('session')
+ .select('date_session, duree')
+ .eq('user_id', userId)
+ .gte('date_session', dateMin)
  .order('date_session', { ascending: true });
 
  const aujourd_hui = new Date();
@@ -456,9 +489,16 @@ export default function TableauProgression() {
  sessions?.forEach(session => {
  const existing = concentrationMap.get(session.date_session);
  if (existing) {
- // Additionner les temps mécaniques et chaotiques
  const dureeTotal = (session.temps_mecanique || 0) + (session.temps_chaotique || 0);
  existing.duree += dureeTotal;
+ existing.nbSessions += 1;
+ }
+ });
+
+ newSessions?.forEach(s => {
+ const existing = concentrationMap.get(s.date_session);
+ if (existing) {
+ existing.duree += s.duree || 0;
  existing.nbSessions += 1;
  }
  });
@@ -480,27 +520,42 @@ export default function TableauProgression() {
  setConcentrationData(concentrationArray);
 
  // All-time : toutes les sessions sans limite de date, regroupées par jour
- const { data: allSessions } = await supabase
-   .from('session_entrainement')
-   .select('date_session, temps_mecanique, temps_chaotique')
-   .eq('user_id', userId)
-   .order('date_session', { ascending: true });
+ const [{ data: allSessions }, { data: allNewSessions }] = await Promise.all([
+   supabase
+     .from('session_entrainement')
+     .select('date_session, temps_mecanique, temps_chaotique')
+     .eq('user_id', userId)
+     .order('date_session', { ascending: true }),
+   supabase
+     .from('session')
+     .select('date_session, duree')
+     .eq('user_id', userId)
+     .order('date_session', { ascending: true }),
+ ]);
 
- if (allSessions && allSessions.length > 0) {
+ if ((allSessions && allSessions.length > 0) || (allNewSessions && allNewSessions.length > 0)) {
    const allTimeMap = new Map<string, { duree: number; nbSessions: number }>();
-   allSessions.forEach(s => {
+   allSessions?.forEach(s => {
      const duree = (s.temps_mecanique || 0) + (s.temps_chaotique || 0);
      const entry = allTimeMap.get(s.date_session) ?? { duree: 0, nbSessions: 0 };
      entry.duree += duree;
      entry.nbSessions += 1;
      allTimeMap.set(s.date_session, entry);
    });
+   allNewSessions?.forEach(s => {
+     const entry = allTimeMap.get(s.date_session) ?? { duree: 0, nbSessions: 0 };
+     entry.duree += s.duree || 0;
+     entry.nbSessions += 1;
+     allTimeMap.set(s.date_session, entry);
+   });
    setConcentrationDataAll(
-     Array.from(allTimeMap.entries()).map(([date, d]) => ({
-       date: new Date(date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
-       duree: d.duree,
-       nbSessions: d.nbSessions,
-     }))
+     Array.from(allTimeMap.entries())
+       .sort(([a], [b]) => a.localeCompare(b))
+       .map(([date, d]) => ({
+         date: new Date(date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+         duree: d.duree,
+         nbSessions: d.nbSessions,
+       }))
    );
  }
  } catch (err: any) {

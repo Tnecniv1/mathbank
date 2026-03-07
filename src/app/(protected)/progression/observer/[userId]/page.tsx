@@ -344,21 +344,24 @@ export default function TableauProgression() {
 
  async function loadConcentrationData(niveauId: string, userId: string) {
  try {
- // Récupérer directement toutes les sessions de l'utilisateur
  const date21JoursAvant = new Date();
  date21JoursAvant.setDate(date21JoursAvant.getDate() - 21);
+ const dateMin = date21JoursAvant.toISOString().split('T')[0];
 
- const { data: sessions, error } = await supabase
- .from('session_entrainement')
- .select('date_session, temps_mecanique, temps_chaotique')
- .eq('user_id', userId)
- .gte('date_session', date21JoursAvant.toISOString().split('T')[0])
- .order('date_session', { ascending: true });
-
- console.log('🔍 Debug concentration - userId:', userId);
- console.log('🔍 Debug concentration - date21JoursAvant:', date21JoursAvant.toISOString().split('T')[0]);
- console.log('🔍 Debug concentration - sessions récupérées:', sessions);
- console.log('🔍 Debug concentration - error:', error);
+ const [{ data: sessions, error }, { data: newSessions }] = await Promise.all([
+   supabase
+     .from('session_entrainement')
+     .select('date_session, temps_mecanique, temps_chaotique')
+     .eq('user_id', userId)
+     .gte('date_session', dateMin)
+     .order('date_session', { ascending: true }),
+   supabase
+     .from('session')
+     .select('date_session, duree')
+     .eq('user_id', userId)
+     .gte('date_session', dateMin)
+     .order('date_session', { ascending: true }),
+ ]);
 
  if (error) {
  console.error('Erreur récupération sessions:', error);
@@ -379,17 +382,18 @@ export default function TableauProgression() {
  sessions?.forEach(session => {
  const existing = concentrationMap.get(session.date_session);
  if (existing) {
- // Additionner les temps mécaniques et chaotiques
- const dureeTotal = (session.temps_mecanique || 0) + (session.temps_chaotique || 0);
- console.log('📊 Session:', session.date_session, '- Méca:', session.temps_mecanique, '- Chaos:', session.temps_chaotique, '- Total:', dureeTotal);
- existing.duree += dureeTotal;
+ existing.duree += (session.temps_mecanique || 0) + (session.temps_chaotique || 0);
  existing.nbSessions += 1;
- } else {
- console.log('⚠️ Session ignorée (hors période):', session.date_session);
  }
  });
 
- console.log('📈 Concentration Map finale:', Array.from(concentrationMap.entries()));
+ newSessions?.forEach(s => {
+ const existing = concentrationMap.get(s.date_session);
+ if (existing) {
+ existing.duree += s.duree || 0;
+ existing.nbSessions += 1;
+ }
+ });
 
  const concentrationArray: ConcentrationData[] = [];
  for (let i = 20; i >= 0; i--) {
@@ -397,7 +401,7 @@ export default function TableauProgression() {
  jour.setDate(jour.getDate() - i);
  const dateStr = jour.toISOString().split('T')[0];
  const data = concentrationMap.get(dateStr) || { duree: 0, nbSessions: 0 };
- 
+
  concentrationArray.push({
  date: jour.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
  duree: data.duree,

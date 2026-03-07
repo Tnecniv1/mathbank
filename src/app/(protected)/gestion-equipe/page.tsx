@@ -272,50 +272,63 @@ export default function GestionEquipePage() {
  
  setMembres(membresAvecStats);
 
- // Calculer le score global
- const { data: scoresEquipe } = await supabase
+ // Calculer le score global — deux sources : score_local (archives) + score_exercice (nouvelles sessions)
+ const [{ data: scoresAnciens }, { data: scoresNouveaux }] = await Promise.all([
+ supabase
  .from('score_local')
- .select(`
- score_calcule,
- session_entrainement!inner(
- user_id,
- feuille_mecanique_id,
- feuille_chaotique_id
- )
- `);
+ .select('score_calcule, session_entrainement!inner(user_id)'),
+ supabase
+ .from('score_exercice')
+ .select('reussi, c1, c2, c3, c4, s1, s2, s3, s4, r1, r2, r3, r4, correction, exercice!inner(type, session!inner(user_id))'),
+ ]);
 
- if (scoresEquipe) {
- console.log('📊 Nombre de scores équipe:', scoresEquipe?.length);
-
- // Calculer le score total et par membre (SANS filtre de validation)
  const scoreParMembre = new Map<string, number>();
  let scoreTotal = 0;
 
- scoresEquipe.forEach((score: any) => {
- const userId = score.session_entrainement.user_id;
- 
- if (userIds.includes(userId)) {
- const scoreBrut = parseFloat(score.score_calcule) * 100;
- scoreTotal += scoreBrut;
- scoreParMembre.set(userId, (scoreParMembre.get(userId) || 0) + scoreBrut);
+ // Archives (score_calcule pré-calculé, valeurs 0–1.3, × 100 = points)
+ scoresAnciens?.forEach((score: any) => {
+ const uid = score.session_entrainement?.user_id;
+ if (uid && userIds.includes(uid)) {
+ const pts = (parseFloat(score.score_calcule) || 0) * 100;
+ scoreTotal += pts;
+ scoreParMembre.set(uid, (scoreParMembre.get(uid) || 0) + pts);
+ }
+ });
+
+ // Nouvelles sessions — score calculé depuis les booléens de score_exercice
+ // Mécanique : reussi → 100 pts | Chaotique : chaque critère vrai → 10 pts (max 130)
+ scoresNouveaux?.forEach((score: any) => {
+ const uid = score.exercice?.session?.user_id;
+ if (uid && userIds.includes(uid)) {
+ let pts = 0;
+ if (score.exercice?.type === 'mecanique') {
+ pts = score.reussi ? 100 : 0;
+ } else {
+ const bools: boolean[] = [
+ score.c1, score.c2, score.c3, score.c4,
+ score.s1, score.s2, score.s3, score.s4,
+ score.r1, score.r2, score.r3, score.r4,
+ score.correction,
+ ];
+ pts = bools.filter(Boolean).length * 10;
+ }
+ scoreTotal += pts;
+ scoreParMembre.set(uid, (scoreParMembre.get(uid) || 0) + pts);
  }
  });
 
  setScoreGlobalEquipe(Math.round(scoreTotal));
 
- const contributions = Array.from(scoreParMembre.entries()).map(([userId, score]) => {
- const profile = profilesData?.find((p: any) => p.user_id === userId);
+ const contributions = Array.from(scoreParMembre.entries()).map(([uid, score]) => {
+ const profile = profilesData?.find((p: any) => p.user_id === uid);
  return {
- user_id: userId,
+ user_id: uid,
  nom: profile?.full_name || 'Inconnu',
- score: Math.round(score)
+ score: Math.round(score),
  };
  }).sort((a, b) => b.score - a.score);
 
  setContributionsMembres(contributions);
- console.log('🏆 Score Global:', Math.round(scoreTotal));
- console.log('👥 Contributions:', contributions);
- }
  } else {
  setMembres([]);
  }
@@ -346,11 +359,6 @@ export default function GestionEquipePage() {
  function handleGererFeuilles(membre: Membre) {
  setMembreSelectionne(membre);
  setShowModalGestion(true);
- }
-
- function handleObserverProgression(membre: Membre) {
- // Redirection vers /progression avec le user_id du membre en query param
- router.push(`/progression/observer/${membre.user_id}`);
  }
 
  async function handleOuvrirSynthese(notif: Notification) {
@@ -646,10 +654,10 @@ export default function GestionEquipePage() {
  📄 Feuilles
  </button>
  <button
- onClick={() => handleObserverProgression(membre)}
+ onClick={() => router.push(`/library/sessions?membre=${membre.user_id}`)}
  className="px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors"
  >
- 📊 Progression
+ 📝 Insérer
  </button>
  <button
  onClick={() => router.push(`/gestion-equipe/rapport?id=${equipeId}&membre=${membre.user_id}`)}

@@ -427,18 +427,17 @@ function ProgressionModal({
  try {
  const { data: { session: userSession } } = await supabase.auth.getSession();
  if (!userSession || !userSession.user) return;
+ const userId = userSession.user.id;
 
- // Charger les sessions depuis session_entrainement
- const { data: sessionsData } = await supabase
+ // ── 1. Ancien système : session_entrainement ──
+ const { data: oldSessions } = await supabase
  .from('session_entrainement')
  .select('*')
- .eq('user_id', userSession.user.id)
+ .eq('user_id', userId)
  .or(`feuille_mecanique_id.eq.${feuille.id},feuille_chaotique_id.eq.${feuille.id}`)
  .order('date_session', { ascending: false });
 
- if (sessionsData) {
- // Filtrer pour ne garder que les données de cette feuille spécifique
- const sessionsFiltered = sessionsData.map((s: any) => {
+ const oldSessionsFiltered = (oldSessions || []).map((s: any) => {
  const isMecanique = s.feuille_mecanique_id === feuille.id;
  return {
  id: s.id,
@@ -450,20 +449,41 @@ function ProgressionModal({
  };
  }).filter((s: any) => s.temps !== null && s.temps > 0);
 
- setSessions(sessionsFiltered);
+ // ── 2. Nouveau système : session ──
+ const { data: newSessions } = await supabase
+ .from('session')
+ .select('id, duree, date_session, feuille_mecanique_id, feuille_chaotique_id')
+ .eq('user_id', userId)
+ .or(`feuille_mecanique_id.eq.${feuille.id},feuille_chaotique_id.eq.${feuille.id}`)
+ .order('date_session', { ascending: false });
 
- // Charger les scores locaux pour ces sessions
- const sessionIds = sessionsData.map((s: any) => s.id);
- 
- if (sessionIds.length > 0) {
+ const newSessionsFiltered = (newSessions || []).map((s: any) => {
+ const isMecanique = s.feuille_mecanique_id === feuille.id;
+ return {
+ id: s.id,
+ date: s.date_session,
+ temps: s.duree || 0,
+ type: isMecanique ? 'mecanique' : 'chaotique',
+ };
+ }).filter((s: any) => s.temps > 0);
+
+ const allSessions = [...oldSessionsFiltered, ...newSessionsFiltered];
+ setSessions(allSessions);
+
+ // ── 3. Scores ancien système ──
+ const scores: ScoreLocalDetail[] = [];
+ const oldSessionIds = (oldSessions || []).map((s: any) => s.id);
+
+ if (oldSessionIds.length > 0) {
  const { data: scoresData } = await supabase
  .from('score_local')
  .select('*')
- .in('session_id', sessionIds)
+ .in('session_id', oldSessionIds)
  .order('created_at', { ascending: true });
 
- if (scoresData && scoresData.length > 0) {
- const scores: ScoreLocalDetail[] = scoresData.map((s: any) => ({
+ if (scoresData) {
+ for (const s of scoresData) {
+ scores.push({
  id: s.id,
  exercice: s.exercice || 'Question',
  question: s.question,
@@ -472,40 +492,69 @@ function ProgressionModal({
  redaction: s.redaction,
  correction: s.correction,
  score_calcule: parseFloat(s.score_calcule) || 0,
- }));
+ });
+ }
+ }
+ }
 
+ // ── 4. Scores nouveau système ──
+ const newSessionIds = (newSessions || []).map((s: any) => s.id);
+ if (newSessionIds.length > 0) {
+ const { data: exercicesData } = await supabase
+ .from('exercice')
+ .select('id, type, score_exercice(reussi, c1, c2, c3, c4, s1, s2, s3, s4, r1, r2, r3, r4, correction)')
+ .in('session_id', newSessionIds);
+
+ if (exercicesData) {
+ for (const ex of exercicesData as any[]) {
+ const se = Array.isArray(ex.score_exercice) ? ex.score_exercice[0] : ex.score_exercice;
+ if (!se) continue;
+
+ if (ex.type === 'mecanique') {
+ scores.push({
+ id: ex.id,
+ exercice: 'Exercice mécanique',
+ question: '',
+ comprehension: se.reussi ? 100 : 0,
+ savoir: se.reussi ? 100 : 0,
+ redaction: 0,
+ correction: se.reussi ? 1 : 0,
+ score_calcule: se.reussi ? 1 : 0,
+ });
+ } else {
+ const cPts = [se.c1, se.c2, se.c3, se.c4].filter(Boolean).length;
+ const sPts = [se.s1, se.s2, se.s3, se.s4].filter(Boolean).length;
+ const rPts = [se.r1, se.r2, se.r3, se.r4].filter(Boolean).length;
+ const totalBools = cPts + sPts + rPts + (se.correction ? 1 : 0);
+ scores.push({
+ id: ex.id,
+ exercice: 'Exercice chaotique',
+ question: '',
+ comprehension: (cPts / 4) * 100,
+ savoir: (sPts / 4) * 100,
+ redaction: (rPts / 4) * 100,
+ correction: se.correction ? 1 : 0,
+ score_calcule: totalBools / 10,
+ });
+ }
+ }
+ }
+ }
+
+ // ── 5. Calcul des statistiques ──
  setScoresLocaux(scores);
 
- // Calculer le score global (score moyen entre 0 et 1.3)
+ if (scores.length > 0) {
  const total = scores.reduce((acc, s) => acc + s.score_calcule, 0);
- const scoreMoyen = scores.length > 0 ? total / scores.length : 0;
- 
- setScoreGlobal(scoreMoyen * 100); // Multiplier par 100 pour garder la compatibilité avec l'affichage
+ setScoreGlobal((total / scores.length) * 100);
  setScoreMax(scores.length * 1.3);
-
- // Calculer les scores moyens par composante
- const scoreComprehensionCalc = scores.length > 0
- ? scores.reduce((acc, s) => acc + s.comprehension, 0) / (scores.length * 100)
- : 0;
-
- const scoreSavoirCalc = scores.length > 0
- ? scores.reduce((acc, s) => acc + s.savoir, 0) / (scores.length * 100)
- : 0;
-
- const scoreRedactionCalc = scores.length > 0
- ? scores.reduce((acc, s) => acc + s.redaction, 0) / (scores.length * 100)
- : 0;
-
- setScoreComprehension(scoreComprehensionCalc);
- setScoreSavoir(scoreSavoirCalc);
- setScoreRedaction(scoreRedactionCalc);
+ setScoreComprehension(scores.reduce((acc, s) => acc + s.comprehension, 0) / (scores.length * 100));
+ setScoreSavoir(scores.reduce((acc, s) => acc + s.savoir, 0) / (scores.length * 100));
+ setScoreRedaction(scores.reduce((acc, s) => acc + s.redaction, 0) / (scores.length * 100));
  }
 
- // Calculer volume de travail
- setNbSessions(sessionsFiltered.length);
- setTempsTotal(sessionsFiltered.reduce((acc: number, s: any) => acc + (s.temps || 0), 0));
- }
- }
+ setNbSessions(allSessions.length);
+ setTempsTotal(allSessions.reduce((acc: number, s: any) => acc + (s.temps || 0), 0));
 
  setLoading(false);
  } catch (error) {

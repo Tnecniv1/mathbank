@@ -52,17 +52,40 @@ function wedgePath(a1,a2,r1,r2){
   return `M${x1},${y1}L${x2},${y2}A${r2},${r2} 0 0,1 ${x3},${y3}L${x4},${y4}A${r1},${r1} 0 0,0 ${x1},${y1}Z`;
 }
 
+// ─── Nouveau format ────────────────────────────────────────────────
 function newSheet(id){
-  return {id, createdAt:Date.now(), meta:{prenom:"",nom:"",feuille:"",exo:"",note:"",sessions:[]}, crosses:{}, validated:{}, mecanique:[], closed:false};
+  return {id, createdAt:Date.now(), meta:{prenom:"",nom:"",feuille:"",note:"",sessions:[]}, exercices:[], closed:false};
 }
 
-// ─── Storage localStorage (fallback hors ligne) ───────────────────
+// Rétrocompat : ancien format (crosses/validated/mecanique) → nouveau (exercices[])
+function migrateSheet(sheet){
+  if(sheet.exercices) return sheet;
+  const exercices = [];
+  exercices.push({
+    id: sheet.id+'_c0',
+    type: 'chaotique',
+    reference: sheet.meta&&sheet.meta.exo ? sheet.meta.exo : '',
+    crosses: sheet.crosses || {},
+    validated: sheet.validated || {},
+  });
+  if((sheet.mecanique||[]).length > 0){
+    exercices.push({
+      id: sheet.id+'_m0',
+      type: 'mecanique',
+      reference: '',
+      observations: (sheet.mecanique||[]).map(m=>({reference:m.reference||'', reussi:m.reussi!=null?m.reussi:null})),
+    });
+  }
+  return {...sheet, exercices};
+}
+
+// ─── Storage localStorage ──────────────────────────────────────────
 const store = {
   get(key){ try{ const v=localStorage.getItem(key); return v?JSON.parse(v):null; }catch{return null;} },
   set(key,val){ try{ localStorage.setItem(key,JSON.stringify(val)); }catch{} },
 };
 
-// ─── DB Supabase ──────────────────────────────────────────────────
+// ─── DB Supabase ───────────────────────────────────────────────────
 let currentUserId  = null;
 let isOnline       = navigator.onLine;
 let _setSaveStatus = () => {};
@@ -72,18 +95,18 @@ let saveTimer      = null;
 
 const db = {
   async loadAll() {
-    if (!isOnline) return store.get('grille-sheets') || [];
+    if (!isOnline) return (store.get('grille-sheets')||[]).map(migrateSheet);
     try {
       const { data, error } = await sb
         .from('grille_observation')
         .select('id, data, closed, updated_at')
         .order('updated_at', { ascending: false });
       if (error) throw error;
-      return (data || []).map(row => ({ ...row.data, id: row.id, closed: !!row.closed }));
+      return (data||[]).map(row => migrateSheet({ ...row.data, id: row.id, closed: !!row.closed }));
     } catch {
       isOnline = false;
       _setSaveStatus('offline');
-      return store.get('grille-sheets') || [];
+      return (store.get('grille-sheets')||[]).map(migrateSheet);
     }
   },
   scheduleSave(sheet) {
@@ -122,10 +145,10 @@ const db = {
 window.addEventListener('online',  () => { isOnline = true; db.syncOnline(); });
 window.addEventListener('offline', () => { isOnline = false; _setSaveStatus('offline'); });
 
-// ─── Export JSON ──────────────────────────────────────────────────
+// ─── Export / Import ───────────────────────────────────────────────
 function exportSheet(sheet){
-  const name = [sheet.meta.feuille,sheet.meta.exo].filter(Boolean).join("_").replace(/\s+/g,"-") || `grille-${sheet.id}`;
-  const payload = {version:"1.0", type:"grille-competences", exportedAt:new Date().toISOString(), ...sheet};
+  const name = (sheet.meta.feuille||'').replace(/\s+/g,"-") || `grille-${sheet.id}`;
+  const payload = {version:"2.0", type:"grille-competences", exportedAt:new Date().toISOString(), ...sheet};
   const blob = new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
@@ -139,13 +162,13 @@ function importSheet(file, onOk, onErr){
     try{
       const d=JSON.parse(e.target.result);
       if(d.type!=="grille-competences") throw new Error();
-      onOk({...d, id:Date.now().toString()});
+      onOk(migrateSheet({...d, id:Date.now().toString()}));
     }catch{ onErr("Fichier invalide ou non reconnu."); }
   };
   r.readAsText(file);
 }
 
-// ─── Croix SVG ───────────────────────────────────────────────────
+// ─── Croix SVG ────────────────────────────────────────────────────
 function Cross({x,y,color,onRemove}){
   const s=7;
   return React.createElement("g",{onClick:onRemove,style:{cursor:"pointer"}},
@@ -155,172 +178,244 @@ function Cross({x,y,color,onRemove}){
   );
 }
 
-// ─── Éditeur de roue ─────────────────────────────────────────────
+// ─── Éditeur de roue ──────────────────────────────────────────────
 function WheelEditor({sheet, onChange}){
-  const svgRef=useRef(null);
-  const [editMeta,setEditMeta]=useState(false);
-  const [localMeta,setLocalMeta]=useState(sheet.meta);
+  const svgRef = useRef(null);
+  const [editMeta, setEditMeta] = useState(false);
+  const [localMeta, setLocalMeta] = useState(sheet.meta);
 
-  const R_BADGE = R_OUT - 18;
+  const exercices = sheet.exercices || [];
+  const [activeExoId, setActiveExoId] = useState(exercices.length > 0 ? exercices[0].id : null);
+  const activeExo = exercices.find(e => e.id === activeExoId) || null;
 
-  const toggleValidated=useCallback((wedgeId,e)=>{
-    e.stopPropagation();
-    onChange(p=>{ const v={...(p.validated||{})}; v[wedgeId]=!v[wedgeId]; return {...p,validated:v}; });
-  },[onChange]);
+  const updateActiveExo = useCallback((fn) => {
+    onChange(p => ({
+      ...p,
+      exercices: (p.exercices||[]).map(e => e.id === activeExoId ? fn(e) : e),
+    }));
+  }, [onChange, activeExoId]);
 
-  const handleClick=useCallback(e=>{
-    const svg=svgRef.current;
-    const rect=svg.getBoundingClientRect();
-    const mx=(e.clientX-rect.left)*(W/rect.width);
-    const my=(e.clientY-rect.top)*(H/rect.height);
-    const dx=mx-CX, dy=my-CY;
-    const r=Math.sqrt(dx*dx+dy*dy);
-    if(r<R_IN||r>R_OUT) return;
-    if(r > R_OUT) return; // hors roue
-    const deg=(Math.atan2(dy,dx)*180)/Math.PI;
-    const norm=x=>((x%360)+360)%360;
-    const wedge=WEDGES.find(w=>{ const na=norm(deg-w.a1),sp=norm(w.a2-w.a1); return na>=0&&na<sp; });
-    if(!wedge) return;
+  const addChaotiqueExo = () => {
     if(sheet.closed) return;
-    onChange(p=>{ const c={...p.crosses}; c[wedge.id]=[...(c[wedge.id]||[]),{x:mx,y:my}]; return {...p,crosses:c}; });
-  },[onChange]);
-
-  const handleTouch=useCallback(e=>{
-    e.preventDefault();
-    const t=e.changedTouches[0];
-    handleClick({clientX:t.clientX,clientY:t.clientY});
-  },[handleClick]);
-
-  const remove=(wid,idx)=>{
-    onChange(p=>{ const arr=[...(p.crosses[wid]||[])]; arr.splice(idx,1); return {...p,crosses:{...p.crosses,[wid]:arr}}; });
+    const id = Date.now().toString();
+    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'chaotique',reference:'',crosses:{},validated:{}}]}));
+    setActiveExoId(id);
   };
 
-  const saveMeta=()=>{ onChange(p=>({...p,meta:localMeta})); setEditMeta(false); };
+  const addMecaniqueExo = () => {
+    if(sheet.closed) return;
+    const id = Date.now().toString();
+    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'mecanique',reference:'',observations:[]}]}));
+    setActiveExoId(id);
+  };
 
-  const counts=SECTORS.map(s=>({...s,total:WEDGES.filter(w=>w.sectorKey===s.key).reduce((a,w)=>a+(sheet.crosses[w.id]?.length||0),0)}));
+  const removeExo = (exoId) => {
+    if(sheet.closed) return;
+    const remaining = exercices.filter(e => e.id !== exoId);
+    onChange(p => ({...p, exercices:(p.exercices||[]).filter(e => e.id !== exoId)}));
+    if(activeExoId === exoId) setActiveExoId(remaining.length > 0 ? remaining[0].id : null);
+  };
 
-  const [activeTab, setActiveTab] = useState("chaotique");
-  const mecanique = sheet.mecanique || [];
-  const addMeca = () => { if(sheet.closed) return; onChange(p=>({...p, mecanique:[...(p.mecanique||[]), {reference:"", reussi:null}]})); };
-  const updateMeca = (idx, patch) => { if(sheet.closed) return; onChange(p=>{ const m=[...(p.mecanique||[])]; m[idx]={...m[idx],...patch}; return {...p,mecanique:m}; }); };
-  const removeMeca = (idx) => { if(sheet.closed) return; onChange(p=>{ const m=[...(p.mecanique||[])]; m.splice(idx,1); return {...p,mecanique:m}; }); };
+  const toggleValidated = useCallback((wedgeId, evt) => {
+    evt.stopPropagation();
+    updateActiveExo(e => { const v={...(e.validated||{})}; v[wedgeId]=!v[wedgeId]; return {...e,validated:v}; });
+  }, [updateActiveExo]);
 
-  const svgProps={
-    ref:svgRef,viewBox:`0 0 ${W} ${H}`,width:"100%",
-    onClick:handleClick,
-    onTouchEnd:handleTouch,
-    style:{display:"block",cursor:"crosshair",touchAction:"none"},
+  const handleClick = useCallback(evt => {
+    if(!activeExo || activeExo.type !== 'chaotique' || sheet.closed) return;
+    const svg = svgRef.current;
+    const rect = svg.getBoundingClientRect();
+    const mx = (evt.clientX-rect.left)*(W/rect.width);
+    const my = (evt.clientY-rect.top)*(H/rect.height);
+    const dx = mx-CX, dy = my-CY;
+    const r = Math.sqrt(dx*dx+dy*dy);
+    if(r<R_IN||r>R_OUT) return;
+    const deg = (Math.atan2(dy,dx)*180)/Math.PI;
+    const norm = x => ((x%360)+360)%360;
+    const wedge = WEDGES.find(w=>{ const na=norm(deg-w.a1),sp=norm(w.a2-w.a1); return na>=0&&na<sp; });
+    if(!wedge) return;
+    updateActiveExo(e => { const c={...e.crosses}; c[wedge.id]=[...(c[wedge.id]||[]),{x:mx,y:my}]; return {...e,crosses:c}; });
+  }, [activeExo, sheet.closed, updateActiveExo]);
+
+  const handleTouch = useCallback(evt => {
+    evt.preventDefault();
+    const t = evt.changedTouches[0];
+    handleClick({clientX:t.clientX, clientY:t.clientY});
+  }, [handleClick]);
+
+  const removeCross = (wid, idx) => {
+    updateActiveExo(e => { const arr=[...(e.crosses[wid]||[])]; arr.splice(idx,1); return {...e,crosses:{...e.crosses,[wid]:arr}}; });
+  };
+
+  const saveMeta = () => { onChange(p=>({...p,meta:localMeta})); setEditMeta(false); };
+
+  const addObs    = () => { if(sheet.closed) return; updateActiveExo(e => ({...e, observations:[...(e.observations||[]),{reference:'',reussi:null}]})); };
+  const updateObs = (idx,patch) => { if(sheet.closed) return; updateActiveExo(e => { const o=[...(e.observations||[])]; o[idx]={...o[idx],...patch}; return {...e,observations:o}; }); };
+  const removeObs = (idx) => { if(sheet.closed) return; updateActiveExo(e => { const o=[...(e.observations||[])]; o.splice(idx,1); return {...e,observations:o}; }); };
+
+  const crosses   = activeExo&&activeExo.crosses   ? activeExo.crosses   : {};
+  const validated = activeExo&&activeExo.validated ? activeExo.validated : {};
+  const counts    = SECTORS.map(s=>({...s, total:WEDGES.filter(w=>w.sectorKey===s.key).reduce((a,w)=>a+(crosses[w.id]&&crosses[w.id].length||0),0)}));
+
+  const svgProps = {
+    ref:svgRef, viewBox:`0 0 ${W} ${H}`, width:"100%",
+    onClick:handleClick, onTouchEnd:handleTouch,
+    style:{display:"block", cursor:activeExo&&activeExo.type==='chaotique'?"crosshair":"default", touchAction:"none"},
   };
 
   return React.createElement("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:12}},
-    // Toggle M | C + infos de référence
+
+    // ── Barre méta ──
     React.createElement("div",{style:{width:"100%",maxWidth:520,display:"flex",alignItems:"center",gap:10,marginBottom:4}},
-      React.createElement("div",{style:{display:"inline-flex",borderRadius:10,overflow:"hidden",border:"1px solid #D0C5B5",background:"#F5F0E8",flexShrink:0}},
-        React.createElement("button",{onClick:()=>setActiveTab("mecanique"),style:{padding:"8px 22px",fontSize:13,fontWeight:"600",fontFamily:"Georgia,serif",border:"none",cursor:"pointer",background:activeTab==="mecanique"?"#2C1810":"transparent",color:activeTab==="mecanique"?"#FDFAF6":"#8B7355"}},"M"),
-        React.createElement("button",{onClick:()=>setActiveTab("chaotique"),style:{padding:"8px 22px",fontSize:13,fontWeight:"600",fontFamily:"Georgia,serif",border:"none",cursor:"pointer",background:activeTab==="chaotique"?"#2C1810":"transparent",color:activeTab==="chaotique"?"#FDFAF6":"#8B7355"}},"C"),
-      ),
-      React.createElement("div",{onClick:()=>{ setEditMeta(true); setLocalMeta(sheet.meta); },style:{flex:1,background:"white",borderRadius:10,border:"1px solid #E0D5C5",padding:"8px 12px",cursor:"pointer",minWidth:0}},
+      React.createElement("div",{
+        onClick:()=>{ setEditMeta(true); setLocalMeta(sheet.meta); },
+        style:{flex:1,background:"white",borderRadius:10,border:"1px solid #E0D5C5",padding:"8px 12px",cursor:"pointer",minWidth:0},
+      },
         React.createElement("div",{style:{fontSize:12,fontWeight:"600",color:"#2C1810",fontFamily:"Georgia,serif",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},[sheet.meta.prenom,sheet.meta.nom].filter(Boolean).join(" ")||"—"),
-        React.createElement("div",{style:{fontSize:10,color:"#8B7355",fontFamily:"Georgia,serif",marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},[sheet.meta.feuille,sheet.meta.exo].filter(Boolean).join(" · ")||"Feuille — · Exo —"),
+        React.createElement("div",{style:{fontSize:10,color:"#8B7355",fontFamily:"Georgia,serif",marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},sheet.meta.feuille||"Feuille —"),
         React.createElement("div",{style:{fontSize:9,color:"#B0A090",fontFamily:"Georgia,serif",marginTop:1}},(sheet.meta.sessions||[]).length>0?`${(sheet.meta.sessions||[]).length} session${(sheet.meta.sessions||[]).length>1?"s":""}`:"Aucune session"),
       ),
       React.createElement("div",{style:{fontSize:14,color:"#C8BBA8",flexShrink:0}},"✎"),
     ),
-    // Panneau chaotique
-    activeTab==="chaotique" && React.createElement("div",{style:{width:"100%",maxWidth:520,display:"flex",flexDirection:"column",gap:12}},
-    // Roue
-    React.createElement("div",{style:{background:"#fff",borderRadius:16,boxShadow:"0 2px 20px rgba(0,0,0,0.08)",overflow:"hidden",border:"1px solid #E8E0D4",width:"100%"}},
-      React.createElement("svg",svgProps,
-        React.createElement("rect",{width:W,height:H,fill:"#FDFAF6"}),
-        ...WEDGES.map((w,i)=>React.createElement("path",{key:w.id,d:wedgePath(w.a1,w.a2,R_IN,R_OUT),fill:w.color,fillOpacity:i%2===0?0.09:0.04,stroke:w.color,strokeWidth:"0.8",strokeOpacity:"0.25"})),
-        ...SECTORS.map(s=>{ const [x,y]=pt(s.startAngle,R_OUT+10); return React.createElement("line",{key:s.key,x1:CX,y1:CY,x2:x,y2:y,stroke:s.color,strokeWidth:"2",strokeOpacity:"0.45"}); }),
-        ...[0.35,0.67,1].map(f=>React.createElement("circle",{key:f,cx:CX,cy:CY,r:R_IN+(R_OUT-R_IN)*f,fill:"none",stroke:"#C8BBA8",strokeWidth:"0.5",strokeDasharray:"3,5"})),
-        ...WEDGES.map(w=>{ const mid=(w.a1+w.a2)/2; const [lx,ly]=pt(mid,R_LABEL+30); return React.createElement("text",{key:w.id+"l",x:lx,y:ly,textAnchor:"middle",dominantBaseline:"middle",fontSize:"11.5",fontFamily:"Georgia,serif",fill:w.color,fontWeight:"700",style:{pointerEvents:"none",userSelect:"none"}},w.id); }),
-        ...SECTORS.map(s=>{ const [lx,ly]=pt(s.startAngle+60,R_LABEL+52); return React.createElement("text",{key:s.key+"sl",x:lx,y:ly,textAnchor:"middle",dominantBaseline:"middle",fontSize:"9.5",fontFamily:"Georgia,serif",fill:s.color,fontStyle:"italic",style:{pointerEvents:"none",userSelect:"none"}},s.label); }),
-        ...WEDGES.flatMap(w=>(sheet.crosses[w.id]||[]).map((c,idx)=>React.createElement(Cross,{key:`${w.id}-${idx}`,x:c.x,y:c.y,color:w.color,onRemove:e=>{ e.stopPropagation(); remove(w.id,idx); }}))),
-        ...WEDGES.map(w=>{
-          const mid=(w.a1+w.a2)/2;
-          const [bx,by]=pt(mid, R_OUT+20);
-          const validated=(sheet.validated||{})[w.id];
-          return React.createElement("g",{key:w.id+"badge",onClick:e=>toggleValidated(w.id,e),style:{cursor:"pointer"}},
-            React.createElement("circle",{cx:bx,cy:by,r:12,fill:validated?w.color:"#FDFAF6",stroke:w.color,strokeWidth:"1.8"}),
-            validated
-              ? React.createElement("text",{x:bx,y:by+0.5,textAnchor:"middle",dominantBaseline:"middle",fontSize:"12",fill:"white",fontWeight:"bold",style:{pointerEvents:"none",userSelect:"none"}},"✓")
-              : React.createElement("circle",{cx:bx,cy:by,r:4,fill:"none",stroke:w.color,strokeWidth:"1.2",opacity:"0.35"}),
+
+    // ── Liste des exercices ──
+    React.createElement("div",{style:{width:"100%",maxWidth:520,display:"flex",flexDirection:"column",gap:8}},
+      exercices.length > 0 && React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:6}},
+        ...exercices.map(exo => {
+          const sel = activeExoId === exo.id;
+          return React.createElement("div",{
+            key:exo.id,
+            onClick:()=>setActiveExoId(exo.id),
+            style:{display:"flex",alignItems:"center",gap:6,padding:"6px 10px",background:sel?"#2C1810":"white",border:`1.5px solid ${sel?"#2C1810":"#D0C5B5"}`,borderRadius:8,cursor:"pointer"},
+          },
+            React.createElement("span",{style:{fontSize:11,fontFamily:"Georgia,serif",color:sel?"#FDFAF6":"#2C1810",maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+              exo.reference||(exo.type==='chaotique'?'Roue':'Tableau')
+            ),
+            React.createElement("span",{style:{fontSize:9,fontWeight:"bold",padding:"2px 5px",borderRadius:4,background:exo.type==='chaotique'?"#3D7FD4":"#7B5A3D",color:"white"}},
+              exo.type==='chaotique'?"C":"M"
+            ),
+            !sheet.closed && React.createElement("button",{
+              onClick:e=>{ e.stopPropagation(); removeExo(exo.id); },
+              style:{background:"transparent",border:"none",cursor:"pointer",color:sel?"#FDFAF6":"#C8BBA8",fontSize:12,padding:"0 2px",lineHeight:1},
+            },"✕"),
           );
         }),
-        React.createElement("circle",{cx:CX,cy:CY,r:R_IN,fill:"#FDFAF6",stroke:"#C8BBA8",strokeWidth:"1.5"}),
-        React.createElement("g",{onClick:e=>{ e.stopPropagation(); setEditMeta(true); setLocalMeta(sheet.meta); },style:{cursor:"pointer"}},
-          React.createElement("text",{x:CX,y:CY-20,textAnchor:"middle",fontSize:"9",fill:"#5A4A3A",fontFamily:"Georgia,serif",fontWeight:"600"},[sheet.meta.prenom,sheet.meta.nom].filter(Boolean).join(" ")||"—"),
-          React.createElement("text",{x:CX,y:CY-7,textAnchor:"middle",fontSize:"8.5",fill:"#8B7355",fontFamily:"Georgia,serif",fontStyle:"italic"},sheet.meta.feuille||"Feuille —"),
-          React.createElement("text",{x:CX,y:CY+6,textAnchor:"middle",fontSize:"8.5",fill:"#8B7355",fontFamily:"Georgia,serif"},sheet.meta.exo||"Exo —"),
-          React.createElement("text",{x:CX,y:CY+19,textAnchor:"middle",fontSize:"8",fill:"#B0A090",fontFamily:"Georgia,serif"},(sheet.meta.sessions||[]).length>0?`${(sheet.meta.sessions||[]).length} session${(sheet.meta.sessions||[]).length>1?"s":""}`:(sheet.meta.date||"")),
-          React.createElement("text",{x:CX,y:CY+22,textAnchor:"middle",fontSize:"8",fill:"#B0A090",fontFamily:"Georgia,serif",fontStyle:"italic"},"✎"),
-        ),
+      ),
+      exercices.length === 0 && React.createElement("div",{style:{textAlign:"center",padding:"20px",color:"#B0A090",fontStyle:"italic",fontSize:12,background:"white",borderRadius:10,border:"1px solid #E8E0D4"}},"Aucun exercice. Ajoutez une roue ou un tableau."),
+      !sheet.closed && React.createElement("div",{style:{display:"flex",gap:8}},
+        React.createElement("button",{onClick:addChaotiqueExo,style:{padding:"8px 14px",fontSize:12,background:"transparent",border:"1.5px dashed #3D7FD4",borderRadius:8,color:"#3D7FD4",cursor:"pointer",fontFamily:"Georgia,serif"}},"+ Roue (C)"),
+        React.createElement("button",{onClick:addMecaniqueExo,style:{padding:"8px 14px",fontSize:12,background:"transparent",border:"1.5px dashed #7B5A3D",borderRadius:8,color:"#7B5A3D",cursor:"pointer",fontFamily:"Georgia,serif"}},"+ Tableau (M)"),
       ),
     ),
-    // Compteurs
-    React.createElement("div",{style:{width:"100%",maxWidth:520,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
-      ...counts.map(s=>React.createElement("div",{key:s.key,style:{background:"white",borderRadius:10,padding:"12px 8px",textAlign:"center",border:`1.5px solid ${s.color}33`}},
-        React.createElement("div",{style:{fontSize:26,fontWeight:"bold",color:s.color,fontFamily:"Georgia,serif"}},s.total),
-        React.createElement("div",{style:{fontSize:9.5,color:"#8B7355",marginTop:2,fontFamily:"Georgia,serif"}},s.label),
-      )),
+
+    // ── Éditeur exercice actif ──
+    activeExo && React.createElement("div",{style:{width:"100%",maxWidth:520,display:"flex",flexDirection:"column",gap:12}},
+
+      // Champ référence
+      React.createElement("input",{
+        value:activeExo.reference,
+        onChange:e=>updateActiveExo(ex=>({...ex,reference:e.target.value})),
+        placeholder:activeExo.type==='chaotique'?"Référence (ex: Exo 3)":"Référence (ex: Tableau 1)",
+        disabled:sheet.closed,
+        style:{width:"100%",padding:"8px 12px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:"#2C1810",background:sheet.closed?"#F5F0E8":"#FDFAF6",outline:"none",fontFamily:"Georgia,serif"},
+      }),
+
+      // ── Roue SVG (chaotique) ──
+      activeExo.type==='chaotique' && React.createElement("div",{style:{background:"#fff",borderRadius:16,boxShadow:"0 2px 20px rgba(0,0,0,0.08)",overflow:"hidden",border:"1px solid #E8E0D4",width:"100%"}},
+        React.createElement("svg",svgProps,
+          React.createElement("rect",{width:W,height:H,fill:"#FDFAF6"}),
+          ...WEDGES.map((w,i)=>React.createElement("path",{key:w.id,d:wedgePath(w.a1,w.a2,R_IN,R_OUT),fill:w.color,fillOpacity:i%2===0?0.09:0.04,stroke:w.color,strokeWidth:"0.8",strokeOpacity:"0.25"})),
+          ...SECTORS.map(s=>{ const [x,y]=pt(s.startAngle,R_OUT+10); return React.createElement("line",{key:s.key,x1:CX,y1:CY,x2:x,y2:y,stroke:s.color,strokeWidth:"2",strokeOpacity:"0.45"}); }),
+          ...[0.35,0.67,1].map(f=>React.createElement("circle",{key:f,cx:CX,cy:CY,r:R_IN+(R_OUT-R_IN)*f,fill:"none",stroke:"#C8BBA8",strokeWidth:"0.5",strokeDasharray:"3,5"})),
+          ...WEDGES.map(w=>{ const mid=(w.a1+w.a2)/2; const [lx,ly]=pt(mid,R_LABEL+30); return React.createElement("text",{key:w.id+"l",x:lx,y:ly,textAnchor:"middle",dominantBaseline:"middle",fontSize:"11.5",fontFamily:"Georgia,serif",fill:w.color,fontWeight:"700",style:{pointerEvents:"none",userSelect:"none"}},w.id); }),
+          ...SECTORS.map(s=>{ const [lx,ly]=pt(s.startAngle+60,R_LABEL+52); return React.createElement("text",{key:s.key+"sl",x:lx,y:ly,textAnchor:"middle",dominantBaseline:"middle",fontSize:"9.5",fontFamily:"Georgia,serif",fill:s.color,fontStyle:"italic",style:{pointerEvents:"none",userSelect:"none"}},s.label); }),
+          ...WEDGES.flatMap(w=>(crosses[w.id]||[]).map((c,idx)=>React.createElement(Cross,{key:`${w.id}-${idx}`,x:c.x,y:c.y,color:w.color,onRemove:e=>{ e.stopPropagation(); removeCross(w.id,idx); }}))),
+          ...WEDGES.map(w=>{
+            const mid=(w.a1+w.a2)/2;
+            const [bx,by]=pt(mid,R_OUT+20);
+            const val=validated[w.id];
+            return React.createElement("g",{key:w.id+"badge",onClick:e=>toggleValidated(w.id,e),style:{cursor:"pointer"}},
+              React.createElement("circle",{cx:bx,cy:by,r:12,fill:val?w.color:"#FDFAF6",stroke:w.color,strokeWidth:"1.8"}),
+              val
+                ? React.createElement("text",{x:bx,y:by+0.5,textAnchor:"middle",dominantBaseline:"middle",fontSize:"12",fill:"white",fontWeight:"bold",style:{pointerEvents:"none",userSelect:"none"}},"✓")
+                : React.createElement("circle",{cx:bx,cy:by,r:4,fill:"none",stroke:w.color,strokeWidth:"1.2",opacity:"0.35"}),
+            );
+          }),
+          React.createElement("circle",{cx:CX,cy:CY,r:R_IN,fill:"#FDFAF6",stroke:"#C8BBA8",strokeWidth:"1.5"}),
+          React.createElement("g",{onClick:e=>{ e.stopPropagation(); setEditMeta(true); setLocalMeta(sheet.meta); },style:{cursor:"pointer"}},
+            React.createElement("text",{x:CX,y:CY-20,textAnchor:"middle",fontSize:"9",fill:"#5A4A3A",fontFamily:"Georgia,serif",fontWeight:"600"},[sheet.meta.prenom,sheet.meta.nom].filter(Boolean).join(" ")||"—"),
+            React.createElement("text",{x:CX,y:CY-7,textAnchor:"middle",fontSize:"8.5",fill:"#8B7355",fontFamily:"Georgia,serif",fontStyle:"italic"},sheet.meta.feuille||"Feuille —"),
+            React.createElement("text",{x:CX,y:CY+6,textAnchor:"middle",fontSize:"8.5",fill:"#8B7355",fontFamily:"Georgia,serif"},activeExo.reference||"Exo —"),
+            React.createElement("text",{x:CX,y:CY+19,textAnchor:"middle",fontSize:"8",fill:"#B0A090",fontFamily:"Georgia,serif"},(sheet.meta.sessions||[]).length>0?`${(sheet.meta.sessions||[]).length} session${(sheet.meta.sessions||[]).length>1?"s":""}`:sheet.meta.date||""),
+            React.createElement("text",{x:CX,y:CY+32,textAnchor:"middle",fontSize:"8",fill:"#B0A090",fontFamily:"Georgia,serif",fontStyle:"italic"},"✎"),
+          ),
+        ),
+      ),
+
+      // Compteurs (chaotique)
+      activeExo.type==='chaotique' && React.createElement("div",{style:{width:"100%",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
+        ...counts.map(s=>React.createElement("div",{key:s.key,style:{background:"white",borderRadius:10,padding:"12px 8px",textAlign:"center",border:`1.5px solid ${s.color}33`}},
+          React.createElement("div",{style:{fontSize:26,fontWeight:"bold",color:s.color,fontFamily:"Georgia,serif"}},s.total),
+          React.createElement("div",{style:{fontSize:9.5,color:"#8B7355",marginTop:2,fontFamily:"Georgia,serif"}},s.label),
+        )),
+      ),
+
+      // Note (chaotique)
+      activeExo.type==='chaotique' && sheet.meta.note && React.createElement("div",{style:{background:"white",borderRadius:10,padding:"12px 14px",border:"1px solid #E8E0D4",fontSize:13,color:"#5A4A3A",fontStyle:"italic",lineHeight:1.5}},
+        `"${sheet.meta.note}"`
+      ),
+
+      // ── Tableau (mécanique) ──
+      activeExo.type==='mecanique' && React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:10}},
+        (activeExo.observations||[]).length===0 && React.createElement("div",{style:{textAlign:"center",padding:"40px 20px",color:"#B0A090",fontStyle:"italic",fontSize:13,background:"white",borderRadius:14,border:"1px solid #E8E0D4"}},"Aucune observation mécanique."),
+        ...(activeExo.observations||[]).map((m,i)=>React.createElement("div",{key:i,style:{background:"white",borderRadius:12,border:"1px solid #E8E0D4",padding:"14px 16px",display:"flex",alignItems:"center",gap:10}},
+          React.createElement("input",{value:m.reference,onChange:e=>updateObs(i,{reference:e.target.value}),placeholder:"Réf. (ex: Q3)",disabled:sheet.closed,style:{flex:1,padding:"8px 10px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:"#2C1810",background:sheet.closed?"#F5F0E8":"#FDFAF6",outline:"none",fontFamily:"Georgia,serif"}}),
+          React.createElement("button",{onClick:()=>updateObs(i,{reussi:true}),disabled:sheet.closed,style:{padding:"8px 14px",fontSize:16,borderRadius:8,border:"2px solid",borderColor:m.reussi===true?"#3DAF6B":"#D0C5B5",background:m.reussi===true?"#F0FBF4":"white",color:m.reussi===true?"#2A8050":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"}},"✓"),
+          React.createElement("button",{onClick:()=>updateObs(i,{reussi:false}),disabled:sheet.closed,style:{padding:"8px 14px",fontSize:16,borderRadius:8,border:"2px solid",borderColor:m.reussi===false?"#D4503D":"#D0C5B5",background:m.reussi===false?"#FFF0EE":"white",color:m.reussi===false?"#C03020":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"}},"✗"),
+          !sheet.closed && React.createElement("button",{onClick:()=>removeObs(i),style:{background:"transparent",border:"none",color:"#C8BBA8",cursor:"pointer",fontSize:15,padding:"4px 6px"}},"✕"),
+        )),
+        !sheet.closed && React.createElement("button",{onClick:addObs,style:{padding:"11px",background:"transparent",border:"1.5px dashed #C8BBA8",borderRadius:10,color:"#8B7355",cursor:"pointer",fontFamily:"Georgia,serif",fontSize:13}},"+ Ajouter une observation"),
+      ),
     ),
-    // Note
-    sheet.meta.note && React.createElement("div",{style:{width:"100%",maxWidth:520,background:"white",borderRadius:10,padding:"12px 14px",border:"1px solid #E8E0D4",fontSize:13,color:"#5A4A3A",fontStyle:"italic",lineHeight:1.5}},
-      `"${sheet.meta.note}"`
-    ),
-    // Boucler + Export
+
+    // ── Boucler / Bouclée / Export (niveau feuille) ──
     !sheet.closed && React.createElement("button",{
       onClick:()=>onChange(p=>({...p,closed:true,closedAt:Date.now()})),
-      style:{width:"100%",maxWidth:520,padding:"13px",background:"#5A4A3A",color:"#FDFAF6",border:"none",borderRadius:10,fontSize:13,cursor:"pointer",letterSpacing:"0.04em",display:"flex",alignItems:"center",justifyContent:"center",gap:8}
-    }, React.createElement("span",null,"⊙"), " Boucler la roue"),
+      style:{width:"100%",maxWidth:520,padding:"13px",background:"#5A4A3A",color:"#FDFAF6",border:"none",borderRadius:10,fontSize:13,cursor:"pointer",letterSpacing:"0.04em",display:"flex",alignItems:"center",justifyContent:"center",gap:8},
+    }, React.createElement("span",null,"⊙"), " Boucler la feuille"),
     sheet.closed && React.createElement("div",{style:{width:"100%",maxWidth:520,padding:"12px 16px",background:"#F0FBF4",border:"1.5px solid #3DAF6B",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}},
       React.createElement("div",null,
-        React.createElement("div",{style:{fontSize:12,fontWeight:"600",color:"#2A8050",fontFamily:"Georgia,serif"}},"✓ Roue bouclée"),
+        React.createElement("div",{style:{fontSize:12,fontWeight:"600",color:"#2A8050",fontFamily:"Georgia,serif"}},"✓ Feuille bouclée"),
         React.createElement("div",{style:{fontSize:10,color:"#5A9070",marginTop:2,fontFamily:"Georgia,serif"}},sheet.closedAt?`Le ${new Date(sheet.closedAt).toLocaleDateString("fr-FR",{day:"2-digit",month:"short",year:"2-digit"})} à ${new Date(sheet.closedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}`:""),
       ),
       React.createElement("button",{onClick:()=>onChange(p=>({...p,closed:false})),style:{background:"transparent",border:"1px solid #B0D0BB",borderRadius:7,color:"#5A9070",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"Georgia,serif",whiteSpace:"nowrap"}},"Rouvrir"),
     ),
     sheet.closed && React.createElement("button",{
       onClick:()=>exportSheet(sheet),
-      style:{width:"100%",maxWidth:520,padding:"13px",background:"#2C1810",color:"#FDFAF6",border:"none",borderRadius:10,fontSize:13,cursor:"pointer",letterSpacing:"0.04em",display:"flex",alignItems:"center",justifyContent:"center",gap:8}
+      style:{width:"100%",maxWidth:520,padding:"13px",background:"#2C1810",color:"#FDFAF6",border:"none",borderRadius:10,fontSize:13,cursor:"pointer",letterSpacing:"0.04em",display:"flex",alignItems:"center",justifyContent:"center",gap:8},
     }, React.createElement("span",null,"↓"), " Enregistrer dans Fichiers (.json)"),
-    ), // fin panneau chaotique
-    // Panneau mécanique
-    activeTab==="mecanique" && React.createElement("div",{style:{width:"100%",maxWidth:520,display:"flex",flexDirection:"column",gap:10}},
-      mecanique.length===0 && React.createElement("div",{style:{textAlign:"center",padding:"40px 20px",color:"#B0A090",fontStyle:"italic",fontSize:13,background:"white",borderRadius:14,border:"1px solid #E8E0D4"}},"Aucune observation mécanique."),
-      ...mecanique.map((m,i)=>React.createElement("div",{key:i,style:{background:"white",borderRadius:12,border:"1px solid #E8E0D4",padding:"14px 16px",display:"flex",alignItems:"center",gap:10}},
-        React.createElement("input",{value:m.reference,onChange:e=>updateMeca(i,{reference:e.target.value}),placeholder:"Réf. (ex: Q3)",disabled:sheet.closed,style:{flex:1,padding:"8px 10px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:"#2C1810",background:sheet.closed?"#F5F0E8":"#FDFAF6",outline:"none",fontFamily:"Georgia,serif"}}),
-        React.createElement("button",{onClick:()=>updateMeca(i,{reussi:true}),disabled:sheet.closed,style:{padding:"8px 14px",fontSize:16,borderRadius:8,border:"2px solid",borderColor:m.reussi===true?"#3DAF6B":"#D0C5B5",background:m.reussi===true?"#F0FBF4":"white",color:m.reussi===true?"#2A8050":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"}},"✓"),
-        React.createElement("button",{onClick:()=>updateMeca(i,{reussi:false}),disabled:sheet.closed,style:{padding:"8px 14px",fontSize:16,borderRadius:8,border:"2px solid",borderColor:m.reussi===false?"#D4503D":"#D0C5B5",background:m.reussi===false?"#FFF0EE":"white",color:m.reussi===false?"#C03020":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"}},"✗"),
-        !sheet.closed && React.createElement("button",{onClick:()=>removeMeca(i),style:{background:"transparent",border:"none",color:"#C8BBA8",cursor:"pointer",fontSize:15,padding:"4px 6px"}},"✕"),
-      )),
-      !sheet.closed && React.createElement("button",{onClick:addMeca,style:{padding:"11px",background:"transparent",border:"1.5px dashed #C8BBA8",borderRadius:10,color:"#8B7355",cursor:"pointer",fontFamily:"Georgia,serif",fontSize:13}},"+ Ajouter une observation"),
-    ),
-    // Modal meta
+
+    // ── Modal méta ──
     editMeta && React.createElement("div",{onClick:()=>setEditMeta(false),style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.38)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:200,padding:"20px 16px",overflowY:"auto"}},
       React.createElement("div",{onClick:e=>e.stopPropagation(),style:{background:"#FDFAF6",borderRadius:16,padding:"26px 24px 20px",width:"100%",maxWidth:340,boxShadow:"0 8px 40px rgba(0,0,0,0.18)",border:"1px solid #E0D5C5",marginTop:20}},
         React.createElement("div",{style:{fontSize:15,fontWeight:"bold",color:"#2C1810",marginBottom:18}},"Référence de la feuille"),
         ...[
-          {k:"prenom", l:"Prénom",    p:"ex: Marie",      type:"input"},
-          {k:"nom",    l:"Nom",       p:"ex: Dupont",     type:"input"},
-          {k:"feuille",l:"Feuille nº",p:"ex: Feuille 4",  type:"input"},
-          {k:"exo",    l:"Exercice",  p:"ex: Exo 3",      type:"input"},
-          {k:"note",   l:"Note libre",p:"Observation…",   type:"textarea"},
+          {k:"prenom", l:"Prénom",    p:"ex: Marie",     type:"input"},
+          {k:"nom",    l:"Nom",       p:"ex: Dupont",    type:"input"},
+          {k:"feuille",l:"Feuille nº",p:"ex: Feuille 4", type:"input"},
+          {k:"note",   l:"Note libre",p:"Observation…",  type:"textarea"},
         ].map(f=>React.createElement("div",{key:f.k,style:{marginBottom:14}},
           React.createElement("label",{style:{fontSize:10,color:"#8B7355",display:"block",marginBottom:4,letterSpacing:"0.1em",textTransform:"uppercase"}},f.l),
           f.type==="textarea"
             ? React.createElement("textarea",{value:localMeta[f.k]||"",onChange:e=>setLocalMeta(p=>({...p,[f.k]:e.target.value})),placeholder:f.p,rows:3,style:{width:"100%",padding:"8px 10px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:"#2C1810",background:"#FDFAF6",resize:"vertical",outline:"none"}})
             : React.createElement("input",{value:localMeta[f.k]||"",onChange:e=>setLocalMeta(p=>({...p,[f.k]:e.target.value})),placeholder:f.p,style:{width:"100%",padding:"8px 10px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:"#2C1810",background:"#FDFAF6",outline:"none"}}),
         )),
-        // Sessions
         React.createElement("div",{style:{marginBottom:14}},
           React.createElement("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}},
             React.createElement("label",{style:{fontSize:10,color:"#8B7355",letterSpacing:"0.1em",textTransform:"uppercase"}},"Sessions"),
             React.createElement("button",{
               onClick:()=>setLocalMeta(p=>({...p,sessions:[...(p.sessions||[]),{date:"",duree:""}]})),
-              style:{fontSize:11,background:"#2C1810",color:"#FDFAF6",border:"none",borderRadius:6,padding:"3px 10px",cursor:"pointer"}
+              style:{fontSize:11,background:"#2C1810",color:"#FDFAF6",border:"none",borderRadius:6,padding:"3px 10px",cursor:"pointer"},
             },"+ Ajouter"),
           ),
           (localMeta.sessions||[]).length===0 && React.createElement("div",{style:{fontSize:11,color:"#B0A090",fontStyle:"italic",padding:"6px 0"}},"Aucune session ajoutée"),
@@ -336,33 +431,43 @@ function WheelEditor({sheet, onChange}){
   );
 }
 
-// ─── Vignette ────────────────────────────────────────────────────
+// ─── Vignette ─────────────────────────────────────────────────────
 function SheetCard({sheet,onOpen,onDelete,onExport}){
-  const counts=SECTORS.map(s=>({...s,total:WEDGES.filter(w=>w.sectorKey===s.key).reduce((a,w)=>a+(sheet.crosses[w.id]?.length||0),0)}));
-  const total=counts.reduce((a,s)=>a+s.total,0);
-  const student=[sheet.meta.prenom,sheet.meta.nom].filter(Boolean).join(" ")||null;
-  const label=student?`${student} — ${[sheet.meta.feuille,sheet.meta.exo].filter(Boolean).join(" · ")||"Sans titre"}`:[sheet.meta.feuille,sheet.meta.exo].filter(Boolean).join(" · ")||"Sans titre";
-  const date=new Date(sheet.createdAt).toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
+  const exercices  = sheet.exercices || [];
+  const chaotiques = exercices.filter(e => e.type === 'chaotique');
+  const mecaniques = exercices.filter(e => e.type === 'mecanique');
+  const counts = SECTORS.map(s=>({...s,
+    total: chaotiques.reduce((t,exo)=>
+      t + WEDGES.filter(w=>w.sectorKey===s.key).reduce((a,w)=>a+(exo.crosses&&exo.crosses[w.id]?exo.crosses[w.id].length:0),0)
+    , 0)
+  }));
+  const crossTotal = counts.reduce((a,s)=>a+s.total,0);
+  const student = [sheet.meta.prenom,sheet.meta.nom].filter(Boolean).join(" ")||null;
+  const label = student
+    ? `${student} — ${sheet.meta.feuille||"Sans titre"}`
+    : sheet.meta.feuille||"Sans titre";
+  const date = new Date(sheet.createdAt).toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
   return React.createElement("div",{style:{background:"white",borderRadius:12,border:"1px solid #E0D5C5",padding:"14px 16px",display:"flex",alignItems:"center",gap:14,boxShadow:"0 1px 6px rgba(0,0,0,0.04)"}},
     React.createElement("div",{onClick:onOpen,style:{cursor:"pointer",flexShrink:0}},
       React.createElement("svg",{width:50,height:50,viewBox:`0 0 ${W} ${H}`},
         ...WEDGES.map((w,i)=>React.createElement("path",{key:w.id,d:wedgePath(w.a1,w.a2,R_IN,R_OUT),fill:w.color,fillOpacity:i%2===0?0.12:0.05,stroke:w.color,strokeWidth:"1.5",strokeOpacity:"0.3"})),
-        ...WEDGES.flatMap(w=>(sheet.crosses[w.id]||[]).map((c,idx)=>React.createElement("g",{key:`${w.id}-${idx}`},
+        ...WEDGES.flatMap(w=>chaotiques.flatMap(exo=>(exo.crosses&&exo.crosses[w.id]?exo.crosses[w.id]:[]).map((c,idx)=>React.createElement("g",{key:`${exo.id}-${w.id}-${idx}`},
           React.createElement("line",{x1:c.x-10,y1:c.y-10,x2:c.x+10,y2:c.y+10,stroke:w.color,strokeWidth:"5",strokeLinecap:"round"}),
           React.createElement("line",{x1:c.x+10,y1:c.y-10,x2:c.x-10,y2:c.y+10,stroke:w.color,strokeWidth:"5",strokeLinecap:"round"}),
-        ))),
+        )))),
         React.createElement("circle",{cx:CX,cy:CY,r:R_IN,fill:"#FDFAF6",stroke:"#C8BBA8",strokeWidth:"3"}),
       ),
     ),
     React.createElement("div",{onClick:onOpen,style:{flex:1,minWidth:0,cursor:"pointer"}},
       React.createElement("div",{style:{fontSize:13,fontWeight:"600",color:"#2C1810",marginBottom:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},label),
-      React.createElement("div",{style:{display:"flex",gap:10,alignItems:"center"}},
-        ...counts.map(s=>React.createElement("span",{key:s.key,style:{fontSize:11,color:s.color}},`${s.key} : ${s.total}`)),
-        (sheet.mecanique||[]).length>0 && React.createElement("span",{style:{fontSize:10,color:"#8B7355",background:"#F5F0E8",borderRadius:4,padding:"1px 5px"}},`M:${(sheet.mecanique||[]).length}`),
+      React.createElement("div",{style:{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
+        ...counts.map(s=>React.createElement("span",{key:s.key,style:{fontSize:11,color:s.color}},`${s.key}:${s.total}`)),
+        chaotiques.length>0 && React.createElement("span",{style:{fontSize:10,color:"#3D7FD4",background:"#EEF4FC",borderRadius:4,padding:"1px 5px"}},`${chaotiques.length}C`),
+        mecaniques.length>0 && React.createElement("span",{style:{fontSize:10,color:"#7B5A3D",background:"#F5EDE6",borderRadius:4,padding:"1px 5px"}},`${mecaniques.length}M`),
       ),
       React.createElement("div",{style:{display:"flex",alignItems:"center",gap:5,marginTop:3}},
         sheet.closed && React.createElement("span",{style:{fontSize:9,background:"#3DAF6B",color:"white",borderRadius:4,padding:"1px 6px",fontFamily:"Georgia,serif",letterSpacing:"0.03em"}},"bouclée"),
-        React.createElement("span",{style:{fontSize:10,color:"#B0A090"}},`${(sheet.meta.sessions||[]).length>0?(sheet.meta.sessions||[]).length+"×":sheet.meta.date||date} · ${total} croix`),
+        React.createElement("span",{style:{fontSize:10,color:"#B0A090"}},`${(sheet.meta.sessions||[]).length>0?(sheet.meta.sessions||[]).length+"×":date} · ${crossTotal} croix`),
       ),
       sheet.meta.note && React.createElement("div",{style:{fontSize:10,color:"#8B7355",marginTop:2,fontStyle:"italic",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},`"${sheet.meta.note}"`),
     ),
@@ -387,9 +492,7 @@ function LoginScreen({ onLogin }) {
     if (error) { setError(error.message); return; }
     onLogin(data.user);
   };
-  const inp = { width:"100%",padding:"10px 12px",border:"1px solid #D0C5B5",
-    borderRadius:8,fontSize:14,color:"#2C1810",background:"#FDFAF6",
-    outline:"none",fontFamily:"Georgia,serif" };
+  const inp = { width:"100%",padding:"10px 12px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:14,color:"#2C1810",background:"#FDFAF6",outline:"none",fontFamily:"Georgia,serif" };
   return React.createElement("div",{style:{minHeight:"100vh",background:"#F5F0E8",display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
     React.createElement("div",{style:{background:"white",borderRadius:16,padding:"32px 28px",width:"100%",maxWidth:340,boxShadow:"0 8px 40px rgba(0,0,0,0.1)",border:"1px solid #E0D5C5"}},
       React.createElement("div",{style:{fontSize:22,fontWeight:"bold",color:"#2C1810",marginBottom:4,fontFamily:"Georgia,serif"}},"Roue des compétences"),
@@ -410,7 +513,7 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-// ─── App ─────────────────────────────────────────────────────────
+// ─── App ──────────────────────────────────────────────────────────
 function App(){
   const [sheets,      setSheets]      = useState([]);
   const [activeId,    setActiveId]    = useState(null);
@@ -418,14 +521,14 @@ function App(){
   const [user,        setUser]        = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [saveStatus,  setSaveStatus]  = useState(null);
-  const importRef=useRef(null);
+  const importRef = useRef(null);
 
   useEffect(() => { _setSaveStatus = setSaveStatus; }, []);
   useEffect(() => { _currentSheets = sheets; }, [sheets]);
 
   useEffect(() => {
     sb.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) { currentUserId = session.user.id; setUser(session.user); }
+      if (session&&session.user) { currentUserId = session.user.id; setUser(session.user); }
       setAuthLoading(false);
     });
   }, []);
@@ -452,7 +555,7 @@ function App(){
   };
 
   const handleImport = e => {
-    const file = e.target.files?.[0]; if (!file) return;
+    const file = e.target.files&&e.target.files[0]; if (!file) return;
     importSheet(file, s => {
       setSheets(p => [s, ...p]); setActiveId(s.id); setError(null); db.saveNow(s);
     }, msg => setError(msg));
@@ -467,7 +570,7 @@ function App(){
   if (authLoading) return React.createElement("div",{style:{minHeight:"100vh",background:"#F5F0E8",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:"#8B7355",fontStyle:"italic",fontFamily:"Georgia,serif"}},"Chargement…");
   if (!user) return React.createElement(LoginScreen,{onLogin:(u)=>{ currentUserId=u.id; setUser(u); }});
 
-  const active=sheets.find(s=>s.id===activeId);
+  const active = sheets.find(s=>s.id===activeId);
 
   const saveIndicator =
     saveStatus === 'saving'  ? React.createElement("span",{style:{fontSize:11,color:"#8B7355",fontStyle:"italic"}},"Sauvegarde…") :
@@ -475,16 +578,16 @@ function App(){
     saveStatus === 'offline' ? React.createElement("span",{style:{fontSize:11,color:"#C06060"}},"⚠ Hors ligne") :
     null;
 
-  const topBar=React.createElement("div",{style:{position:"sticky",top:0,zIndex:50,background:"#FDFAF6",borderBottom:"1px solid #E0D5C5",padding:"14px 20px",display:"flex",alignItems:"center",gap:12,boxShadow:"0 1px 6px rgba(0,0,0,0.05)"}},
+  const topBar = React.createElement("div",{style:{position:"sticky",top:0,zIndex:50,background:"#FDFAF6",borderBottom:"1px solid #E0D5C5",padding:"14px 20px",display:"flex",alignItems:"center",gap:12,boxShadow:"0 1px 6px rgba(0,0,0,0.05)"}},
     active && React.createElement("button",{onClick:()=>setActiveId(null),style:{background:"transparent",border:"1px solid #D0C5B5",borderRadius:8,color:"#5A4A3A",cursor:"pointer",padding:"6px 12px",fontSize:12}},"← Retour"),
     React.createElement("div",{style:{flex:1}},
-      React.createElement("div",{style:{fontSize:10,letterSpacing:"0.12em",color:"#8B7355",textTransform:"uppercase"}},active?([active.meta.feuille,active.meta.exo].filter(Boolean).join(" · ")||"Sans titre"):"Mes feuilles"),
+      React.createElement("div",{style:{fontSize:10,letterSpacing:"0.12em",color:"#8B7355",textTransform:"uppercase"}},active?(active.meta.feuille||"Sans titre"):"Mes feuilles"),
       React.createElement("div",{style:{fontSize:17,fontWeight:"bold",color:"#2C1810",marginTop:1}},"Roue des compétences"),
     ),
     saveIndicator,
     !active && React.createElement("div",{style:{display:"flex",gap:8}},
       React.createElement("input",{ref:importRef,type:"file",accept:".json",onChange:handleImport,style:{display:"none"}}),
-      React.createElement("button",{onClick:()=>importRef.current?.click(),style:{background:"transparent",border:"1px solid #C0B5A5",color:"#5A4A3A",borderRadius:10,padding:"10px 14px",fontSize:13,cursor:"pointer"}},"↑ Importer"),
+      React.createElement("button",{onClick:()=>importRef.current&&importRef.current.click(),style:{background:"transparent",border:"1px solid #C0B5A5",color:"#5A4A3A",borderRadius:10,padding:"10px 14px",fontSize:13,cursor:"pointer"}},"↑ Importer"),
       React.createElement("button",{onClick:create,style:{background:"#2C1810",color:"#FDFAF6",border:"none",borderRadius:10,padding:"10px 18px",fontSize:13,cursor:"pointer"}},"+ Nouvelle feuille"),
     ),
     active && React.createElement("button",{onClick:()=>remove(active.id),style:{background:"transparent",border:"1px solid #E0C0BC",borderRadius:8,color:"#C06060",cursor:"pointer",padding:"6px 12px",fontSize:12}},"Supprimer"),
