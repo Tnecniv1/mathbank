@@ -74,6 +74,7 @@ function migrateSheet(sheet){
       type: 'mecanique',
       reference: '',
       observations: (sheet.mecanique||[]).map(m=>({reference:m.reference||'', reussi:m.reussi!=null?m.reussi:null})),
+      reussi: null,
     });
   }
   return {...sheet, exercices};
@@ -205,7 +206,7 @@ function WheelEditor({sheet, onChange}){
   const addMecaniqueExo = () => {
     if(sheet.closed) return;
     const id = Date.now().toString();
-    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'mecanique',reference:'',observations:[]}]}));
+    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'mecanique',reference:'',observations:[],reussi:null}]}));
     setActiveExoId(id);
   };
 
@@ -367,6 +368,20 @@ function WheelEditor({sheet, onChange}){
 
       // ── Tableau (mécanique) ──
       activeExo.type==='mecanique' && React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:10}},
+        // Résultat global
+        React.createElement("div",{style:{background:"white",borderRadius:12,border:"1px solid #E8E0D4",padding:"14px 16px",display:"flex",alignItems:"center",gap:12}},
+          React.createElement("span",{style:{fontSize:12,color:"#8B7355",fontFamily:"Georgia,serif",flexShrink:0}},"Résultat global"),
+          React.createElement("button",{
+            onClick:()=>updateActiveExo(e=>({...e,reussi:true})),
+            disabled:sheet.closed,
+            style:{padding:"10px 20px",fontSize:14,borderRadius:8,border:"2px solid",borderColor:activeExo.reussi===true?"#3DAF6B":"#D0C5B5",background:activeExo.reussi===true?"#F0FBF4":"white",color:activeExo.reussi===true?"#2A8050":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"},
+          },"✓ Succès"),
+          React.createElement("button",{
+            onClick:()=>updateActiveExo(e=>({...e,reussi:false})),
+            disabled:sheet.closed,
+            style:{padding:"10px 20px",fontSize:14,borderRadius:8,border:"2px solid",borderColor:activeExo.reussi===false?"#D4503D":"#D0C5B5",background:activeExo.reussi===false?"#FFF0EE":"white",color:activeExo.reussi===false?"#C03020":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"},
+          },"✗ Échec"),
+        ),
         (activeExo.observations||[]).length===0 && React.createElement("div",{style:{textAlign:"center",padding:"40px 20px",color:"#B0A090",fontStyle:"italic",fontSize:13,background:"white",borderRadius:14,border:"1px solid #E8E0D4"}},"Aucune observation mécanique."),
         ...(activeExo.observations||[]).map((m,i)=>React.createElement("div",{key:i,style:{background:"white",borderRadius:12,border:"1px solid #E8E0D4",padding:"14px 16px",display:"flex",alignItems:"center",gap:10}},
           React.createElement("input",{value:m.reference,onChange:e=>updateObs(i,{reference:e.target.value}),placeholder:"Réf. (ex: Q3)",disabled:sheet.closed,style:{flex:1,padding:"8px 10px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:"#2C1810",background:sheet.closed?"#F5F0E8":"#FDFAF6",outline:"none",fontFamily:"Georgia,serif"}}),
