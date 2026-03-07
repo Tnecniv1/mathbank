@@ -70,18 +70,20 @@ type SessionHistorique = {
   score_moy_chaos: number | null;
 };
 
+type ChaotiqueBools = {
+  c1: boolean; c2: boolean; c3: boolean; c4: boolean;
+  s1: boolean; s2: boolean; s3: boolean; s4: boolean;
+  r1: boolean; r2: boolean; r3: boolean; r4: boolean;
+};
+
 type RoueApercu = {
   nbSessions: number;
   mecaniques: { reference: string; reussi: boolean }[];
-  exo: string | null;
-  score: number | null;
-  bools: { c1: boolean; c2: boolean; c3: boolean; c4: boolean;
-           s1: boolean; s2: boolean; s3: boolean; s4: boolean;
-           r1: boolean; r2: boolean; r3: boolean; r4: boolean } | null;
+  chaotiques: { exo: string; score: number; bools: ChaotiqueBools }[];
   rawSessions: { date: string; duree: string }[];
 };
 
-type RoueSucces = { nb: number; exo: string | null; score: number | null; nbMeca: number };
+type RoueSucces = { nb: number; nbMeca: number; nbChaos: number };
 
 type RoueDB = {
   id: string;
@@ -702,9 +704,19 @@ export default function SessionsPage() {
     }
 
     let mecaniques: { reference: string; reussi: boolean }[] = [];
-    let exo: string | null = null;
-    let score: number | null = null;
-    let bools: RoueApercu['bools'] = null;
+    const chaotiques: RoueApercu['chaotiques'] = [];
+
+    const buildBools = (v: any): ChaotiqueBools => ({
+      c1: !!(v.C1), c2: !!(v.C2), c3: !!(v.C3), c4: !!(v.C4),
+      s1: !!(v.S1), s2: !!(v.S2), s3: !!(v.S3), s4: !!(v.S4),
+      r1: !!(v.R1), r2: !!(v.R2), r3: !!(v.R3), r4: !!(v.R4),
+    });
+    const calcScore = (b: ChaotiqueBools): number => {
+      const comp   = ([b.c1, b.c2, b.c3, b.c4].filter(Boolean).length / 4) * 100;
+      const savoir = ([b.s1, b.s2, b.s3, b.s4].filter(Boolean).length / 4) * 100;
+      const red    = ([b.r1, b.r2, b.r3, b.r4].filter(Boolean).length / 4) * 100;
+      return (50 * comp + 25 * savoir + 25 * red) / 100;
+    };
 
     if (Array.isArray(json.exercices)) {
       // ── Nouveau format ──
@@ -715,22 +727,13 @@ export default function SessionsPage() {
           : []
       );
 
-      const exoChaotique = json.exercices.find((e: any) => e.type === 'chaotique');
-      const validated = exoChaotique?.validated;
-      const hasChaotique = validated && Object.keys(validated).length > 0;
-      if (hasChaotique) {
-        exo = exoChaotique.reference || json.meta?.exo || null;
-        if (!exo) { setRoueErreur('Référence manquante dans l\'exercice chaotique'); return; }
-        const v = validated;
-        bools = {
-          c1: !!(v.C1), c2: !!(v.C2), c3: !!(v.C3), c4: !!(v.C4),
-          s1: !!(v.S1), s2: !!(v.S2), s3: !!(v.S3), s4: !!(v.S4),
-          r1: !!(v.R1), r2: !!(v.R2), r3: !!(v.R3), r4: !!(v.R4),
-        };
-        const comp   = ([bools.c1, bools.c2, bools.c3, bools.c4].filter(Boolean).length / 4) * 100;
-        const savoir = ([bools.s1, bools.s2, bools.s3, bools.s4].filter(Boolean).length / 4) * 100;
-        const red    = ([bools.r1, bools.r2, bools.r3, bools.r4].filter(Boolean).length / 4) * 100;
-        score = (50 * comp + 25 * savoir + 25 * red) / 100;
+      for (const e of json.exercices.filter((e: any) => e.type === 'chaotique')) {
+        const validated = e.validated;
+        if (!validated || Object.keys(validated).length === 0) continue;
+        const exoRef: string = e.reference || json.meta?.exo || '';
+        if (!exoRef) continue;
+        const bools = buildBools(validated);
+        chaotiques.push({ exo: exoRef, score: calcScore(bools), bools });
       }
     } else {
       // ── Ancien format ──
@@ -740,37 +743,28 @@ export default function SessionsPage() {
           : [];
 
       const validated = json.validated;
-      const hasChaotique = validated && Object.keys(validated).length > 0;
-      if (hasChaotique) {
-        exo = json.meta?.exo ?? null;
-        if (!exo) { setRoueErreur('meta.exo manquant dans cette roue'); return; }
-        const v = validated;
-        bools = {
-          c1: !!(v.C1), c2: !!(v.C2), c3: !!(v.C3), c4: !!(v.C4),
-          s1: !!(v.S1), s2: !!(v.S2), s3: !!(v.S3), s4: !!(v.S4),
-          r1: !!(v.R1), r2: !!(v.R2), r3: !!(v.R3), r4: !!(v.R4),
-        };
-        const comp   = ([bools.c1, bools.c2, bools.c3, bools.c4].filter(Boolean).length / 4) * 100;
-        const savoir = ([bools.s1, bools.s2, bools.s3, bools.s4].filter(Boolean).length / 4) * 100;
-        const red    = ([bools.r1, bools.r2, bools.r3, bools.r4].filter(Boolean).length / 4) * 100;
-        score = (50 * comp + 25 * savoir + 25 * red) / 100;
+      if (validated && Object.keys(validated).length > 0) {
+        const exoRef: string = json.meta?.exo ?? '';
+        if (!exoRef) { setRoueErreur('meta.exo manquant dans cette roue'); return; }
+        const bools = buildBools(validated);
+        chaotiques.push({ exo: exoRef, score: calcScore(bools), bools });
       }
     }
 
-    if (mecaniques.length === 0 && !hasChaotique) {
+    if (mecaniques.length === 0 && chaotiques.length === 0) {
       setRoueErreur('Aucun exercice trouvé dans cette roue');
       return;
     }
 
-    setRoueApercu({ nbSessions: sessions.length, mecaniques, exo, score, bools, rawSessions: sessions });
+    setRoueApercu({ nbSessions: sessions.length, mecaniques, chaotiques, rawSessions: sessions });
   }
 
   async function confirmerImportRoue() {
     if (!roueApercu || !membreParamId) return;
     setRoueImporting(true);
-    const { rawSessions, mecaniques, exo, score, bools } = roueApercu;
-    const feuilleMeca  = mecaniques.length > 0 ? (feuilles.meca[0]?.id ?? null) : null;
-    const feuilleChaos = bools ? (feuilles.chaos[0]?.id ?? null) : null;
+    const { rawSessions, mecaniques, chaotiques } = roueApercu;
+    const feuilleMeca  = mecaniques.length > 0  ? (feuilles.meca[0]?.id  ?? null) : null;
+    const feuilleChaos = chaotiques.length > 0  ? (feuilles.chaos[0]?.id ?? null) : null;
 
     // Sessions vides (toutes sauf la dernière)
     for (let i = 0; i < rawSessions.length - 1; i++) {
@@ -817,21 +811,21 @@ export default function SessionsPage() {
         }
       }
 
-      // Exercice chaotique
-      if (exo && bools) {
+      // Exercices chaotiques
+      for (const ch of chaotiques) {
         const { data: exerciceId } = await supabase.rpc('insert_exercice_chef', {
           p_session_id: sessionId as string,
           p_type:       'chaotique',
-          p_reference:  exo,
-          p_ordre:      ordreCount,
+          p_reference:  ch.exo,
+          p_ordre:      ordreCount++,
         });
         if (exerciceId) {
           await supabase.rpc('insert_score_exercice_chef', {
             p_exercice_id: exerciceId as string,
             p_reussi:      false,
-            p_c1: bools.c1, p_c2: bools.c2, p_c3: bools.c3, p_c4: bools.c4,
-            p_s1: bools.s1, p_s2: bools.s2, p_s3: bools.s3, p_s4: bools.s4,
-            p_r1: bools.r1, p_r2: bools.r2, p_r3: bools.r3, p_r4: bools.r4,
+            p_c1: ch.bools.c1, p_c2: ch.bools.c2, p_c3: ch.bools.c3, p_c4: ch.bools.c4,
+            p_s1: ch.bools.s1, p_s2: ch.bools.s2, p_s3: ch.bools.s3, p_s4: ch.bools.s4,
+            p_r1: ch.bools.r1, p_r2: ch.bools.r2, p_r3: ch.bools.r3, p_r4: ch.bools.r4,
             p_correction: false,
           });
         }
@@ -839,7 +833,7 @@ export default function SessionsPage() {
     }
 
     setRoueImporting(false);
-    setRoueSucces({ nb: rawSessions.length, exo, score, nbMeca: mecaniques.length });
+    setRoueSucces({ nb: rawSessions.length, nbMeca: mecaniques.length, nbChaos: chaotiques.length });
     setRoueApercu(null);
     chargerHistorique(targetUserId);
   }
@@ -992,12 +986,12 @@ export default function SessionsPage() {
                       <span className="font-semibold">{roueApercu.mecaniques.map(m => `${m.reference} ${m.reussi ? '✓' : '✗'}`).join(', ')}</span>
                     </p>
                   )}
-                  {roueApercu.exo && roueApercu.score !== null && (
-                    <p>
-                      <span className="text-ink-muted">Exercice chaotique {roueApercu.exo} — Score : </span>
-                      <span className="font-semibold text-accent">{Math.round(roueApercu.score)}%</span>
+                  {roueApercu.chaotiques.map((ch, i) => (
+                    <p key={i}>
+                      <span className="text-ink-muted">Exercice chaotique {ch.exo} — Score : </span>
+                      <span className="font-semibold text-accent">{Math.round(ch.score)}%</span>
                     </p>
-                  )}
+                  ))}
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -1022,7 +1016,7 @@ export default function SessionsPage() {
               <div className="bg-status-success/10 border border-status-success/30 rounded-lg p-4 space-y-1">
                 <p className="text-sm font-semibold text-status-success">✅ {roueSucces.nb} session{roueSucces.nb > 1 ? 's' : ''} insérée{roueSucces.nb > 1 ? 's' : ''} pour {membreNom}</p>
                 {roueSucces.nbMeca > 0 && <p className="text-sm text-ink-muted">{roueSucces.nbMeca} exercice{roueSucces.nbMeca > 1 ? 's' : ''} mécanique{roueSucces.nbMeca > 1 ? 's' : ''} inséré{roueSucces.nbMeca > 1 ? 's' : ''}</p>}
-                {roueSucces.exo && roueSucces.score !== null && <p className="text-sm text-ink-muted">Exercice {roueSucces.exo} — Score : {Math.round(roueSucces.score)}%</p>}
+                {roueSucces.nbChaos > 0 && <p className="text-sm text-ink-muted">{roueSucces.nbChaos} exercice{roueSucces.nbChaos > 1 ? 's' : ''} chaotique{roueSucces.nbChaos > 1 ? 's' : ''} inséré{roueSucces.nbChaos > 1 ? 's' : ''}</p>}
                 <button
                   onClick={() => setRoueSucces(null)}
                   className="mt-2 text-xs text-ink-muted underline"
