@@ -1336,7 +1336,7 @@ export default function AdminPage() {
  async function deleteItem(table: string, id: string, confirmMsg: string) {
  if (!confirm(confirmMsg)) return;
 
- // Supprime les progression_feuille + PDF + feuille pour un chapitre_id donné
+ // Supprime toutes les dépendances puis les feuilles d'un chapitre
  async function deleteFeuilleDuChapitre(chapitreId: string) {
    const { data: feuilles } = await supabase
      .from('feuille_entrainement')
@@ -1344,10 +1344,34 @@ export default function AdminPage() {
      .eq('chapitre_id', chapitreId);
    if (!feuilles || feuilles.length === 0) return;
    const feuilleIds = feuilles.map(f => f.id);
+
+   // 1. membre_equipe référençant ces feuilles
+   await supabase.from('membre_equipe').delete().in('feuille_autorisee_id', feuilleIds);
+
+   // 2. feuilles_autorisees
+   await supabase.from('feuilles_autorisees').delete().in('feuille_id', feuilleIds);
+
+   // 3. prerequis (côté feuille et côté prérequis)
+   await supabase.from('prerequis').delete().in('feuille_id', feuilleIds);
+   await supabase.from('prerequis').delete().in('prerequis_id', feuilleIds);
+
+   // 4. progression_feuille
    await supabase.from('progression_feuille').delete().in('feuille_id', feuilleIds);
+
+   // 5. session_entrainement : mettre les FK à NULL (pas DELETE)
+   await supabase.from('session_entrainement').update({ feuille_mecanique_id: null }).in('feuille_mecanique_id', feuilleIds);
+   await supabase.from('session_entrainement').update({ feuille_chaotique_id: null }).in('feuille_chaotique_id', feuilleIds);
+
+   // 6. session : même chose
+   await supabase.from('session').update({ feuille_mecanique_id: null }).in('feuille_mecanique_id', feuilleIds);
+   await supabase.from('session').update({ feuille_chaotique_id: null }).in('feuille_chaotique_id', feuilleIds);
+
+   // 7. PDFs du storage
    for (const f of feuilles) {
      if (f.pdf_url) await deletePdfFromStorage(f.pdf_url);
    }
+
+   // 8. feuilles elles-mêmes
    await supabase.from('feuille_entrainement').delete().in('id', feuilleIds);
  }
 
