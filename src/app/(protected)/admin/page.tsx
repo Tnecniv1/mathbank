@@ -1335,36 +1335,70 @@ export default function AdminPage() {
 
  async function deleteItem(table: string, id: string, confirmMsg: string) {
  if (!confirm(confirmMsg)) return;
- 
+
+ // Supprime les progression_feuille + PDF + feuille pour un chapitre_id donné
+ async function deleteFeuilleDuChapitre(chapitreId: string) {
+   const { data: feuilles } = await supabase
+     .from('feuille_entrainement')
+     .select('id, pdf_url')
+     .eq('chapitre_id', chapitreId);
+   if (!feuilles || feuilles.length === 0) return;
+   const feuilleIds = feuilles.map(f => f.id);
+   await supabase.from('progression_feuille').delete().in('feuille_id', feuilleIds);
+   for (const f of feuilles) {
+     if (f.pdf_url) await deletePdfFromStorage(f.pdf_url);
+   }
+   await supabase.from('feuille_entrainement').delete().in('id', feuilleIds);
+ }
+
  let chapitreId: string | null = null;
- 
- // Si c'est une feuille, supprimer d'abord le PDF du storage
+
  if (table === 'feuille_entrainement') {
- const feuille = niveaux
- .flatMap(n => n.sujets || [])
- .flatMap(s => s.chapitres || [])
- .flatMap(c => c.feuilles || [])
- .find(f => f.id === id);
- 
- if (feuille) {
- chapitreId = feuille.chapitre_id; // Sauvegarder le chapitre_id
- 
- if (feuille.pdf_url) {
- await deletePdfFromStorage(feuille.pdf_url);
+   const feuille = niveaux
+     .flatMap(n => n.sujets || [])
+     .flatMap(s => s.chapitres || [])
+     .flatMap(c => c.feuilles || [])
+     .find(f => f.id === id);
+
+   if (feuille) {
+     chapitreId = feuille.chapitre_id;
+     // Supprimer les progressions liées avant la feuille
+     await supabase.from('progression_feuille').delete().eq('feuille_id', id);
+     if (feuille.pdf_url) await deletePdfFromStorage(feuille.pdf_url);
+   }
+
+   const { error } = await supabase.from('feuille_entrainement').delete().eq('id', id);
+   if (!error && chapitreId) await recalculerOrdresChapitre(chapitreId);
+   if (!error) await loadData();
+   return;
  }
+
+ if (table === 'chapitre') {
+   await deleteFeuilleDuChapitre(id);
+   const { error } = await supabase.from('chapitre').delete().eq('id', id);
+   if (!error) await loadData();
+   return;
  }
+
+ if (table === 'sujet') {
+   const { data: chapitres } = await supabase
+     .from('chapitre')
+     .select('id')
+     .eq('sujet_id', id);
+   for (const ch of chapitres || []) {
+     await deleteFeuilleDuChapitre(ch.id);
+   }
+   if (chapitres && chapitres.length > 0) {
+     await supabase.from('chapitre').delete().eq('sujet_id', id);
+   }
+   const { error } = await supabase.from('sujet').delete().eq('id', id);
+   if (!error) await loadData();
+   return;
  }
- 
+
+ // Autres tables (niveau, …) : suppression directe
  const { error } = await supabase.from(table).delete().eq('id', id);
- 
- if (!error) {
- // Si c'est une feuille, recalculer les ordres du chapitre
- if (table === 'feuille_entrainement' && chapitreId) {
- await recalculerOrdresChapitre(chapitreId);
- }
- 
- await loadData();
- }
+ if (!error) await loadData();
  }
 
  function openModal(type: 'niveau' | 'sujet' | 'chapitre' | 'feuille', item?: any, parent?: string) {
