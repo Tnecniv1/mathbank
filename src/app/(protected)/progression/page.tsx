@@ -366,7 +366,7 @@ export default function TableauProgression() {
  }
 
  // Regrouper en paquets de 30 questions consécutives
- const TAILLE_PAQUET = 30;
+ const TAILLE_PAQUET = 6;
 
  function groupEnPaquets(questions: { score: number; date: string }[]): ScoreParPaquet[] {
    const paquets: ScoreParPaquet[] = [];
