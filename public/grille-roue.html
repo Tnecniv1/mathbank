@@ -213,10 +213,10 @@ function WheelEditor({sheet, onChange}){
       });
   }, [sheet.meta.user_id]);
 
-  useEffect(() => { setUndoStack([]); }, [activeExoId]);
-
   const exercices = sheet.exercices || [];
   const [activeExoId, setActiveExoId] = useState(exercices.length > 0 ? exercices[0].id : null);
+
+  useEffect(() => { setUndoStack([]); }, [activeExoId]);
   const activeExo = exercices.find(e => e.id === activeExoId) || null;
 
   const updateActiveExo = useCallback((fn) => {
