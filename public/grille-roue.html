@@ -190,10 +190,10 @@ function WheelEditor({sheet, onChange}){
   const [undoStack, setUndoStack] = useState([]);
 
   useEffect(() => {
-    sb.from('profil').select('user_id,prenom,nom').then(({data, error}) => {
-      console.log('[grille] profil:', data, error);
+    sb.from('profiles').select('user_id,full_name').then(({data, error}) => {
+      console.log('[grille] profiles:', data, error);
       if(data && data.length > 0) {
-        setMembres(data);
+        setMembres(data.map(r => ({user_id:r.user_id, prenom:r.full_name||r.user_id.slice(0,8), nom:''})));
       } else {
         sb.from('membre_equipe').select('user_id').then(({data: d2}) => {
           if(d2) setMembres(d2.map(r => ({user_id:r.user_id, prenom:r.user_id.slice(0,8), nom:''})));
