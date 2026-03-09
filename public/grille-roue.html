@@ -54,7 +54,7 @@ function wedgePath(a1,a2,r1,r2){
 
 // ─── Nouveau format ────────────────────────────────────────────────
 function newSheet(id){
-  return {id, createdAt:Date.now(), meta:{prenom:"",nom:"",feuille:"",note:"",sessions:[]}, exercices:[], closed:false};
+  return {id, createdAt:Date.now(), meta:{prenom:"",nom:"",feuille:"",note:"",sessions:[],user_id:null}, exercices:[], closed:false};
 }
 
 // Rétrocompat : ancien format (crosses/validated/mecanique) → nouveau (exercices[])
@@ -185,6 +185,24 @@ function WheelEditor({sheet, onChange}){
   const svgRef = useRef(null);
   const [editMeta, setEditMeta] = useState(false);
   const [localMeta, setLocalMeta] = useState(sheet.meta);
+  const [membres, setMembres] = useState([]);
+  const [feuillesAutorisees, setFeuillesAutorisees] = useState([]);
+
+  useEffect(() => {
+    sb.from('membre_equipe').select('user_id,prenom,nom').order('nom').then(({data}) => {
+      if(data) setMembres(data);
+    });
+  }, []);
+
+  useEffect(() => {
+    if(!sheet.meta.user_id) { setFeuillesAutorisees([]); return; }
+    sb.from('feuilles_autorisees')
+      .select('feuille_id, feuille_entrainement(id,titre,type)')
+      .eq('user_id', sheet.meta.user_id)
+      .then(({data}) => {
+        if(data) setFeuillesAutorisees(data.map(r=>r.feuille_entrainement).filter(Boolean));
+      });
+  }, [sheet.meta.user_id]);
 
   const exercices = sheet.exercices || [];
   const [activeExoId, setActiveExoId] = useState(exercices.length > 0 ? exercices[0].id : null);
@@ -200,14 +218,14 @@ function WheelEditor({sheet, onChange}){
   const addChaotiqueExo = () => {
     if(sheet.closed) return;
     const id = Date.now().toString();
-    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'chaotique',reference:'',crosses:{},validated:{},reussi:null}]}));
+    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'chaotique',feuille_id:null,reference:'',crosses:{},validated:{},reussi:null}]}));
     setActiveExoId(id);
   };
 
   const addMecaniqueExo = () => {
     if(sheet.closed) return;
     const id = Date.now().toString();
-    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'mecanique',reference:'',observations:[],reussi:null}]}));
+    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'mecanique',feuille_id:null,reference:'',observations:[],reussi:null}]}));
     setActiveExoId(id);
   };
 
@@ -313,20 +331,31 @@ function WheelEditor({sheet, onChange}){
     // ── Éditeur exercice actif ──
     activeExo && React.createElement("div",{style:{width:"100%",maxWidth:520,display:"flex",flexDirection:"column",gap:12}},
 
-      // Champ référence
-      React.createElement("input",{
-        value:activeExo.reference,
-        onChange:e=>updateActiveExo(ex=>({...ex,reference:e.target.value})),
-        placeholder:activeExo.type==='chaotique'?"Référence (ex: Exo 3)":"Référence (ex: Tableau 1)",
-        disabled:sheet.closed,
-        style:{width:"100%",padding:"8px 12px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:"#2C1810",background:sheet.closed?"#F5F0E8":"#FDFAF6",outline:"none",fontFamily:"Georgia,serif"},
-      }),
+      // Sélecteur feuille + N° exercice
+      React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+        React.createElement("select",{
+          value:activeExo.feuille_id||'',
+          onChange:e=>updateActiveExo(ex=>({...ex,feuille_id:e.target.value||null})),
+          disabled:sheet.closed||!sheet.meta.user_id,
+          style:{width:"100%",padding:"8px 12px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:activeExo.feuille_id?"#2C1810":"#8B7355",background:sheet.closed?"#F5F0E8":"#FDFAF6",outline:"none",fontFamily:"Georgia,serif"},
+        },
+          React.createElement("option",{value:""},sheet.meta.user_id?"— Sélectionner une feuille —":"— Sélectionner un étudiant d'abord —"),
+          ...feuillesAutorisees.filter(f=>f.type===activeExo.type).map(f=>React.createElement("option",{key:f.id,value:f.id},f.titre)),
+        ),
+        React.createElement("input",{
+          value:activeExo.reference,
+          onChange:e=>updateActiveExo(ex=>({...ex,reference:e.target.value})),
+          placeholder:"N° exercice (ex: Exo 3)",
+          disabled:sheet.closed,
+          style:{width:"100%",padding:"8px 12px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:"#2C1810",background:sheet.closed?"#F5F0E8":"#FDFAF6",outline:"none",fontFamily:"Georgia,serif"},
+        }),
+      ),
 
       // ── Roue SVG (chaotique) ──
       activeExo.type==='chaotique' && React.createElement("div",{style:{background:"#fff",borderRadius:16,boxShadow:"0 2px 20px rgba(0,0,0,0.08)",overflow:"hidden",border:"1px solid #E8E0D4",width:"100%"}},
         React.createElement("svg",svgProps,
           React.createElement("rect",{width:W,height:H,fill:"#FDFAF6"}),
-          ...WEDGES.map((w,i)=>React.createElement("path",{key:w.id,d:wedgePath(w.a1,w.a2,R_IN,R_OUT),fill:w.color,fillOpacity:i%2===0?0.09:0.04,stroke:w.color,strokeWidth:"0.8",strokeOpacity:"0.25"})),
+          ...WEDGES.map((w,i)=>React.createElement("path",{key:w.id,d:wedgePath(w.a1,w.a2,R_IN,R_OUT),fill:w.color,fillOpacity:i%2===0?0.09:0.04,stroke:w.color,strokeWidth:"0.8",strokeOpacity:"0.25",onTouchEnd:e=>{ e.stopPropagation(); handleTouch(e); }})),
           ...SECTORS.map(s=>{ const [x,y]=pt(s.startAngle,R_OUT+10); return React.createElement("line",{key:s.key,x1:CX,y1:CY,x2:x,y2:y,stroke:s.color,strokeWidth:"2",strokeOpacity:"0.45"}); }),
           ...[0.35,0.67,1].map(f=>React.createElement("circle",{key:f,cx:CX,cy:CY,r:R_IN+(R_OUT-R_IN)*f,fill:"none",stroke:"#C8BBA8",strokeWidth:"0.5",strokeDasharray:"3,5"})),
           ...WEDGES.map(w=>{ const mid=(w.a1+w.a2)/2; const [lx,ly]=pt(mid,R_LABEL+30); return React.createElement("text",{key:w.id+"l",x:lx,y:ly,textAnchor:"middle",dominantBaseline:"middle",fontSize:"11.5",fontFamily:"Georgia,serif",fill:w.color,fontWeight:"700",style:{pointerEvents:"none",userSelect:"none"}},w.id); }),
@@ -336,7 +365,7 @@ function WheelEditor({sheet, onChange}){
             const mid=(w.a1+w.a2)/2;
             const [bx,by]=pt(mid,R_OUT+20);
             const val=validated[w.id];
-            return React.createElement("g",{key:w.id+"badge",onClick:e=>toggleValidated(w.id,e),style:{cursor:"pointer"}},
+            return React.createElement("g",{key:w.id+"badge",onClick:e=>toggleValidated(w.id,e),onTouchEnd:e=>{ e.preventDefault(); toggleValidated(w.id,e); },style:{cursor:"pointer"}},
               React.createElement("circle",{cx:bx,cy:by,r:12,fill:val?w.color:"#FDFAF6",stroke:w.color,strokeWidth:"1.8"}),
               val
                 ? React.createElement("text",{x:bx,y:by+0.5,textAnchor:"middle",dominantBaseline:"middle",fontSize:"12",fill:"white",fontWeight:"bold",style:{pointerEvents:"none",userSelect:"none"}},"✓")
@@ -430,6 +459,17 @@ function WheelEditor({sheet, onChange}){
     editMeta && React.createElement("div",{onClick:()=>setEditMeta(false),style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.38)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:200,padding:"20px 16px",overflowY:"auto"}},
       React.createElement("div",{onClick:e=>e.stopPropagation(),style:{background:"#FDFAF6",borderRadius:16,padding:"26px 24px 20px",width:"100%",maxWidth:340,boxShadow:"0 8px 40px rgba(0,0,0,0.18)",border:"1px solid #E0D5C5",marginTop:20}},
         React.createElement("div",{style:{fontSize:15,fontWeight:"bold",color:"#2C1810",marginBottom:18}},"Référence de la feuille"),
+        React.createElement("div",{style:{marginBottom:14}},
+          React.createElement("label",{style:{fontSize:10,color:"#8B7355",display:"block",marginBottom:4,letterSpacing:"0.1em",textTransform:"uppercase"}},"Étudiant"),
+          React.createElement("select",{
+            value:localMeta.user_id||'',
+            onChange:e=>setLocalMeta(p=>({...p,user_id:e.target.value||null})),
+            style:{width:"100%",padding:"8px 10px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:localMeta.user_id?"#2C1810":"#8B7355",background:"#FDFAF6",outline:"none",fontFamily:"Georgia,serif"},
+          },
+            React.createElement("option",{value:""},"— Sélectionner un étudiant —"),
+            ...membres.map(m=>React.createElement("option",{key:m.user_id,value:m.user_id},[m.prenom,m.nom].filter(Boolean).join(" ")||m.user_id)),
+          ),
+        ),
         ...[
           {k:"prenom", l:"Prénom",    p:"ex: Marie",     type:"input"},
           {k:"nom",    l:"Nom",       p:"ex: Dupont",    type:"input"},
