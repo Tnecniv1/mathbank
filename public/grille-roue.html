@@ -190,14 +190,13 @@ function WheelEditor({sheet, onChange}){
   const [undoStack, setUndoStack] = useState([]);
 
   useEffect(() => {
-    sb.from('membre_equipe').select('*').order('nom').limit(100).then(({data, error}) => {
-      console.log('[grille] membre_equipe data:', data, 'error:', error);
+    sb.from('profil').select('user_id,prenom,nom').then(({data, error}) => {
+      console.log('[grille] profil:', data, error);
       if(data && data.length > 0) {
         setMembres(data);
       } else {
-        sb.rpc('get_membres_equipe').then(({data: rpcData, error: rpcErr}) => {
-          console.log('[grille] get_membres_equipe rpc:', rpcData, 'error:', rpcErr);
-          if(rpcData && rpcData.length > 0) setMembres(rpcData);
+        sb.from('membre_equipe').select('user_id').then(({data: d2}) => {
+          if(d2) setMembres(d2.map(r => ({user_id:r.user_id, prenom:r.user_id.slice(0,8), nom:''})));
         });
       }
     });
