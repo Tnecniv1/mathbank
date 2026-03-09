@@ -187,10 +187,19 @@ function WheelEditor({sheet, onChange}){
   const [localMeta, setLocalMeta] = useState(sheet.meta);
   const [membres, setMembres] = useState([]);
   const [feuillesAutorisees, setFeuillesAutorisees] = useState([]);
+  const [undoStack, setUndoStack] = useState([]);
 
   useEffect(() => {
-    sb.from('membre_equipe').select('user_id,prenom,nom').order('nom').then(({data}) => {
-      if(data) setMembres(data);
+    sb.from('membre_equipe').select('*').order('nom').limit(100).then(({data, error}) => {
+      console.log('[grille] membre_equipe data:', data, 'error:', error);
+      if(data && data.length > 0) {
+        setMembres(data);
+      } else {
+        sb.rpc('get_membres_equipe').then(({data: rpcData, error: rpcErr}) => {
+          console.log('[grille] get_membres_equipe rpc:', rpcData, 'error:', rpcErr);
+          if(rpcData && rpcData.length > 0) setMembres(rpcData);
+        });
+      }
     });
   }, []);
 
@@ -203,6 +212,8 @@ function WheelEditor({sheet, onChange}){
         if(data) setFeuillesAutorisees(data.map(r=>r.feuille_entrainement).filter(Boolean));
       });
   }, [sheet.meta.user_id]);
+
+  useEffect(() => { setUndoStack([]); }, [activeExoId]);
 
   const exercices = sheet.exercices || [];
   const [activeExoId, setActiveExoId] = useState(exercices.length > 0 ? exercices[0].id : null);
@@ -255,6 +266,7 @@ function WheelEditor({sheet, onChange}){
     const wedge = WEDGES.find(w=>{ const na=norm(deg-w.a1),sp=norm(w.a2-w.a1); return na>=0&&na<sp; });
     if(!wedge) return;
     updateActiveExo(e => { const c={...e.crosses}; c[wedge.id]=[...(c[wedge.id]||[]),{x:mx,y:my}]; return {...e,crosses:c}; });
+    setUndoStack(s => [...s, wedge.id]);
   }, [activeExo, sheet.closed, updateActiveExo]);
 
   const handleTouch = useCallback(evt => {
@@ -265,6 +277,13 @@ function WheelEditor({sheet, onChange}){
 
   const removeCross = (wid, idx) => {
     updateActiveExo(e => { const arr=[...(e.crosses[wid]||[])]; arr.splice(idx,1); return {...e,crosses:{...e.crosses,[wid]:arr}}; });
+  };
+
+  const undoCross = () => {
+    if(undoStack.length === 0 || sheet.closed) return;
+    const wid = undoStack[undoStack.length - 1];
+    setUndoStack(s => s.slice(0, -1));
+    updateActiveExo(e => { const arr=[...(e.crosses[wid]||[])]; arr.splice(arr.length-1,1); return {...e,crosses:{...e.crosses,[wid]:arr}}; });
   };
 
   const saveMeta = () => { onChange(p=>({...p,meta:localMeta})); setEditMeta(false); };
@@ -391,6 +410,13 @@ function WheelEditor({sheet, onChange}){
         )),
       ),
 
+      // Bouton annuler dernière croix (chaotique)
+      activeExo.type==='chaotique' && React.createElement("button",{
+        onClick:undoCross,
+        disabled:undoStack.length===0||sheet.closed,
+        style:{width:"100%",padding:"10px",background:"transparent",border:"1.5px solid #D0C5B5",borderRadius:8,color:undoStack.length===0||sheet.closed?"#C8BBA8":"#5A4A3A",cursor:undoStack.length===0||sheet.closed?"default":"pointer",fontSize:13,fontFamily:"Georgia,serif"},
+      },"↩ Annuler dernière croix"),
+
       // Résultat global (chaotique)
       activeExo.type==='chaotique' && React.createElement("div",{style:{background:"white",borderRadius:12,border:"1px solid #E8E0D4",padding:"14px 16px",display:"flex",alignItems:"center",gap:12}},
         React.createElement("span",{style:{fontSize:12,color:"#8B7355",fontFamily:"Georgia,serif",flexShrink:0}},"Résultat global"),
@@ -471,10 +497,7 @@ function WheelEditor({sheet, onChange}){
           ),
         ),
         ...[
-          {k:"prenom", l:"Prénom",    p:"ex: Marie",     type:"input"},
-          {k:"nom",    l:"Nom",       p:"ex: Dupont",    type:"input"},
-          {k:"feuille",l:"Feuille nº",p:"ex: Feuille 4", type:"input"},
-          {k:"note",   l:"Note libre",p:"Observation…",  type:"textarea"},
+          {k:"note", l:"Note libre", p:"Observation…", type:"textarea"},
         ].map(f=>React.createElement("div",{key:f.k,style:{marginBottom:14}},
           React.createElement("label",{style:{fontSize:10,color:"#8B7355",display:"block",marginBottom:4,letterSpacing:"0.1em",textTransform:"uppercase"}},f.l),
           f.type==="textarea"
