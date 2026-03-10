@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 
 import ModalObserverFeuilles from '@/components/ModalObserverFeuilles';
 import ModalGererFeuillesScope from '@/components/ModalGererFeuillesScope';
+import ParcoursTimeline from '@/components/ParcoursTimeline';
 
 /* ---------- Types ---------- */
 type Membre = {
@@ -46,6 +47,22 @@ type ScoreLocalDetail = {
  redaction: number;
  correction: number;
  score_calcule: number;
+};
+
+type EtapeParcours = {
+ id: string;
+ numero: number;
+ titre_snapshot: string;
+ statut: string;
+ autorisee_at: string | null;
+ validee_at: string | null;
+ feuille_id: string;
+};
+
+type FeuilleSimple = {
+ id: string;
+ titre: string;
+ type: string;
 };
 
 type SyntheseData = {
@@ -132,6 +149,12 @@ export default function GestionEquipePage() {
  const [scoreGlobalEquipe, setScoreGlobalEquipe] = useState<number>(0);
  const [contributionsMembres, setContributionsMembres] = useState<{user_id: string, nom: string, score: number}[]>([]);
  const [isChef, setIsChef] = useState(false);
+
+ const [membreParcoursModal, setMembreParcoursModal] = useState<Membre | null>(null);
+ const [etapesParcours, setEtapesParcours] = useState<EtapeParcours[]>([]);
+ const [loadingParcours, setLoadingParcours] = useState(false);
+ const [feuillesDisponibles, setFeuillesDisponibles] = useState<FeuilleSimple[]>([]);
+ const [etapeEnRemplacement, setEtapeEnRemplacement] = useState<string | null>(null);
 
  const [showRejetModal, setShowRejetModal] = useState(false);
  const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
@@ -359,6 +382,37 @@ export default function GestionEquipePage() {
  function handleGererFeuilles(membre: Membre) {
  setMembreSelectionne(membre);
  setShowModalGestion(true);
+ }
+
+ async function handleVoirParcours(membre: Membre) {
+ setMembreParcoursModal(membre);
+ setEtapeEnRemplacement(null);
+ setLoadingParcours(true);
+ const { data } = await supabase
+  .from('etape_parcours')
+  .select('id, numero, titre_snapshot, statut, autorisee_at, validee_at, feuille_id')
+  .eq('user_id', membre.user_id)
+  .order('numero', { ascending: true });
+ setEtapesParcours(data || []);
+ // Charger toutes les feuilles pour le sélecteur
+ const { data: feuilles } = await supabase
+  .from('feuille_entrainement')
+  .select('id, titre, type')
+  .order('ordre');
+ setFeuillesDisponibles(feuilles || []);
+ setLoadingParcours(false);
+ }
+
+ async function handleRemplacerFeuille(etapeId: string, feuilleId: string, titreFeuille: string) {
+ const { error } = await supabase
+  .from('etape_parcours')
+  .update({ feuille_id: feuilleId, titre_snapshot: titreFeuille })
+  .eq('id', etapeId);
+ if (error) { alert('Erreur lors de la mise à jour'); return; }
+ setEtapesParcours(prev => prev.map(e =>
+  e.id === etapeId ? { ...e, feuille_id: feuilleId, titre_snapshot: titreFeuille } : e
+ ));
+ setEtapeEnRemplacement(null);
  }
 
  async function handleOuvrirSynthese(notif: Notification) {
@@ -654,6 +708,12 @@ export default function GestionEquipePage() {
  📄 Feuilles
  </button>
  <button
+ onClick={() => handleVoirParcours(membre)}
+ className="px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors"
+ >
+ 🗺 Parcours
+ </button>
+ <button
  onClick={() => router.push(`/library/sessions?membre=${membre.user_id}`)}
  className="px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors"
  >
@@ -837,6 +897,99 @@ export default function GestionEquipePage() {
  if (equipeId) loadData(equipeId);
  }}
  />
+ )}
+
+ {/* Modal Parcours */}
+ {membreParcoursModal && (
+ <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+  <div className="bg-cream-50 rounded-lg max-w-2xl w-full max-h-[85vh] flex flex-col">
+  {/* Header */}
+  <div className="px-6 py-4 border-b border-border flex items-center justify-between flex-shrink-0">
+   <h2 className="text-xl font-bold text-ink">
+   🗺 Parcours de {membreParcoursModal.membre_nom}
+   </h2>
+   <button
+   onClick={() => { setMembreParcoursModal(null); setEtapeEnRemplacement(null); }}
+   className="w-8 h-8 rounded-lg hover:bg-cream-200 flex items-center justify-center transition-colors"
+   >
+   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+    <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+   </svg>
+   </button>
+  </div>
+  {/* Contenu */}
+  <div className="flex-1 overflow-y-auto p-6">
+   {loadingParcours ? (
+   <div className="flex items-center justify-center py-12 text-ink-light">Chargement…</div>
+   ) : etapesParcours.length === 0 ? (
+   <div className="text-center py-12 text-ink-muted">Aucune étape trouvée pour ce membre.</div>
+   ) : (
+   <>
+   {/* Timeline visuelle */}
+   <ParcoursTimeline etapes={etapesParcours} />
+   {/* Actions — modifier les feuilles */}
+   <div className="mt-2 border-t border-border pt-4 space-y-2">
+    <p className="text-xs font-medium text-ink-muted mb-3 uppercase tracking-wide">Modifier les feuilles</p>
+    {etapesParcours.map((etape) => (
+    <div key={etape.id} className="rounded-lg border border-border bg-cream-50 p-3">
+     <div className="flex items-center justify-between gap-3">
+     <span className="text-sm font-medium text-ink truncate">
+      Étape {etape.numero} — {etape.titre_snapshot}
+     </span>
+     <button
+      onClick={() => setEtapeEnRemplacement(etapeEnRemplacement === etape.id ? null : etape.id)}
+      className="px-3 py-1.5 bg-cream-200 hover:bg-cream-300 text-ink text-xs font-medium rounded-lg transition-colors flex-shrink-0"
+     >
+      🔁 Remplacer
+     </button>
+     </div>
+     {etapeEnRemplacement === etape.id && (
+     <div className="mt-3 pt-3 border-t border-border">
+      <label className="block text-xs font-medium text-ink-light mb-1">Choisir une nouvelle feuille :</label>
+      <div className="flex gap-2">
+      <select
+       defaultValue=""
+       id={`select-feuille-${etape.id}`}
+       className="flex-1 px-3 py-2 border border-border rounded-lg bg-cream-50 text-ink text-sm focus:border-accent outline-none"
+      >
+       <option value="" disabled>— Sélectionner —</option>
+       {feuillesDisponibles.map(f => (
+       <option key={f.id} value={f.id}>
+        [{f.type}] {f.titre}
+       </option>
+       ))}
+      </select>
+      <button
+       onClick={() => {
+       const sel = document.getElementById(`select-feuille-${etape.id}`) as HTMLSelectElement;
+       if (!sel || !sel.value) return;
+       const titre = sel.options[sel.selectedIndex].text.replace(/^\[.*?\] /, '');
+       handleRemplacerFeuille(etape.id, sel.value, titre);
+       }}
+       className="px-3 py-2 bg-accent hover:bg-accent text-ink text-sm font-medium rounded-lg transition-colors"
+      >
+       Valider
+      </button>
+      </div>
+     </div>
+     )}
+    </div>
+    ))}
+   </div>
+   </>
+   )}
+  </div>
+  {/* Footer */}
+  <div className="px-6 py-4 border-t border-border flex-shrink-0">
+   <button
+   onClick={() => { setMembreParcoursModal(null); setEtapeEnRemplacement(null); }}
+   className="w-full px-4 py-2 bg-cream-200 hover:bg-cream-300 text-ink font-medium rounded-lg transition-colors"
+   >
+   Fermer
+   </button>
+  </div>
+  </div>
+ </div>
  )}
 
  {/* Modal Observer Feuilles */}

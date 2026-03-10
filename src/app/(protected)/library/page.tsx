@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import ParcoursTimeline from '@/components/ParcoursTimeline';
 
 /* ---------- Types ---------- */
 type FeuilleEntrainement = {
@@ -981,6 +982,9 @@ export default function LibraryPage() {
  progression: Progression;
  chapitre: string;
  }>>([]);
+ const [progressionOuverte, setProgressionOuverte] = useState(false);
+ const [parcoursOuvert, setParcoursOuvert] = useState(true);
+ const [etapesParcours, setEtapesParcours] = useState<{numero: number; titre_snapshot: string; statut: string; validee_at: string | null}[]>([]);;
 
  // Chargement initial des niveaux
  useEffect(() => {
@@ -1002,9 +1006,19 @@ export default function LibraryPage() {
  })();
  }, []);
 
- // Chargement des feuilles en progression
+ // Chargement des feuilles en progression + parcours
  useEffect(() => {
  loadFeuillesEnProgression();
+ (async () => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return;
+  const { data } = await supabase
+  .from('etape_parcours')
+  .select('numero, titre_snapshot, statut, validee_at')
+  .eq('user_id', session.user.id)
+  .order('numero', { ascending: true });
+  if (data) setEtapesParcours(data);
+ })();
  }, []);
 
  // Chargement du parcours quand un niveau est sélectionné
@@ -1278,28 +1292,60 @@ export default function LibraryPage() {
  </div>
  </header>
 
- {/* Section En Progression */}
+ {/* Section En Progression (pliable) */}
  {feuillesEnProgression.length > 0 && (
- <div className="mb-8 from-status-success/10 to-accent/10 rounded-lg p-6 border border-status-success/30">
- <h2 className="text-2xl font-['IBM_Plex_Mono'] font-bold text-status-success mb-4 flex items-center gap-2">
- 🔥 En Progression
- <span className="text-sm font-normal text-status-success/70">
- ({feuillesEnProgression.length})
- </span>
- </h2>
- <div className="space-y-2">
- {feuillesEnProgression.map(({ feuille, progression }) => (
- <FeuilleCard
- key={feuille.id}
- feuille={feuille}
- progression={progression}
- onOpen={() => handleOpenPdf(feuille.pdf_url)}
- onUpdateProgression={handleProgressionUpdate}
- />
- ))}
- </div>
+ <div className="mb-8 rounded-lg border border-status-success/30">
+ <button
+  onClick={() => setProgressionOuverte(v => !v)}
+  className="w-full flex items-center justify-between px-6 py-4 rounded-lg hover:bg-status-success/5 transition-colors"
+ >
+  <h2 className="text-2xl font-['IBM_Plex_Mono'] font-bold text-status-success flex items-center gap-2">
+  🔥 En Progression
+  <span className="text-sm font-normal text-status-success/70">
+   ({feuillesEnProgression.length})
+  </span>
+  </h2>
+  <span className="text-status-success text-lg">{progressionOuverte ? '▼' : '▶'}</span>
+ </button>
+ {progressionOuverte && (
+  <div className="px-6 pb-6 space-y-2">
+  {feuillesEnProgression.map(({ feuille, progression }) => (
+   <FeuilleCard
+   key={feuille.id}
+   feuille={feuille}
+   progression={progression}
+   onOpen={() => handleOpenPdf(feuille.pdf_url)}
+   onUpdateProgression={handleProgressionUpdate}
+   />
+  ))}
+  </div>
+ )}
  </div>
  )}
+
+ {/* Section Mon Parcours (pliable) */}
+ <div className="mb-8 rounded-lg border border-border">
+ <button
+  onClick={() => setParcoursOuvert(v => !v)}
+  className="w-full flex items-center justify-between px-6 py-4 rounded-lg hover:bg-cream-100 transition-colors"
+ >
+  <h2 className="text-2xl font-['IBM_Plex_Mono'] font-bold text-ink flex items-center gap-2">
+  🗺 Mon Parcours
+  {etapesParcours.length > 0 && (
+   <span className="text-sm font-normal text-ink-muted">
+   ({etapesParcours.length} étape{etapesParcours.length > 1 ? 's' : ''})
+   </span>
+  )}
+  </h2>
+  <span className="text-ink-light text-lg">{parcoursOuvert ? '▼' : '▶'}</span>
+ </button>
+ {parcoursOuvert && (
+  <div className="pb-4">
+   <ParcoursTimeline etapes={etapesParcours} />
+  </div>
+ )}
+ </div>
+
  {/* Sélecteur de niveau (si plusieurs niveaux disponibles) */}
  {niveaux.length > 1 && (
  <div className="mb-8">
