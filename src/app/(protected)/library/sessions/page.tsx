@@ -688,6 +688,7 @@ export default function SessionsPage() {
       .from('grille_observation')
       .select('id, data, updated_at')
       .eq('closed', true)
+      .filter('data->meta->>user_id', 'eq', membreParamId)
       .order('updated_at', { ascending: false });
     setRouesDB(data || []);
     setRouesLoading(false);

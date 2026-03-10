@@ -204,11 +204,21 @@ function WheelEditor({sheet, onChange}){
 
   useEffect(() => {
     if(!sheet.meta.user_id) { setFeuillesAutorisees([]); return; }
-    sb.from('feuilles_autorisees')
-      .select('feuille_id, feuille_entrainement(id,titre,type)')
+    // 1. Trouver le membre_equipe.id depuis user_id
+    sb.from('membre_equipe').select('id')
       .eq('user_id', sheet.meta.user_id)
-      .then(({data}) => {
-        if(data) setFeuillesAutorisees(data.map(r=>r.feuille_entrainement).filter(Boolean));
+      .then(({data: membres}) => {
+        if(!membres || membres.length === 0) return;
+        const membreIds = membres.map(m => m.id);
+        // 2. Charger les feuilles autorisées via membre_id
+        sb.from('feuilles_autorisees')
+          .select('feuille_id, feuille_entrainement(id,titre,type)')
+          .in('membre_id', membreIds)
+          .then(({data}) => {
+            if(data) setFeuillesAutorisees(
+              data.map(r=>r.feuille_entrainement).filter(Boolean)
+            );
+          });
       });
   }, [sheet.meta.user_id]);
 
