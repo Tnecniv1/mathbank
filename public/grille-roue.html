@@ -54,7 +54,7 @@ function wedgePath(a1,a2,r1,r2){
 
 // ─── Nouveau format ────────────────────────────────────────────────
 function newSheet(id){
-  return {id, createdAt:Date.now(), meta:{prenom:"",nom:"",feuille:"",note:"",sessions:[],user_id:null}, exercices:[], closed:false};
+  return {id, createdAt:Date.now(), meta:{prenom:"",nom:"",feuille:"",note:"",sessions:[],user_id:null}, exercices:[], closed:false, inserted:false};
 }
 
 // Rétrocompat : ancien format (crosses/validated/mecanique) → nouveau (exercices[])
@@ -101,10 +101,10 @@ const db = {
     try {
       const { data, error } = await sb
         .from('grille_observation')
-        .select('id, data, closed, updated_at')
+        .select('id, data, closed, inserted, updated_at')
         .order('updated_at', { ascending: false });
       if (error) throw error;
-      return (data||[]).map(row => migrateSheet({ ...row.data, id: row.id, closed: !!row.closed }));
+      return (data||[]).map(row => migrateSheet({ ...row.data, id: row.id, closed: !!row.closed, inserted: !!row.inserted }));
     } catch {
       isOnline = false;
       _setSaveStatus('offline');
@@ -126,7 +126,7 @@ const db = {
     try {
       const { error } = await sb.from('grille_observation').upsert({
         id: sheet.id, user_id: currentUserId,
-        data: sheet, closed: sheet.closed ?? false,
+        data: sheet, closed: sheet.closed ?? false, inserted: sheet.inserted ?? false,
         updated_at: new Date().toISOString(),
       });
       if (error) throw error;
@@ -258,8 +258,9 @@ function WheelEditor({sheet, onChange}){
 
   const toggleValidated = useCallback((wedgeId, evt) => {
     evt.stopPropagation();
+    if(sheet.closed) return;
     updateActiveExo(e => { const v={...(e.validated||{})}; v[wedgeId]=!v[wedgeId]; return {...e,validated:v}; });
-  }, [updateActiveExo]);
+  }, [updateActiveExo, sheet.closed]);
 
   const handleClick = useCallback(evt => {
     if(!activeExo || activeExo.type !== 'chaotique' || sheet.closed) return;
@@ -285,6 +286,7 @@ function WheelEditor({sheet, onChange}){
   }, [handleClick]);
 
   const removeCross = (wid, idx) => {
+    if(sheet.closed) return;
     updateActiveExo(e => { const arr=[...(e.crosses[wid]||[])]; arr.splice(idx,1); return {...e,crosses:{...e.crosses,[wid]:arr}}; });
   };
 
@@ -295,7 +297,7 @@ function WheelEditor({sheet, onChange}){
     updateActiveExo(e => { const arr=[...(e.crosses[wid]||[])]; arr.splice(arr.length-1,1); return {...e,crosses:{...e.crosses,[wid]:arr}}; });
   };
 
-  const saveMeta = () => { onChange(p=>({...p,meta:localMeta})); setEditMeta(false); };
+  const saveMeta = () => { if(sheet.closed) return; onChange(p=>({...p,meta:localMeta})); setEditMeta(false); };
 
   const addObs    = () => { if(sheet.closed) return; updateActiveExo(e => ({...e, observations:[...(e.observations||[]),{reference:'',reussi:null}]})); };
   const updateObs = (idx,patch) => { if(sheet.closed) return; updateActiveExo(e => { const o=[...(e.observations||[])]; o[idx]={...o[idx],...patch}; return {...e,observations:o}; }); };
@@ -316,7 +318,7 @@ function WheelEditor({sheet, onChange}){
     // ── Barre méta ──
     React.createElement("div",{style:{width:"100%",maxWidth:520,display:"flex",alignItems:"center",gap:10,marginBottom:4}},
       React.createElement("div",{
-        onClick:()=>{ setEditMeta(true); setLocalMeta(sheet.meta); },
+        onClick:()=>{ if(!sheet.closed){ setEditMeta(true); setLocalMeta(sheet.meta); } },
         style:{flex:1,background:"white",borderRadius:10,border:"1px solid #E0D5C5",padding:"8px 12px",cursor:"pointer",minWidth:0},
       },
         React.createElement("div",{style:{fontSize:12,fontWeight:"600",color:"#2C1810",fontFamily:"Georgia,serif",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},[sheet.meta.prenom,sheet.meta.nom].filter(Boolean).join(" ")||"—"),
@@ -401,7 +403,7 @@ function WheelEditor({sheet, onChange}){
             );
           }),
           React.createElement("circle",{cx:CX,cy:CY,r:R_IN,fill:"#FDFAF6",stroke:"#C8BBA8",strokeWidth:"1.5"}),
-          React.createElement("g",{onClick:e=>{ e.stopPropagation(); setEditMeta(true); setLocalMeta(sheet.meta); },style:{cursor:"pointer"}},
+          React.createElement("g",{onClick:e=>{ e.stopPropagation(); if(!sheet.closed){ setEditMeta(true); setLocalMeta(sheet.meta); } },style:{cursor:"pointer"}},
             React.createElement("text",{x:CX,y:CY-20,textAnchor:"middle",fontSize:"9",fill:"#5A4A3A",fontFamily:"Georgia,serif",fontWeight:"600"},[sheet.meta.prenom,sheet.meta.nom].filter(Boolean).join(" ")||"—"),
             React.createElement("text",{x:CX,y:CY-7,textAnchor:"middle",fontSize:"8.5",fill:"#8B7355",fontFamily:"Georgia,serif",fontStyle:"italic"},sheet.meta.feuille||"Feuille —"),
             React.createElement("text",{x:CX,y:CY+6,textAnchor:"middle",fontSize:"8.5",fill:"#8B7355",fontFamily:"Georgia,serif"},activeExo.reference||"Exo —"),
@@ -489,6 +491,17 @@ function WheelEditor({sheet, onChange}){
       onClick:()=>exportSheet(sheet),
       style:{width:"100%",maxWidth:520,padding:"13px",background:"#2C1810",color:"#FDFAF6",border:"none",borderRadius:10,fontSize:13,cursor:"pointer",letterSpacing:"0.04em",display:"flex",alignItems:"center",justifyContent:"center",gap:8},
     }, React.createElement("span",null,"↓"), " Enregistrer dans Fichiers (.json)"),
+    sheet.closed && !sheet.inserted && React.createElement("button",{
+      onClick:()=>onChange(p=>({...p,inserted:true,insertedAt:Date.now()})),
+      style:{width:"100%",maxWidth:520,padding:"13px",background:"#3D7FD4",color:"#FDFAF6",border:"none",borderRadius:10,fontSize:13,cursor:"pointer",letterSpacing:"0.04em",display:"flex",alignItems:"center",justifyContent:"center",gap:8},
+    }, React.createElement("span",null,"✓"), " Marquer comme inséré"),
+    sheet.closed && sheet.inserted && React.createElement("div",{style:{width:"100%",maxWidth:520,padding:"12px 16px",background:"#EEF4FC",border:"1.5px solid #3D7FD4",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}},
+      React.createElement("div",null,
+        React.createElement("div",{style:{fontSize:12,fontWeight:"600",color:"#2A5FA5",fontFamily:"Georgia,serif"}},"✓ Inséré"),
+        React.createElement("div",{style:{fontSize:10,color:"#5A7FA5",marginTop:2,fontFamily:"Georgia,serif"}},sheet.insertedAt?`Le ${new Date(sheet.insertedAt).toLocaleDateString("fr-FR",{day:"2-digit",month:"short",year:"2-digit"})} à ${new Date(sheet.insertedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}`:""),
+      ),
+      React.createElement("button",{onClick:()=>onChange(p=>({...p,inserted:false,insertedAt:null})),style:{background:"transparent",border:"1px solid #A0BBD5",borderRadius:7,color:"#5A7FA5",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"Georgia,serif",whiteSpace:"nowrap"}},"Annuler"),
+    ),
 
     // ── Modal méta ──
     editMeta && React.createElement("div",{onClick:()=>setEditMeta(false),style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.38)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:200,padding:"20px 16px",overflowY:"auto"}},
@@ -570,6 +583,7 @@ function SheetCard({sheet,onOpen,onDelete,onExport}){
       ),
       React.createElement("div",{style:{display:"flex",alignItems:"center",gap:5,marginTop:3}},
         sheet.closed && React.createElement("span",{style:{fontSize:9,background:"#3DAF6B",color:"white",borderRadius:4,padding:"1px 6px",fontFamily:"Georgia,serif",letterSpacing:"0.03em"}},"bouclée"),
+        sheet.inserted && React.createElement("span",{style:{fontSize:9,background:"#3D7FD4",color:"white",borderRadius:4,padding:"1px 6px",fontFamily:"Georgia,serif",letterSpacing:"0.03em"}},"inséré"),
         React.createElement("span",{style:{fontSize:10,color:"#B0A090"}},`${(sheet.meta.sessions||[]).length>0?(sheet.meta.sessions||[]).length+"×":date} · ${crossTotal} croix`),
       ),
       sheet.meta.note && React.createElement("div",{style:{fontSize:10,color:"#8B7355",marginTop:2,fontStyle:"italic",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},`"${sheet.meta.note}"`),
@@ -624,6 +638,7 @@ function App(){
   const [user,        setUser]        = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [saveStatus,  setSaveStatus]  = useState(null);
+  const [filter,      setFilter]      = useState('en_cours');
   const importRef = useRef(null);
 
   useEffect(() => { _setSaveStatus = setSaveStatus; }, []);
@@ -674,6 +689,9 @@ function App(){
   if (!user) return React.createElement(LoginScreen,{onLogin:(u)=>{ currentUserId=u.id; setUser(u); }});
 
   const active = sheets.find(s=>s.id===activeId);
+  const filteredSheets = filter==='en_cours' ? sheets.filter(s=>!s.closed)
+                       : filter==='boucle'   ? sheets.filter(s=>s.closed&&!s.inserted)
+                       :                       sheets.filter(s=>s.closed&&!!s.inserted);
 
   const saveIndicator =
     saveStatus === 'saving'  ? React.createElement("span",{style:{fontSize:11,color:"#8B7355",fontStyle:"italic"}},"Sauvegarde…") :
@@ -713,8 +731,20 @@ function App(){
               React.createElement("div",{style:{fontSize:13,marginTop:6}},"Crée une nouvelle grille ou importe un fichier .json."),
             )
           : React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:10}},
-              React.createElement("div",{style:{fontSize:11,color:"#8B7355",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:4}},`${sheets.length} feuille${sheets.length>1?"s":""} enregistrée${sheets.length>1?"s":""}`),
-              ...sheets.map(s=>React.createElement(SheetCard,{key:s.id,sheet:s,onOpen:()=>setActiveId(s.id),onDelete:()=>remove(s.id),onExport:()=>exportSheet(s)})),
+              React.createElement("div",{style:{display:"flex",gap:6,marginBottom:4}},
+                ...[
+                  {id:'en_cours', label:'En cours'},
+                  {id:'boucle',   label:'Bouclé'},
+                  {id:'insere',   label:'Inséré'},
+                ].map(f=>React.createElement("button",{
+                  key:f.id,
+                  onClick:()=>setFilter(f.id),
+                  style:{padding:"6px 14px",fontSize:11,borderRadius:20,border:`1.5px solid ${filter===f.id?"#2C1810":"#D0C5B5"}`,background:filter===f.id?"#2C1810":"white",color:filter===f.id?"#FDFAF6":"#5A4A3A",cursor:"pointer",fontFamily:"Georgia,serif",letterSpacing:"0.03em"},
+                },f.label)),
+              ),
+              React.createElement("div",{style:{fontSize:11,color:"#8B7355",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:4}},`${filteredSheets.length} feuille${filteredSheets.length>1?"s":""} enregistrée${filteredSheets.length>1?"s":""}`),
+              ...filteredSheets.map(s=>React.createElement(SheetCard,{key:s.id,sheet:s,onOpen:()=>setActiveId(s.id),onDelete:()=>remove(s.id),onExport:()=>exportSheet(s)})),
+              filteredSheets.length===0 && React.createElement("div",{style:{textAlign:"center",padding:"30px 20px",color:"#B0A090",fontStyle:"italic",fontSize:13,background:"white",borderRadius:12,border:"1px solid #E8E0D4"}},"Aucune feuille dans cette catégorie."),
             ),
     ),
   );
