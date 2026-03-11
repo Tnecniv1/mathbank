@@ -180,6 +180,66 @@ function Cross({x,y,color,onRemove}){
   );
 }
 
+// ─── Insert dans Mathbank (logique RPC partagée) ──────────────────
+async function doInsertInMathbank(sheet) {
+  const sessions = sheet.meta.sessions || [];
+  for (let i = 0; i < sessions.length - 1; i++) {
+    const s = sessions[i];
+    await sb.rpc('insert_session_chef', {
+      p_membre_user_id:       sheet.meta.user_id,
+      p_date:                 s.date,
+      p_duree:                parseInt(s.duree) || 0,
+      p_feuille_mecanique_id: null,
+      p_feuille_chaotique_id: null,
+    });
+  }
+  const last     = sessions[sessions.length - 1];
+  const exoMeca  = (sheet.exercices || []).find(e => e.type === 'mecanique');
+  const exoChaos = (sheet.exercices || []).find(e => e.type === 'chaotique');
+  const { data: sessionId } = await sb.rpc('insert_session_chef', {
+    p_membre_user_id:       sheet.meta.user_id,
+    p_date:                 last.date,
+    p_duree:                parseInt(last.duree) || 0,
+    p_feuille_mecanique_id: exoMeca?.feuille_id  || null,
+    p_feuille_chaotique_id: exoChaos?.feuille_id || null,
+  });
+  if (sessionId) {
+    let ordreCount = 1;
+    for (const exo of (sheet.exercices || []).filter(e => e.type === 'mecanique')) {
+      for (const obs of (exo.observations || [])) {
+        const { data: exoId } = await sb.rpc('insert_exercice_chef', {
+          p_session_id: sessionId, p_type: 'mecanique',
+          p_reference: obs.reference || '', p_ordre: ordreCount++,
+        });
+        if (exoId) {
+          await sb.rpc('insert_score_exercice_chef', {
+            p_exercice_id: exoId, p_reussi: !!obs.reussi,
+            p_c1:false, p_c2:false, p_c3:false, p_c4:false,
+            p_s1:false, p_s2:false, p_s3:false, p_s4:false,
+            p_r1:false, p_r2:false, p_r3:false, p_r4:false, p_correction:false,
+          });
+        }
+      }
+    }
+    for (const exo of (sheet.exercices || []).filter(e => e.type === 'chaotique')) {
+      if (!exo.validated || Object.keys(exo.validated).length === 0) continue;
+      const { data: exoId } = await sb.rpc('insert_exercice_chef', {
+        p_session_id: sessionId, p_type: 'chaotique',
+        p_reference: exo.reference || '', p_ordre: ordreCount++,
+      });
+      if (exoId) {
+        const v = exo.validated || {};
+        await sb.rpc('insert_score_exercice_chef', {
+          p_exercice_id: exoId, p_reussi: false,
+          p_c1:!!v.C1, p_c2:!!v.C2, p_c3:!!v.C3, p_c4:!!v.C4,
+          p_s1:!!v.S1, p_s2:!!v.S2, p_s3:!!v.S3, p_s4:!!v.S4,
+          p_r1:!!v.R1, p_r2:!!v.R2, p_r3:!!v.R3, p_r4:!!v.R4, p_correction:false,
+        });
+      }
+    }
+  }
+}
+
 // ─── Éditeur de roue ──────────────────────────────────────────────
 function WheelEditor({sheet, onChange}){
   const svgRef = useRef(null);
@@ -192,77 +252,10 @@ function WheelEditor({sheet, onChange}){
 
   async function insertInMathbank() {
     if (!sheet.meta.user_id) { alert('Veuillez associer un étudiant à cette grille'); return; }
-    const sessions = sheet.meta.sessions || [];
-    if (sessions.length === 0) { alert('Aucune session enregistrée'); return; }
+    if ((sheet.meta.sessions || []).length === 0) { alert('Aucune session enregistrée'); return; }
     setInserting(true);
     try {
-      // Sessions vides (toutes sauf la dernière)
-      for (let i = 0; i < sessions.length - 1; i++) {
-        const s = sessions[i];
-        await sb.rpc('insert_session_chef', {
-          p_membre_user_id:       sheet.meta.user_id,
-          p_date:                 s.date,
-          p_duree:                parseInt(s.duree) || 0,
-          p_feuille_mecanique_id: null,
-          p_feuille_chaotique_id: null,
-        });
-      }
-      // Dernière session avec exercices
-      const last     = sessions[sessions.length - 1];
-      const exoMeca  = (sheet.exercices || []).find(e => e.type === 'mecanique');
-      const exoChaos = (sheet.exercices || []).find(e => e.type === 'chaotique');
-      const { data: sessionId } = await sb.rpc('insert_session_chef', {
-        p_membre_user_id:       sheet.meta.user_id,
-        p_date:                 last.date,
-        p_duree:                parseInt(last.duree) || 0,
-        p_feuille_mecanique_id: exoMeca?.feuille_id  || null,
-        p_feuille_chaotique_id: exoChaos?.feuille_id || null,
-      });
-      if (sessionId) {
-        let ordreCount = 1;
-        // Mécaniques
-        for (const exo of (sheet.exercices || []).filter(e => e.type === 'mecanique')) {
-          for (const obs of (exo.observations || [])) {
-            const { data: exoId } = await sb.rpc('insert_exercice_chef', {
-              p_session_id: sessionId,
-              p_type:       'mecanique',
-              p_reference:  obs.reference || '',
-              p_ordre:      ordreCount++,
-            });
-            if (exoId) {
-              await sb.rpc('insert_score_exercice_chef', {
-                p_exercice_id: exoId,
-                p_reussi:      !!obs.reussi,
-                p_c1:false, p_c2:false, p_c3:false, p_c4:false,
-                p_s1:false, p_s2:false, p_s3:false, p_s4:false,
-                p_r1:false, p_r2:false, p_r3:false, p_r4:false,
-                p_correction:false,
-              });
-            }
-          }
-        }
-        // Chaotiques
-        for (const exo of (sheet.exercices || []).filter(e => e.type === 'chaotique')) {
-          if (!exo.validated || Object.keys(exo.validated).length === 0) continue;
-          const { data: exoId } = await sb.rpc('insert_exercice_chef', {
-            p_session_id: sessionId,
-            p_type:       'chaotique',
-            p_reference:  exo.reference || '',
-            p_ordre:      ordreCount++,
-          });
-          if (exoId) {
-            const v = exo.validated || {};
-            await sb.rpc('insert_score_exercice_chef', {
-              p_exercice_id: exoId,
-              p_reussi:      false,
-              p_c1:!!v.C1, p_c2:!!v.C2, p_c3:!!v.C3, p_c4:!!v.C4,
-              p_s1:!!v.S1, p_s2:!!v.S2, p_s3:!!v.S3, p_s4:!!v.S4,
-              p_r1:!!v.R1, p_r2:!!v.R2, p_r3:!!v.R3, p_r4:!!v.R4,
-              p_correction:false,
-            });
-          }
-        }
-      }
+      await doInsertInMathbank(sheet);
       onChange(p => ({...p, inserted:true, insertedAt:Date.now()}));
       alert('Insertion réussie !');
     } catch(err) {
@@ -632,7 +625,10 @@ function WheelEditor({sheet, onChange}){
 }
 
 // ─── Vignette ─────────────────────────────────────────────────────
-function SheetCard({sheet,onOpen,onDelete,onExport}){
+function SheetCard({sheet,onOpen,onDelete,onExport,onInsert}){
+  const [inserting, setInserting] = useState(false);
+  const canInsert = sheet.closed && !sheet.inserted && sheet.meta.user_id && (sheet.meta.sessions||[]).length > 0;
+  const handleInsert = async () => { setInserting(true); try { await onInsert(); } finally { setInserting(false); } };
   const exercices  = sheet.exercices || [];
   const chaotiques = exercices.filter(e => e.type === 'chaotique');
   const mecaniques = exercices.filter(e => e.type === 'mecanique');
@@ -674,6 +670,12 @@ function SheetCard({sheet,onOpen,onDelete,onExport}){
     ),
     React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:6,flexShrink:0}},
       React.createElement("button",{onClick:onExport,title:"Exporter",style:{background:"transparent",border:"1px solid #D0C5B5",color:"#5A4A3A",cursor:"pointer",fontSize:13,padding:"4px 9px",borderRadius:6}},"↓"),
+      canInsert && React.createElement("button",{
+        onClick:inserting ? undefined : handleInsert,
+        disabled:inserting,
+        title:inserting ? "Insertion…" : "Insérer dans mathbank",
+        style:{background:inserting?"#6FA8E0":"#3D7FD4",border:"none",color:"#FDFAF6",cursor:inserting?"default":"pointer",fontSize:13,padding:"4px 9px",borderRadius:6},
+      },inserting ? "⏳" : "📥"),
       React.createElement("button",{onClick:onDelete,title:"Supprimer",style:{background:"transparent",border:"none",color:"#C8BBA8",cursor:"pointer",fontSize:14,padding:"4px 6px",borderRadius:6}},"✕"),
     ),
   );
@@ -756,6 +758,16 @@ function App(){
     db.delete(id);
   };
 
+  const insertSheet = async (sheet) => {
+    try {
+      await doInsertInMathbank(sheet);
+      update(sheet.id, p => ({...p, inserted:true, insertedAt:Date.now()}));
+      alert('Insertion réussie !');
+    } catch(err) {
+      alert('Erreur lors de l\'insertion : ' + (err?.message || err));
+    }
+  };
+
   const handleImport = e => {
     const file = e.target.files&&e.target.files[0]; if (!file) return;
     importSheet(file, s => {
@@ -827,7 +839,7 @@ function App(){
                 },f.label)),
               ),
               React.createElement("div",{style:{fontSize:11,color:"#8B7355",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:4}},`${filteredSheets.length} feuille${filteredSheets.length>1?"s":""} enregistrée${filteredSheets.length>1?"s":""}`),
-              ...filteredSheets.map(s=>React.createElement(SheetCard,{key:s.id,sheet:s,onOpen:()=>setActiveId(s.id),onDelete:()=>remove(s.id),onExport:()=>exportSheet(s)})),
+              ...filteredSheets.map(s=>React.createElement(SheetCard,{key:s.id,sheet:s,onOpen:()=>setActiveId(s.id),onDelete:()=>remove(s.id),onExport:()=>exportSheet(s),onInsert:()=>insertSheet(s)})),
               filteredSheets.length===0 && React.createElement("div",{style:{textAlign:"center",padding:"30px 20px",color:"#B0A090",fontStyle:"italic",fontSize:13,background:"white",borderRadius:12,border:"1px solid #E8E0D4"}},"Aucune feuille dans cette catégorie."),
             ),
     ),
