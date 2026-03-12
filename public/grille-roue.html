@@ -27,6 +27,10 @@ const SUPABASE_URL      = 'https://rvonutomiuvsxjxeuipq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2b251dG9taXV2c3hqeGV1aXBxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgxMjAxMDUsImV4cCI6MjA3MzY5NjEwNX0.uAfN8Eadx9aMjBOwnZFTxEv_VgdnZZbXMQgPILqC_GI';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// ─── State module-level ────────────────────────────────────────────
+let _membres = []; // [{user_id, full_name}]
+let _feuilles = {}; // {feuille_id: titre}
+
 // ─── Géométrie ─────────────────────────────────────────────────────
 const W = 640, H = 640, CX = 320, CY = 320;
 const R_IN = 58, R_OUT = 230, R_LABEL = 256;
@@ -291,9 +295,7 @@ function WheelEditor({sheet, onChange}){
           .select('feuille_id, feuille_entrainement(id,titre,type)')
           .in('membre_id', membreIds)
           .then(({data}) => {
-            if(data) setFeuillesAutorisees(
-              data.map(r=>r.feuille_entrainement).filter(Boolean)
-            );
+            if(data) setFeuillesAutorisees(data.map(r=>r.feuille_entrainement).filter(Boolean));
           });
       });
   }, [sheet.meta.user_id]);
@@ -638,10 +640,29 @@ function SheetCard({sheet,onOpen,onDelete,onExport,onInsert}){
     , 0)
   }));
   const crossTotal = counts.reduce((a,s)=>a+s.total,0);
-  const student = [sheet.meta.prenom,sheet.meta.nom].filter(Boolean).join(" ")||null;
-  const label = student
-    ? `${student} — ${sheet.meta.feuille||"Sans titre"}`
-    : sheet.meta.feuille||"Sans titre";
+  // 1. Nom étudiant
+  const membre = _membres.find(m => m.user_id === sheet.meta.user_id);
+  const nomEtudiant = membre ? membre.full_name : (sheet.meta.prenom || 'Inconnu');
+  // 2. Ref feuille
+  const feuilleId = (sheet.exercices||[])[0]?.feuille_id;
+  const refFeuille = feuilleId ? (_feuilles[feuilleId] || feuilleId) : '—';
+  // 3. Exos
+  const exoRefs = (sheet.exercices||[]).map(e => e.reference).filter(Boolean);
+  const exoStr = exoRefs.length > 0 ? exoRefs.join(', ') : null;
+  // 4. Date dernière session
+  const sessions = sheet.meta.sessions || [];
+  const lastSession = sessions.length > 0 ? sessions[sessions.length - 1] : null;
+  let dateStr = null;
+  if (lastSession && lastSession.date) {
+    const d = new Date(lastSession.date);
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const yy = String(d.getFullYear()).slice(-2);
+    dateStr = `${dd}/${mm}/${yy}`;
+  }
+  let label = `${nomEtudiant} — ${refFeuille}`;
+  if (exoStr) label += ` · ${exoStr}`;
+  if (dateStr) label += ` · ${dateStr}`;
   const date = new Date(sheet.createdAt).toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
   return React.createElement("div",{style:{background:"white",borderRadius:12,border:"1px solid #E0D5C5",padding:"14px 16px",display:"flex",alignItems:"center",gap:14,boxShadow:"0 1px 6px rgba(0,0,0,0.04)"}},
     React.createElement("div",{onClick:onOpen,style:{cursor:"pointer",flexShrink:0}},
@@ -740,6 +761,31 @@ function App(){
   useEffect(() => {
     if (!user) return;
     db.loadAll().then(loaded => setSheets(loaded));
+  }, [user]);
+
+  // Charge _membres et _feuilles dès que l'utilisateur est connecté
+  useEffect(() => {
+    if (!user) return;
+    // _membres
+    sb.from('profiles').select('user_id,full_name').then(({data}) => {
+      if (data && data.length > 0) {
+        _membres = data.map(r => ({user_id:r.user_id, full_name:r.full_name||r.user_id.slice(0,8)}));
+      } else {
+        sb.from('membre_equipe').select('user_id').then(({data:d2}) => {
+          if (d2) _membres = d2.map(r => ({user_id:r.user_id, full_name:r.user_id.slice(0,8)}));
+        });
+      }
+    });
+    // _feuilles : toutes les feuilles autorisées de l'équipe
+    sb.from('membre_equipe').select('id').then(({data:membres}) => {
+      if (!membres || membres.length === 0) return;
+      sb.from('feuilles_autorisees')
+        .select('feuille_id, feuille_entrainement(id,titre)')
+        .in('membre_id', membres.map(m => m.id))
+        .then(({data}) => {
+          if (data) data.forEach(r => { if (r.feuille_entrainement) _feuilles[r.feuille_entrainement.id] = r.feuille_entrainement.titre; });
+        });
+    });
   }, [user]);
 
   const create = () => {
