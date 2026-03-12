@@ -649,20 +649,9 @@ function SheetCard({sheet,onOpen,onDelete,onExport,onInsert}){
   // 3. Exos
   const exoRefs = (sheet.exercices||[]).map(e => e.reference).filter(Boolean);
   const exoStr = exoRefs.length > 0 ? exoRefs.join(', ') : null;
-  // 4. Date dernière session
-  const sessions = sheet.meta.sessions || [];
-  const lastSession = sessions.length > 0 ? sessions[sessions.length - 1] : null;
-  let dateStr = null;
-  if (lastSession && lastSession.date) {
-    const d = new Date(lastSession.date);
-    const dd = String(d.getDate()).padStart(2,'0');
-    const mm = String(d.getMonth()+1).padStart(2,'0');
-    const yy = String(d.getFullYear()).slice(-2);
-    dateStr = `${dd}/${mm}/${yy}`;
-  }
-  let label = `${nomEtudiant} — ${refFeuille}`;
+  let label = nomEtudiant;
+  if (feuilleId) label += ` — ${refFeuille}`;
   if (exoStr) label += ` · ${exoStr}`;
-  if (dateStr) label += ` · ${dateStr}`;
   const date = new Date(sheet.createdAt).toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
   return React.createElement("div",{style:{background:"white",borderRadius:12,border:"1px solid #E0D5C5",padding:"14px 16px",display:"flex",alignItems:"center",gap:14,boxShadow:"0 1px 6px rgba(0,0,0,0.04)"}},
     React.createElement("div",{onClick:onOpen,style:{cursor:"pointer",flexShrink:0}},
