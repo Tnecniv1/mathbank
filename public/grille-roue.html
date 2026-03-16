@@ -820,9 +820,13 @@ function App(){
   if (!user) return React.createElement(LoginScreen,{onLogin:(u)=>{ currentUserId=u.id; setUser(u); }});
 
   const active = sheets.find(s=>s.id===activeId);
-  const filteredSheets = filter==='en_cours' ? sheets.filter(s=>!s.closed)
-                       : filter==='boucle'   ? sheets.filter(s=>s.closed&&!s.inserted)
-                       :                       sheets.filter(s=>s.closed&&!!s.inserted);
+  const lastSessionDate = s => s.meta?.sessions?.length
+    ? (s.meta.sessions[s.meta.sessions.length - 1]?.date ?? "0000-00-00")
+    : "0000-00-00";
+  const sortByLastSession = arr => [...arr].sort((a,b) => lastSessionDate(a).localeCompare(lastSessionDate(b)));
+  const filteredSheets = filter==='en_cours' ? sortByLastSession(sheets.filter(s=>!s.closed))
+                       : filter==='boucle'   ? sortByLastSession(sheets.filter(s=>s.closed&&!s.inserted))
+                       :                       sortByLastSession(sheets.filter(s=>s.closed&&!!s.inserted));
 
   const saveIndicator =
     saveStatus === 'saving'  ? React.createElement("span",{style:{fontSize:11,color:"#8B7355",fontStyle:"italic"}},"Sauvegarde…") :
