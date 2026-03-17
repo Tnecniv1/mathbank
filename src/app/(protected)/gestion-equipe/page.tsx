@@ -395,7 +395,7 @@ export default function GestionEquipePage() {
  setLoadingParcours(true);
  const { data } = await supabase
   .from('etape_parcours')
-  .select('id, numero, titre_snapshot, statut, autorisee_at, validee_at, feuille_id, chapitre_snapshot, clot_noeud')
+  .select('id, numero, titre_snapshot, statut, autorisee_at, validee_at, feuille_id, chapitre_snapshot, clot_noeud, type')
   .eq('user_id', membre.user_id)
   .order('numero', { ascending: true });
  setEtapesParcours(data || []);
