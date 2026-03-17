@@ -590,12 +590,14 @@ export default function GestionEquipePage() {
  setSyntheseData(null);
 
  // Chercher l'étape correspondante pour proposer la clôture du nœud
- const { data: etapeData } = await supabase
+ const etapeData = await supabase
  .from('etape_parcours')
  .select('id')
  .eq('user_id', notif.metadata.user_id)
  .eq('feuille_id', notif.metadata.feuille_id)
- .maybeSingle();
+ .order('autorisee_at', { ascending: false })
+ .limit(1)
+ .then(res => res.data?.[0] ?? null);
 
  if (etapeData) {
  setEtapeACloturer(etapeData.id);
