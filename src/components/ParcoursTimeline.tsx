@@ -37,10 +37,10 @@ const C = {
 } as const;
 
 /* ─── Constantes layout ──────────────────────────────────────────── */
-const FE_ROW_H    = 60;  // hauteur allouée par FE satellite
-const NOEUD_W     = 100;
-const NOEUD_H     = 42;
-const CONNECTOR_W = 28;
+const FE_ROW_H    = 72;  // hauteur allouée par FE satellite
+const NOEUD_W     = 140;
+const NOEUD_H     = 48;
+const CONNECTOR_W = 36;
 
 /* ─── Helpers ────────────────────────────────────────────────────── */
 function couleurStatut(statut: string): string {
@@ -102,7 +102,7 @@ function BulleFE({ etape, side }: { etape: Etape; side: 'left' | 'right' }) {
         border: `1.5px solid ${color}`,
         borderRadius: '10px',
         padding: '7px 11px',
-        maxWidth: '178px',
+        maxWidth: '220px',
         minWidth: '100px',
         color: C.encre,
         fontFamily: 'Georgia, serif',
@@ -169,15 +169,16 @@ function OvaleNoeud({ groupe }: { groupe: Groupe }) {
           justifyContent: 'center',
           color: '#fff',
           fontWeight: 700,
-          fontSize: '11px',
+          fontSize: '12px',
           letterSpacing: '0.01em',
           boxShadow: `0 3px 14px ${color}55`,
           fontFamily: 'Georgia, serif',
-          padding: '0 10px',
+          padding: '4px 10px',
           textAlign: 'center',
           overflow: 'hidden',
-          whiteSpace: 'nowrap',
-          textOverflow: 'ellipsis',
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
           zIndex: 2,
           cursor: 'default',
         }}

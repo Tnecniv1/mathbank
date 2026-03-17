@@ -934,7 +934,7 @@ export default function GestionEquipePage() {
  {/* Modal Parcours */}
  {membreParcoursModal && (
  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-  <div className="bg-cream-50 rounded-lg max-w-2xl w-full max-h-[85vh] flex flex-col">
+  <div className="bg-cream-50 rounded-lg max-w-3xl w-full max-h-[85vh] overflow-y-auto flex flex-col">
   {/* Header */}
   <div className="px-6 py-4 border-b border-border flex items-center justify-between flex-shrink-0">
    <h2 className="text-xl font-bold text-ink">
