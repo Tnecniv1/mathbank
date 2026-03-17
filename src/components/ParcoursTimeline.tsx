@@ -32,91 +32,80 @@ const C = {
   ligne:     '#D0C5B5',
   muted:     '#8B7355',
   validee:   '#BA69C8',
-  en_cours:  '#83C5BE',
-  en_attente:'#C8BBA8',
-  mecanique: '#BA69C8',
   chaotique: '#F4A261',
 } as const;
 
-/* ─── Constantes layout ──────────────────────────────────────────── */
+/* ─── Layout (coordonnées fixes pour le SVG) ─────────────────────── */
 const NOEUD_W     = 200;
 const NOEUD_H     = 56;
-const NOEUD_HALF  = NOEUD_W / 2;   // 100
-const AXIS_OFFSET = 40;             // nœud décalé de 40px à gauche du centre
-const BRACKET_GAP = 28;             // espace nœud-droite → spine
-const BRANCH_LEN  = 32;             // branche horizontale spine → FE
+const NOEUD_HALF  = NOEUD_W / 2;    // 100
 const FE_ROW_H    = 68;
+const FE_W        = 200;
 const GROUP_MB    = 60;
+const BRACKET_GAP = 28;
+const BRANCH_LEN  = 32;
+const CONTAINER_W = 780;
+const CENTER      = CONTAINER_W / 2; // 390
 
-// Positions CSS responsive (calc)
-// nœud right  = 50% + (NOEUD_HALF - AXIS_OFFSET) = 50% + 50px
-// spine       = nœud right + BRACKET_GAP          = 50% + 70px
-// FE left     = spine + BRANCH_LEN                = 50% + 90px
-const noeudRightPx  = NOEUD_HALF - AXIS_OFFSET;               // +50
-const spinePx       = noeudRightPx + BRACKET_GAP;             // +70
-const feLeftPx      = spinePx + BRANCH_LEN;                   // +90
-const S = {
-  axis:      `calc(50% - ${AXIS_OFFSET}px)`,
-  noeudLeft: `calc(50% - ${AXIS_OFFSET + NOEUD_HALF}px)`,     // calc(50% - 130px)
-  hLineLeft: `calc(50% + ${noeudRightPx}px)`,                 // calc(50% + 50px)
-  spine:     `calc(50% + ${spinePx}px)`,                      // calc(50% + 70px)
-  feLeft:    `calc(50% + ${feLeftPx}px)`,                     // calc(50% + 90px)
-};
+// Nœud bornes
+const NOEUD_LEFT  = CENTER - NOEUD_HALF; // 290
+const NOEUD_RIGHT = CENTER + NOEUD_HALF; // 490
+
+// Positions côté droit (groupes pairs 0, 2, 4…)
+const R_SPINE = NOEUD_RIGHT + BRACKET_GAP; // 518
+const R_FE_L  = R_SPINE + BRANCH_LEN;      // 550
+
+// Positions côté gauche (groupes impairs 1, 3, 5…)
+const L_SPINE = NOEUD_LEFT - BRACKET_GAP;  // 262
+const L_FE_R  = L_SPINE - BRANCH_LEN;      // 230
+const L_FE_L  = L_FE_R - FE_W;             // 30
 
 /* ─── Helpers ────────────────────────────────────────────────────── */
-function iconeStatut(statut: string): string {
-  if (statut === 'validee')    return '✅';
-  if (statut === 'en_cours')   return '🔄';
-  if (statut === 'en_attente') return '⏳';
+function iconeStatut(s: string): string {
+  if (s === 'validee')    return '✅';
+  if (s === 'en_cours')   return '🔄';
+  if (s === 'en_attente') return '⏳';
   return '🔒';
 }
 
-
-function couleurBordureFE(etape: Etape): string {
-  if (etape.type === 'mecanique') return C.mecanique;
-  if (etape.type === 'chaotique') return C.chaotique;
-  return C.en_attente;
+function couleurNoeud(g: Groupe): string {
+  return g.etapes.every(e => e.statut === 'validee') ? C.validee : C.chaotique;
 }
 
-function couleurNoeud(groupe: Groupe): string {
-  const statuts = groupe.etapes.map(e => e.statut);
-  if (statuts.every(s => s === 'validee')) return C.validee;
-  return C.chaotique;
+function feStyle(type?: string | null): { bg: string; border: string; color: string } {
+  if (type === 'mecanique') return { bg: '#EEEDFE', border: '#AFA9EC', color: '#3C3489' };
+  if (type === 'chaotique') return { bg: '#FAEEDA', border: '#EF9F27', color: '#633806' };
+  return { bg: '#F0EDE8', border: '#C8BBA8', color: '#2C1810' };
 }
 
 function grouperEtapes(etapes: Etape[]): Groupe[] {
-  const groupes: Groupe[] = [];
-  for (const etape of etapes) {
-    const cle     = etape.chapitre_snapshot ?? null;
-    const dernier = groupes[groupes.length - 1];
-    if (dernier && dernier.chapitre_snapshot === cle) {
-      dernier.etapes.push(etape);
-    } else {
-      groupes.push({ chapitre_snapshot: cle, etapes: [etape] });
-    }
+  const gs: Groupe[] = [];
+  for (const e of etapes) {
+    const cle  = e.chapitre_snapshot ?? null;
+    const last = gs[gs.length - 1];
+    if (last && last.chapitre_snapshot === cle) last.etapes.push(e);
+    else gs.push({ chapitre_snapshot: cle, etapes: [e] });
   }
-  return groupes;
+  return gs;
 }
 
 /* ─── Bulle FE ───────────────────────────────────────────────────── */
 function BulleFE({ etape }: { etape: Etape }) {
-  const border = couleurBordureFE(etape);
-  const icone  = iconeStatut(etape.statut);
-
+  const s = feStyle(etape.type);
   return (
     <div style={{
-      background: C.fond,
-      border: `1.5px solid ${border}`,
+      background: s.bg,
+      border: `1.5px solid ${s.border}`,
       borderRadius: '10px',
       padding: '10px 14px',
-      width: '220px',
-      color: C.encre,
+      width: FE_W,
+      color: s.color,
       fontFamily: 'Georgia, serif',
-      boxShadow: `0 2px 8px ${border}22`,
+      boxShadow: `0 2px 8px ${s.border}33`,
       textAlign: 'center',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
-        <span style={{ fontSize: '13px', flexShrink: 0 }}>{icone}</span>
+        <span style={{ fontSize: '13px', flexShrink: 0 }}>{iconeStatut(etape.statut)}</span>
         <span style={{
           fontWeight: 700,
           fontSize: '13px',
@@ -133,20 +122,20 @@ function BulleFE({ etape }: { etape: Etape }) {
   );
 }
 
-/* ─── Rectangle nœud ─────────────────────────────────────────────── */
+/* ─── Nœud rectangle arrondi ─────────────────────────────────────── */
 function RectNoeud({ groupe }: { groupe: Groupe }) {
-  const color    = couleurNoeud(groupe);
-  const label    = groupe.chapitre_snapshot ?? '—';
-  const derniere = groupe.etapes[groupe.etapes.length - 1];
-
+  const color = couleurNoeud(groupe);
+  const label = groupe.chapitre_snapshot ?? '—';
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-      <div style={{
+    <div
+      style={{
         background: color,
-        borderRadius: `${NOEUD_H / 2}px`,
-        width: `${NOEUD_W}px`,
-        height: `${NOEUD_H}px`,
-        display: 'flex',
+        borderRadius: NOEUD_H / 2,
+        width: NOEUD_W,
+        height: NOEUD_H,
+        display: '-webkit-box',
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: 'vertical',
         alignItems: 'center',
         justifyContent: 'center',
         color: '#fff',
@@ -157,15 +146,11 @@ function RectNoeud({ groupe }: { groupe: Groupe }) {
         textAlign: 'center',
         boxShadow: `0 3px 14px ${color}55`,
         overflow: 'hidden',
-        display: '-webkit-box',
-        WebkitLineClamp: 2,
-        WebkitBoxOrient: 'vertical',
-        zIndex: 2,
+        zIndex: 3,
       } as React.CSSProperties}
-        title={label}
-      >
-        {label}
-      </div>
+      title={label}
+    >
+      {label}
     </div>
   );
 }
@@ -185,47 +170,58 @@ export default function ParcoursTimeline({ etapes }: Props) {
   return (
     <div style={{
       position: 'relative',
-      width: '100%',
-      maxWidth: '800px',
+      width: CONTAINER_W,
+      maxWidth: '100%',
       margin: '0 auto',
-      paddingTop: '32px',
-      paddingBottom: '32px',
+      paddingTop: 32,
+      paddingBottom: 32,
       fontFamily: 'Georgia, serif',
+      overflowX: 'auto',
     }}>
 
-      {/* Ligne verticale de l'axe */}
+      {/* Ligne d'axe — fond gris pointillé (visible avant le 1er groupe) */}
       <div style={{
         position: 'absolute',
         top: 0,
         bottom: 0,
-        left: S.axis,
-        transform: 'translateX(-1px)',
+        left: CENTER - 1,
         borderLeft: `2px dashed ${C.ligne}`,
         zIndex: 0,
       }} />
 
       {/* Cercle de départ */}
-      <div style={{ position: 'relative', height: '28px', marginBottom: '16px', zIndex: 1 }}>
+      <div style={{ position: 'relative', height: 28, marginBottom: 16, zIndex: 4 }}>
         <div style={{
           position: 'absolute',
-          left: S.axis,
+          left: CENTER,
           top: '50%',
           transform: 'translate(-50%, -50%)',
-          width: '14px',
-          height: '14px',
+          width: 14,
+          height: 14,
           borderRadius: '50%',
           background: C.validee,
           boxShadow: `0 0 0 3px ${C.fond}, 0 0 0 5px ${C.validee}55`,
-          zIndex: 1,
         }} />
       </div>
 
       {/* Groupes */}
       {groupes.map((groupe, gi) => {
-        const n       = groupe.etapes.length;
-        const groupH  = n * FE_ROW_H;
-        const noeudCY = groupH / 2;             // nœud center Y within group
-        const noeudT  = noeudCY - NOEUD_H / 2; // nœud top within group
+        const isRight  = gi % 2 === 0;
+        const n        = groupe.etapes.length;
+        const groupH   = n * FE_ROW_H;
+        const noeudCY  = groupH / 2;
+        const color    = couleurNoeud(groupe);
+
+        // Coordonnées SVG selon le côté
+        const spineX   = isRight ? R_SPINE : L_SPINE;
+        const hLineX1  = isRight ? NOEUD_RIGHT : NOEUD_LEFT;
+        const hLineX2  = isRight ? R_SPINE     : L_SPINE;
+        const branchX2 = isRight ? R_FE_L      : L_FE_R;
+        const feLeft   = isRight ? R_FE_L      : L_FE_L;
+
+        const spineY1  = FE_ROW_H / 2;
+        const spineY2  = (n - 1) * FE_ROW_H + FE_ROW_H / 2;
+        const markerId = `ar-${gi}`;
 
         return (
           <div
@@ -238,63 +234,103 @@ export default function ParcoursTimeline({ etapes }: Props) {
               animationDelay: `${gi * 150}ms`,
             }}
           >
+            {/* Segment d'axe coloré (couleur de CE nœud, s'étend dans le gap ci-dessous) */}
+            <div style={{
+              position: 'absolute',
+              left: CENTER - 1,
+              top: 0,
+              bottom: gi < groupes.length - 1 ? -GROUP_MB : 0,
+              borderLeft: `2px solid ${color}`,
+              zIndex: 1,
+            }} />
+
+            {/* SVG — connecteurs avec flèches */}
+            <svg
+              width={CONTAINER_W}
+              height={groupH}
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                overflow: 'visible',
+                zIndex: 2,
+              }}
+            >
+              <defs>
+                <marker
+                  id={markerId}
+                  viewBox="0 0 8 8"
+                  refX="7"
+                  refY="4"
+                  markerWidth="5"
+                  markerHeight="5"
+                  orient="auto"
+                >
+                  <path d="M 0 0 L 8 4 L 0 8 z" fill={color} />
+                </marker>
+              </defs>
+
+              {/* Ligne H : nœud → spine */}
+              <line
+                x1={hLineX1} y1={noeudCY}
+                x2={hLineX2} y2={noeudCY}
+                stroke={color}
+                strokeWidth="1.5"
+                markerEnd={`url(#${markerId})`}
+              />
+
+              {/* Spine verticale */}
+              {n > 1 && (
+                <line
+                  x1={spineX} y1={spineY1}
+                  x2={spineX} y2={spineY2}
+                  stroke={color}
+                  strokeWidth="1.5"
+                />
+              )}
+
+              {/* Branches : spine → FE */}
+              {groupe.etapes.map((_, ei) => {
+                const feCY = ei * FE_ROW_H + FE_ROW_H / 2;
+                return (
+                  <line
+                    key={ei}
+                    x1={spineX}    y1={feCY}
+                    x2={branchX2}  y2={feCY}
+                    stroke={color}
+                    strokeWidth="1.5"
+                    markerEnd={`url(#${markerId})`}
+                  />
+                );
+              })}
+            </svg>
+
             {/* Nœud */}
             <div style={{
               position: 'absolute',
-              left: S.noeudLeft,
-              top: noeudT,
-              zIndex: 2,
+              left: NOEUD_LEFT,
+              top: noeudCY - NOEUD_H / 2,
+              zIndex: 3,
             }}>
               <RectNoeud groupe={groupe} />
             </div>
 
-            {/* Ligne horizontale nœud → spine (au niveau du centre du nœud) */}
-            <div style={{
-              position: 'absolute',
-              left: S.hLineLeft,
-              top: noeudCY,
-              width: BRACKET_GAP,
-              transform: 'translateY(-1px)',
-              borderTop: `1.5px dashed ${C.ligne}`,
-            }} />
-
-            {/* Spine verticale (de la première FE à la dernière) */}
-            {n > 1 && (
-              <div style={{
-                position: 'absolute',
-                left: S.spine,
-                top: FE_ROW_H / 2,
-                height: (n - 1) * FE_ROW_H,
-                transform: 'translateX(-1px)',
-                borderLeft: `1.5px dashed ${C.ligne}`,
-              }} />
-            )}
-
-            {/* Branches + FE bubbles */}
+            {/* Bulles FE */}
             {groupe.etapes.map((etape, ei) => {
               const feCY = ei * FE_ROW_H + FE_ROW_H / 2;
               return (
-                <React.Fragment key={etape.id ?? `${gi}-${ei}`}>
-                  {/* Branche horizontale spine → FE */}
-                  <div style={{
+                <div
+                  key={etape.id ?? `${gi}-${ei}`}
+                  style={{
                     position: 'absolute',
-                    left: S.spine,
-                    top: feCY,
-                    width: BRANCH_LEN,
-                    transform: 'translateY(-1px)',
-                    borderTop: `1.5px dashed ${C.ligne}`,
-                  }} />
-                  {/* Bulle FE */}
-                  <div style={{
-                    position: 'absolute',
-                    left: S.feLeft,
+                    left: feLeft,
                     top: feCY,
                     transform: 'translateY(-50%)',
-                    zIndex: 1,
-                  }}>
-                    <BulleFE etape={etape} />
-                  </div>
-                </React.Fragment>
+                    zIndex: 3,
+                  }}
+                >
+                  <BulleFE etape={etape} />
+                </div>
               );
             })}
           </div>
@@ -302,41 +338,34 @@ export default function ParcoursTimeline({ etapes }: Props) {
       })}
 
       {/* Cercle d'arrivée */}
-      <div style={{ position: 'relative', height: '20px', zIndex: 1 }}>
+      <div style={{ position: 'relative', height: 20, zIndex: 4 }}>
         <div style={{
           position: 'absolute',
-          left: S.axis,
+          left: CENTER,
           top: '50%',
           transform: 'translate(-50%, -50%)',
-          width: '14px',
-          height: '14px',
+          width: 14,
+          height: 14,
           borderRadius: '50%',
-          background: C.en_cours,
-          boxShadow: `0 0 0 3px ${C.fond}, 0 0 0 5px ${C.en_cours}55`,
-          zIndex: 1,
+          background: C.chaotique,
+          boxShadow: `0 0 0 3px ${C.fond}, 0 0 0 5px ${C.chaotique}55`,
         }} />
       </div>
 
       {/* Légende */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        gap: '24px',
-        marginTop: '28px',
-      }}>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 24, marginTop: 28 }}>
         {[
-          { label: 'Mécanique', color: C.mecanique },
-          { label: 'Chaotique', color: C.chaotique },
-        ].map(({ label, color }) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+          { label: 'Mécanique', bg: '#EEEDFE', border: '#AFA9EC' },
+          { label: 'Chaotique', bg: '#FAEEDA', border: '#EF9F27' },
+        ].map(({ label, bg, border }) => (
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
             <div style={{
-              width: '16px',
-              height: '16px',
-              border: `2px solid ${color}`,
-              borderRadius: '4px',
-              background: C.fond,
+              width: 16, height: 16,
+              border: `2px solid ${border}`,
+              borderRadius: 4,
+              background: bg,
             }} />
-            <span style={{ fontSize: '11px', color: C.muted, fontFamily: 'Georgia, serif' }}>
+            <span style={{ fontSize: 11, color: C.muted, fontFamily: 'Georgia, serif' }}>
               {label}
             </span>
           </div>
