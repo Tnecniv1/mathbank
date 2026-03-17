@@ -47,11 +47,19 @@ type Props = {
  onUpdate: () => void;
 };
 
+type ChapitreOption = {
+ id: string;
+ titre: string;
+ sujet_titre: string;
+};
+
 export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: Props) {
  const [loading, setLoading] = useState(true);
  const [niveaux, setNiveaux] = useState<Niveau[]>([]);
  const [modeVue, setModeVue] = useState<'scope' | 'graphe'>('scope');
  const [niveauSelectionne, setNiveauSelectionne] = useState<string>('');
+ const [chapitreId, setChapitreId] = useState<string | null>(null);
+ const [chapitresDisponibles, setChapitresDisponibles] = useState<ChapitreOption[]>([]);
  
  // États pour les feuilles autorisées
  const [feuilleMecaAutorisee, setFeuilleMecaAutorisee] = useState<Feuille | null>(null);
@@ -75,6 +83,25 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
  async function loadData() {
  try {
  setLoading(true);
+
+ // 0. Charger les chapitres pour le sélecteur
+ const { data: chapitresData } = await supabase
+ .from('chapitre')
+ .select('id, titre, sujet:sujet_id(titre, ordre), ordre')
+ .order('ordre');
+
+ const chapitresAvecSujet: ChapitreOption[] = (chapitresData || [])
+ .map((c: any) => ({
+ id: c.id,
+ titre: c.titre,
+ sujet_titre: c.sujet?.titre || '',
+ _sujet_ordre: c.sujet?.ordre ?? 0,
+ _chapitre_ordre: c.ordre ?? 0,
+ }))
+ .sort((a: any, b: any) => a._sujet_ordre - b._sujet_ordre || a._chapitre_ordre - b._chapitre_ordre)
+ .map(({ id, titre, sujet_titre }: ChapitreOption) => ({ id, titre, sujet_titre }));
+
+ setChapitresDisponibles(chapitresAvecSujet);
 
  // 1. Charger la structure hiérarchique SANS les feuilles
  const { data: niveauxData } = await supabase
@@ -203,6 +230,7 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
  p_membre_id: membre.membre_id || null,
  p_feuilles_a_ajouter: [feuilleId],
  p_feuilles_a_retirer: [],
+ p_chapitre_id: chapitreId,
  });
 
  if (error) throw error;
@@ -231,6 +259,7 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
  p_membre_id: membre.membre_id || null,
  p_feuilles_a_ajouter: [],
  p_feuilles_a_retirer: [feuilleId],
+ p_chapitre_id: chapitreId,
  });
 
  if (error) throw error;
@@ -310,7 +339,10 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
  ...s,
  chapitres: s.chapitres.map(c => ({
  ...c,
- feuilles: c.feuilles.filter(f => f.type === typeFiltre)
+ feuilles: c.feuilles.filter(f =>
+ f.type === typeFiltre &&
+ (!chapitreId || c.id === chapitreId)
+ )
  })).filter(c => c.feuilles.length > 0)
  })).filter(s => s.chapitres.length > 0);
 
@@ -549,6 +581,25 @@ export default function ModalGererFeuillesScope({ membre, onClose, onUpdate }: P
  {/* Contenu selon le mode */}
  {modeVue === 'scope' ? (
  <div className="p-6 space-y-6">
+ {/* Sélecteur de chapitre */}
+ <div>
+ <label className="block text-sm font-medium text-ink mb-2">
+ Nœud (chapitre) :
+ </label>
+ <select
+ value={chapitreId ?? ''}
+ onChange={(e) => setChapitreId(e.target.value || null)}
+ className="w-full px-3 py-2 border border-border rounded-lg bg-cream-50 text-ink focus:border-accent outline-none"
+ >
+ <option value="">-- Choisir un nœud (chapitre) --</option>
+ {chapitresDisponibles.map(c => (
+ <option key={c.id} value={c.id}>
+ {c.sujet_titre} — {c.titre}
+ </option>
+ ))}
+ </select>
+ </div>
+
  {/* Section Mécanique */}
  <div className="border border-border rounded-lg p-4 /20">
  <h3 className="text-lg font-bold text-accent mb-4 flex items-center gap-2">

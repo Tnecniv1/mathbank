@@ -57,6 +57,8 @@ type EtapeParcours = {
  autorisee_at: string | null;
  validee_at: string | null;
  feuille_id: string;
+ chapitre_snapshot?: string | null;
+ clot_noeud?: boolean;
 };
 
 type FeuilleSimple = {
@@ -168,6 +170,9 @@ export default function GestionEquipePage() {
  const [scoreRedaction, setScoreRedaction] = useState<number>(0);
  const [nbSessions, setNbSessions] = useState<number>(0);
  const [tempsTotal, setTempsTotal] = useState<number>(0);
+
+ const [showClotureNoeudModal, setShowClotureNoeudModal] = useState(false);
+ const [etapeACloturer, setEtapeACloturer] = useState<string | null>(null);
 
  useEffect(() => {
  // Récupérer l'ID de l'équipe depuis l'URL
@@ -390,7 +395,7 @@ export default function GestionEquipePage() {
  setLoadingParcours(true);
  const { data } = await supabase
   .from('etape_parcours')
-  .select('id, numero, titre_snapshot, statut, autorisee_at, validee_at, feuille_id')
+  .select('id, numero, titre_snapshot, statut, autorisee_at, validee_at, feuille_id, chapitre_snapshot, clot_noeud')
   .eq('user_id', membre.user_id)
   .order('numero', { ascending: true });
  setEtapesParcours(data || []);
@@ -581,14 +586,39 @@ export default function GestionEquipePage() {
 
  if (error) throw error;
 
- alert('✓ Soumission validée');
  setShowSyntheseModal(false);
  setSyntheseData(null);
+
+ // Chercher l'étape correspondante pour proposer la clôture du nœud
+ const { data: etapeData } = await supabase
+ .from('etape_parcours')
+ .select('id')
+ .eq('user_id', notif.metadata.user_id)
+ .eq('feuille_id', notif.metadata.feuille_id)
+ .maybeSingle();
+
+ if (etapeData) {
+ setEtapeACloturer(etapeData.id);
+ setShowClotureNoeudModal(true);
+ } else {
  if (equipeId) loadData(equipeId);
+ }
  } catch (error) {
  console.error(error);
  alert('Erreur lors de la validation');
  }
+ }
+
+ async function handleCloturerNoeud(clot: boolean) {
+ if (clot && etapeACloturer) {
+ await supabase
+ .from('etape_parcours')
+ .update({ clot_noeud: true })
+ .eq('id', etapeACloturer);
+ }
+ setShowClotureNoeudModal(false);
+ setEtapeACloturer(null);
+ if (equipeId) loadData(equipeId);
  }
 
  function handleOuvrirRejet(notif: Notification) {
@@ -1206,6 +1236,30 @@ export default function GestionEquipePage() {
  </button>
  </div>
  )}
+ </div>
+ </div>
+ )}
+ {/* Mini-modal Clôture Nœud */}
+ {showClotureNoeudModal && (
+ <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
+ <div className="bg-cream-50 rounded-xl shadow-xl max-w-sm w-full p-6 border border-border">
+ <p className="text-base font-semibold text-ink mb-5 text-center">
+ Cette feuille clôt-elle le nœud en cours ?
+ </p>
+ <div className="flex flex-col gap-3">
+ <button
+ onClick={() => handleCloturerNoeud(true)}
+ className="w-full px-4 py-2.5 bg-green-500 hover:bg-green-600 text-white font-medium rounded-lg transition-colors"
+ >
+ ✅ Oui, nœud validé
+ </button>
+ <button
+ onClick={() => handleCloturerNoeud(false)}
+ className="w-full px-4 py-2.5 bg-cream-200 hover:bg-cream-300 text-ink font-medium rounded-lg transition-colors"
+ >
+ ➡️ Non, continuer le nœud
+ </button>
+ </div>
  </div>
  </div>
  )}

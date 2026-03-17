@@ -10,11 +10,18 @@ interface Etape {
   statut: string; // 'validee' | 'en_attente' | 'en_cours'
   validee_at?: string | null;
   autorisee_at?: string | null;
+  chapitre_snapshot?: string | null;
+  clot_noeud?: boolean;
 }
 
 interface Props {
   etapes: Etape[];
 }
+
+type Groupe = {
+  chapitre_snapshot: string | null;
+  etapes: Etape[];
+};
 
 /* ─── Palette ────────────────────────────────────────────────────── */
 const COULEURS = {
@@ -48,6 +55,20 @@ function dateEtape(etape: Etape): string | null {
   if (etape.autorisee_at)
     return `Autorisée le ${new Date(etape.autorisee_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}`;
   return null;
+}
+
+function grouperEtapes(etapes: Etape[]): Groupe[] {
+  const groupes: Groupe[] = [];
+  for (const etape of etapes) {
+    const cle = etape.chapitre_snapshot ?? null;
+    const dernier = groupes[groupes.length - 1];
+    if (dernier && dernier.chapitre_snapshot === cle) {
+      dernier.etapes.push(etape);
+    } else {
+      groupes.push({ chapitre_snapshot: cle, etapes: [etape] });
+    }
+  }
+  return groupes;
 }
 
 /* ─── Sous-composant : bulle d'annotation ───────────────────────── */
@@ -133,6 +154,9 @@ export default function ParcoursTimeline({ etapes }: Props) {
     );
   }
 
+  const groupes = grouperEtapes(etapes);
+  let globalIndex = 0;
+
   return (
     <div
       style={{
@@ -171,61 +195,104 @@ export default function ParcoursTimeline({ etapes }: Props) {
         />
       </div>
 
-      {/* Étapes */}
-      {etapes.map((etape, index) => {
-        const isOdd  = etape.numero % 2 === 1; // impaire → annotation à droite
-        const color  = couleurStatut(etape.statut);
-        const delay  = index * 110;
+      {/* Groupes */}
+      {groupes.map((groupe, gi) => {
+        const derniere = groupe.etapes[groupe.etapes.length - 1];
 
         return (
-          <div
-            key={etape.id ?? etape.numero}
-            style={{
-              position: 'relative',
-              display: 'flex',
-              alignItems: 'center',
-              marginBottom: '32px',
-              animation: `parcours-fade-in 0.4s ease both`,
-              animationDelay: `${delay}ms`,
-            }}
-          >
-            {/* Zone gauche */}
-            <div
-              style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-                paddingRight: isOdd ? '0' : '0',
-              }}
-            >
-              {!isOdd && (
-                <>
-                  <AnnotationBubble etape={etape} side="right" />
-                  <ConnectorH color={color} />
-                </>
-              )}
-            </div>
+          <div key={gi}>
+            {/* Label de chapitre */}
+            {groupe.chapitre_snapshot && (
+              <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', margin: '4px 0 18px', zIndex: 1 }}>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    color: COULEURS.muted,
+                    fontStyle: 'italic',
+                    background: COULEURS.fond,
+                    padding: '0 10px',
+                  }}
+                >
+                  📍 {groupe.chapitre_snapshot}
+                </span>
+              </div>
+            )}
 
-            {/* Nœud */}
-            <Noeud etape={etape} />
+            {/* Étapes du groupe */}
+            {groupe.etapes.map((etape) => {
+              const idx    = globalIndex++;
+              const isOdd  = etape.numero % 2 === 1;
+              const color  = couleurStatut(etape.statut);
+              const delay  = idx * 110;
 
-            {/* Zone droite */}
-            <div
-              style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-start',
-              }}
-            >
-              {isOdd && (
-                <>
-                  <ConnectorH color={color} />
-                  <AnnotationBubble etape={etape} side="left" />
-                </>
-              )}
-            </div>
+              return (
+                <div
+                  key={etape.id ?? etape.numero}
+                  style={{
+                    position: 'relative',
+                    display: 'flex',
+                    alignItems: 'center',
+                    marginBottom: '32px',
+                    animation: `parcours-fade-in 0.4s ease both`,
+                    animationDelay: `${delay}ms`,
+                  }}
+                >
+                  {/* Zone gauche */}
+                  <div
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'flex-end',
+                    }}
+                  >
+                    {!isOdd && (
+                      <>
+                        <AnnotationBubble etape={etape} side="right" />
+                        <ConnectorH color={color} />
+                      </>
+                    )}
+                  </div>
+
+                  {/* Nœud */}
+                  <Noeud etape={etape} />
+
+                  {/* Zone droite */}
+                  <div
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'flex-start',
+                    }}
+                  >
+                    {isOdd && (
+                      <>
+                        <ConnectorH color={color} />
+                        <AnnotationBubble etape={etape} side="left" />
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Séparateur "Nœud validé" si clot_noeud sur la dernière étape */}
+            {derniere.clot_noeud && (
+              <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', margin: '-16px 0 28px', zIndex: 1 }}>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    color: '#5a8a5a',
+                    fontStyle: 'italic',
+                    background: COULEURS.fond,
+                    padding: '0 10px',
+                  }}
+                >
+                  ✓ Nœud validé
+                </span>
+              </div>
+            )}
           </div>
         );
       })}

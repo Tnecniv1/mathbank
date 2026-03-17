@@ -1014,7 +1014,7 @@ export default function LibraryPage() {
   if (!session?.user) return;
   const { data } = await supabase
   .from('etape_parcours')
-  .select('numero, titre_snapshot, statut, validee_at')
+  .select('numero, titre_snapshot, statut, validee_at, chapitre_snapshot, clot_noeud')
   .eq('user_id', session.user.id)
   .order('numero', { ascending: true });
   if (data) setEtapesParcours(data);
