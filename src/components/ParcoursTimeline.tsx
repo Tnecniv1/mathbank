@@ -81,15 +81,19 @@ function borderNoeud(g: Groupe): string {
   return g.etapes.every(e => e.statut === 'validee') ? C.noeud_border_valide : C.noeud_border_encours;
 }
 
-function feStyle(type?: string | null): { bg: string; border: string; color: string } {
-  if (type === 'mecanique') return { bg: '#EEEDFE', border: '#AFA9EC', color: '#3C3489' };
-  if (type === 'chaotique') return { bg: '#FAEEDA', border: '#EF9F27', color: '#633806' };
+function feStyle(type?: string | null, statut?: string): { bg: string; border: string; color: string } {
+  if (type === 'mecanique') return { bg: '#E8E8E8', border: '#B0B0B0', color: '#555555' };
+  if (type === 'chaotique') {
+    if (statut === 'validee') return { bg: '#EEEDFE', border: '#AFA9EC', color: '#3C3489' };
+    return { bg: '#E0F5F0', border: '#5DCAA5', color: '#0F6E56' };
+  }
   return { bg: '#F0EDE8', border: '#C8BBA8', color: '#2C1810' };
 }
 
 function grouperEtapes(etapes: Etape[]): Groupe[] {
   const gs: Groupe[] = [];
-  for (const e of etapes) {
+  const etapesFiltrees = etapes.filter(e => e.chapitre_snapshot);
+  for (const e of etapesFiltrees) {
     const cle  = e.chapitre_snapshot ?? null;
     const last = gs[gs.length - 1];
     if (last && last.chapitre_snapshot === cle) last.etapes.push(e);
@@ -100,7 +104,7 @@ function grouperEtapes(etapes: Etape[]): Groupe[] {
 
 /* ─── Bulle FE ───────────────────────────────────────────────────── */
 function BulleFE({ etape }: { etape: Etape }) {
-  const s = feStyle(etape.type);
+  const s = feStyle(etape.type, etape.statut);
   return (
     <div style={{
       background: s.bg,
@@ -218,21 +222,29 @@ export default function ParcoursTimeline({ etapes }: Props) {
 
       {/* Groupes */}
       {groupes.map((groupe, gi) => {
-        const isRight  = gi % 2 === 0;
-        const n        = groupe.etapes.length;
-        const groupH   = n * FE_ROW_H;
-        const noeudCY  = groupH / 2;
-        const color    = couleurNoeud(groupe);
+        const isRight       = gi % 2 === 0;
+        const fesChaotiques = groupe.etapes.filter(e => e.type === 'chaotique');
+        const fesMecaniques = groupe.etapes.filter(e => e.type === 'mecanique');
+        const nC            = fesChaotiques.length;
+        const nM            = fesMecaniques.length;
+        const groupH        = Math.max(nC, nM, 1) * FE_ROW_H;
+        const noeudCY       = groupH / 2;
+        const color         = couleurNoeud(groupe);
 
-        // Coordonnées SVG selon le côté
-        const spineX   = isRight ? R_SPINE : L_SPINE;
+        // Côté chaotiques (bracket)
+        const spineX   = isRight ? R_SPINE    : L_SPINE;
         const hLineX1  = isRight ? NOEUD_RIGHT : NOEUD_LEFT;
         const hLineX2  = isRight ? R_SPINE     : L_SPINE;
         const branchX2 = isRight ? R_FE_L      : L_FE_R;
-        const feLeft   = isRight ? R_FE_L      : L_FE_L;
+        const cFeLeft  = isRight ? R_FE_L      : L_FE_L;
+
+        // Côté mécaniques (flèche directe, côté opposé)
+        const mechNoeudX = isRight ? NOEUD_LEFT  : NOEUD_RIGHT;
+        const mechEndX   = isRight ? L_FE_R       : R_FE_L;
+        const mFeLeft    = isRight ? L_FE_L        : R_FE_L;
 
         const spineY1  = FE_ROW_H / 2;
-        const spineY2  = (n - 1) * FE_ROW_H + FE_ROW_H / 2;
+        const spineY2  = (nC - 1) * FE_ROW_H + FE_ROW_H / 2;
         const markerId = `ar-${gi}`;
 
         return (
@@ -282,33 +294,46 @@ export default function ParcoursTimeline({ etapes }: Props) {
                 </marker>
               </defs>
 
-              {/* Ligne H : nœud → spine */}
-              <line
-                x1={hLineX1} y1={noeudCY}
-                x2={hLineX2} y2={noeudCY}
-                stroke={C.connector_fe}
-                strokeWidth="1.5"
-                markerEnd={`url(#${markerId})`}
-              />
-
-              {/* Spine verticale */}
-              {n > 1 && (
+              {/* Chaotiques : bracket (H-line → spine → branches) */}
+              {nC > 0 && <>
                 <line
-                  x1={spineX} y1={spineY1}
-                  x2={spineX} y2={spineY2}
+                  x1={hLineX1} y1={noeudCY}
+                  x2={hLineX2} y2={noeudCY}
                   stroke={C.connector_fe}
                   strokeWidth="1.5"
+                  markerEnd={`url(#${markerId})`}
                 />
-              )}
+                {nC > 1 && (
+                  <line
+                    x1={spineX} y1={spineY1}
+                    x2={spineX} y2={spineY2}
+                    stroke={C.connector_fe}
+                    strokeWidth="1.5"
+                  />
+                )}
+                {fesChaotiques.map((_, ei) => {
+                  const feCY = ei * FE_ROW_H + FE_ROW_H / 2;
+                  return (
+                    <line
+                      key={ei}
+                      x1={spineX}   y1={feCY}
+                      x2={branchX2} y2={feCY}
+                      stroke={C.connector_fe}
+                      strokeWidth="1.5"
+                      markerEnd={`url(#${markerId})`}
+                    />
+                  );
+                })}
+              </>}
 
-              {/* Branches : spine → FE */}
-              {groupe.etapes.map((_, ei) => {
+              {/* Mécaniques : flèches directes depuis le nœud */}
+              {fesMecaniques.map((_, ei) => {
                 const feCY = ei * FE_ROW_H + FE_ROW_H / 2;
                 return (
                   <line
                     key={ei}
-                    x1={spineX}    y1={feCY}
-                    x2={branchX2}  y2={feCY}
+                    x1={mechNoeudX} y1={noeudCY}
+                    x2={mechEndX}   y2={feCY}
                     stroke={C.connector_fe}
                     strokeWidth="1.5"
                     markerEnd={`url(#${markerId})`}
@@ -327,15 +352,34 @@ export default function ParcoursTimeline({ etapes }: Props) {
               <RectNoeud groupe={groupe} />
             </div>
 
-            {/* Bulles FE */}
-            {groupe.etapes.map((etape, ei) => {
+            {/* Bulles chaotiques */}
+            {fesChaotiques.map((etape, ei) => {
               const feCY = ei * FE_ROW_H + FE_ROW_H / 2;
               return (
                 <div
-                  key={etape.id ?? `${gi}-${ei}`}
+                  key={etape.id ?? `${gi}-c${ei}`}
                   style={{
                     position: 'absolute',
-                    left: feLeft,
+                    left: cFeLeft,
+                    top: feCY,
+                    transform: 'translateY(-50%)',
+                    zIndex: 3,
+                  }}
+                >
+                  <BulleFE etape={etape} />
+                </div>
+              );
+            })}
+
+            {/* Bulles mécaniques */}
+            {fesMecaniques.map((etape, ei) => {
+              const feCY = ei * FE_ROW_H + FE_ROW_H / 2;
+              return (
+                <div
+                  key={etape.id ?? `${gi}-m${ei}`}
+                  style={{
+                    position: 'absolute',
+                    left: mFeLeft,
                     top: feCY,
                     transform: 'translateY(-50%)',
                     zIndex: 3,
@@ -367,8 +411,9 @@ export default function ParcoursTimeline({ etapes }: Props) {
       {/* Légende */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: 24, marginTop: 28 }}>
         {[
-          { label: 'Mécanique', bg: '#EEEDFE', border: '#AFA9EC' },
-          { label: 'Chaotique', bg: '#FAEEDA', border: '#EF9F27' },
+          { label: 'Mécanique',          bg: '#E8E8E8', border: '#B0B0B0' },
+          { label: 'Chaotique (validée)', bg: '#EEEDFE', border: '#AFA9EC' },
+          { label: 'Chaotique (en cours)', bg: '#E0F5F0', border: '#5DCAA5' },
         ].map(({ label, bg, border }) => (
           <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
             <div style={{
