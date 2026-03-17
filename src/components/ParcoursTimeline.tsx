@@ -71,17 +71,6 @@ function iconeStatut(statut: string): string {
   return '🔒';
 }
 
-function dateEtape(etape: Etape): string | null {
-  if (etape.statut === 'validee' && etape.validee_at)
-    return new Date(etape.validee_at).toLocaleDateString('fr-FR', {
-      day: 'numeric', month: 'short', year: 'numeric',
-    });
-  if (etape.autorisee_at)
-    return `Auth. le ${new Date(etape.autorisee_at).toLocaleDateString('fr-FR', {
-      day: 'numeric', month: 'short',
-    })}`;
-  return null;
-}
 
 function couleurBordureFE(etape: Etape): string {
   if (etape.type === 'mecanique') return C.mecanique;
@@ -92,8 +81,7 @@ function couleurBordureFE(etape: Etape): string {
 function couleurNoeud(groupe: Groupe): string {
   const statuts = groupe.etapes.map(e => e.statut);
   if (statuts.every(s => s === 'validee')) return C.validee;
-  if (statuts.some(s => s === 'en_cours')) return C.en_cours;
-  return C.en_attente;
+  return C.chaotique;
 }
 
 function grouperEtapes(etapes: Etape[]): Groupe[] {
@@ -113,7 +101,6 @@ function grouperEtapes(etapes: Etape[]): Groupe[] {
 /* ─── Bulle FE ───────────────────────────────────────────────────── */
 function BulleFE({ etape }: { etape: Etape }) {
   const border = couleurBordureFE(etape);
-  const date   = dateEtape(etape);
   const icone  = iconeStatut(etape.statut);
 
   return (
@@ -126,8 +113,9 @@ function BulleFE({ etape }: { etape: Etape }) {
       color: C.encre,
       fontFamily: 'Georgia, serif',
       boxShadow: `0 2px 8px ${border}22`,
+      textAlign: 'center',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
         <span style={{ fontSize: '13px', flexShrink: 0 }}>{icone}</span>
         <span style={{
           fontWeight: 700,
@@ -141,11 +129,6 @@ function BulleFE({ etape }: { etape: Etape }) {
           {etape.titre_snapshot}
         </span>
       </div>
-      {date && (
-        <div style={{ fontSize: '10px', color: C.muted, marginTop: '3px' }}>
-          {date}
-        </div>
-      )}
     </div>
   );
 }
@@ -183,16 +166,6 @@ function RectNoeud({ groupe }: { groupe: Groupe }) {
       >
         {label}
       </div>
-      {derniere.clot_noeud && (
-        <span style={{
-          fontSize: '10px',
-          color: '#5a8a5a',
-          fontStyle: 'italic',
-          fontFamily: 'Georgia, serif',
-        }}>
-          ✓ nœud validé
-        </span>
-      )}
     </div>
   );
 }
@@ -213,7 +186,7 @@ export default function ParcoursTimeline({ etapes }: Props) {
     <div style={{
       position: 'relative',
       width: '100%',
-      maxWidth: '680px',
+      maxWidth: '800px',
       margin: '0 auto',
       paddingTop: '32px',
       paddingBottom: '32px',
@@ -350,8 +323,6 @@ export default function ParcoursTimeline({ etapes }: Props) {
         justifyContent: 'center',
         gap: '24px',
         marginTop: '28px',
-        paddingTop: '16px',
-        borderTop: `1px solid ${C.ligne}`,
       }}>
         {[
           { label: 'Mécanique', color: C.mecanique },
