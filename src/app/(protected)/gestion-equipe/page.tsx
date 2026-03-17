@@ -959,55 +959,6 @@ export default function GestionEquipePage() {
    <>
    {/* Timeline visuelle */}
    <ParcoursTimeline etapes={etapesParcours} />
-   {/* Actions — modifier les feuilles */}
-   <div className="mt-2 border-t border-border pt-4 space-y-2">
-    <p className="text-xs font-medium text-ink-muted mb-3 uppercase tracking-wide">Modifier les feuilles</p>
-    {etapesParcours.map((etape) => (
-    <div key={etape.id} className="rounded-lg border border-border bg-cream-50 p-3">
-     <div className="flex items-center justify-between gap-3">
-     <span className="text-sm font-medium text-ink truncate">
-      Étape {etape.numero} — {etape.titre_snapshot}
-     </span>
-     <button
-      onClick={() => setEtapeEnRemplacement(etapeEnRemplacement === etape.id ? null : etape.id)}
-      className="px-3 py-1.5 bg-cream-200 hover:bg-cream-300 text-ink text-xs font-medium rounded-lg transition-colors flex-shrink-0"
-     >
-      🔁 Remplacer
-     </button>
-     </div>
-     {etapeEnRemplacement === etape.id && (
-     <div className="mt-3 pt-3 border-t border-border">
-      <label className="block text-xs font-medium text-ink-light mb-1">Choisir une nouvelle feuille :</label>
-      <div className="flex gap-2">
-      <select
-       defaultValue=""
-       id={`select-feuille-${etape.id}`}
-       className="flex-1 px-3 py-2 border border-border rounded-lg bg-cream-50 text-ink text-sm focus:border-accent outline-none"
-      >
-       <option value="" disabled>— Sélectionner —</option>
-       {feuillesDisponibles.map(f => (
-       <option key={f.id} value={f.id}>
-        [{f.type}] {f.titre}
-       </option>
-       ))}
-      </select>
-      <button
-       onClick={() => {
-       const sel = document.getElementById(`select-feuille-${etape.id}`) as HTMLSelectElement;
-       if (!sel || !sel.value) return;
-       const titre = sel.options[sel.selectedIndex].text.replace(/^\[.*?\] /, '');
-       handleRemplacerFeuille(etape.id, sel.value, titre);
-       }}
-       className="px-3 py-2 bg-accent hover:bg-accent text-ink text-sm font-medium rounded-lg transition-colors"
-      >
-       Valider
-      </button>
-      </div>
-     </div>
-     )}
-    </div>
-    ))}
-   </div>
    </>
    )}
   </div>

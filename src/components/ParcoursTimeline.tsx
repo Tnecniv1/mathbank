@@ -39,13 +39,13 @@ const C = {
 } as const;
 
 /* ─── Constantes layout ──────────────────────────────────────────── */
-const NOEUD_W     = 180;
-const NOEUD_H     = 52;
-const NOEUD_HALF  = NOEUD_W / 2;   // 90
+const NOEUD_W     = 200;
+const NOEUD_H     = 56;
+const NOEUD_HALF  = NOEUD_W / 2;   // 100
 const AXIS_OFFSET = 40;             // nœud décalé de 40px à gauche du centre
-const BRACKET_GAP = 20;             // espace nœud-droite → spine
-const BRANCH_LEN  = 20;             // branche horizontale spine → FE
-const FE_ROW_H    = 52;
+const BRACKET_GAP = 28;             // espace nœud-droite → spine
+const BRANCH_LEN  = 32;             // branche horizontale spine → FE
+const FE_ROW_H    = 68;
 const GROUP_MB    = 60;
 
 // Positions CSS responsive (calc)
@@ -121,9 +121,8 @@ function BulleFE({ etape }: { etape: Etape }) {
       background: C.fond,
       border: `1.5px solid ${border}`,
       borderRadius: '10px',
-      padding: '7px 11px',
-      maxWidth: '200px',
-      minWidth: '90px',
+      padding: '10px 14px',
+      width: '220px',
       color: C.encre,
       fontFamily: 'Georgia, serif',
       boxShadow: `0 2px 8px ${border}22`,
@@ -132,7 +131,7 @@ function BulleFE({ etape }: { etape: Etape }) {
         <span style={{ fontSize: '13px', flexShrink: 0 }}>{icone}</span>
         <span style={{
           fontWeight: 700,
-          fontSize: '12px',
+          fontSize: '13px',
           lineHeight: 1.3,
           overflow: 'hidden',
           display: '-webkit-box',
