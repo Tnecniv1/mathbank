@@ -27,12 +27,17 @@ type Groupe = {
 
 /* ─── Palette ────────────────────────────────────────────────────── */
 const C = {
-  fond:      '#FDFAF6',
-  encre:     '#2C1810',
-  ligne:     '#D0C5B5',
-  muted:     '#8B7355',
-  validee:   '#BA69C8',
-  chaotique: '#F4A261',
+  fond:                 '#FFFFFF',
+  encre:                '#2C1810',
+  ligne:                '#D0C5B5',
+  muted:                '#8B7355',
+  noeud_valide:         '#1D9E75',
+  noeud_encours:        '#7F77DD',
+  noeud_border_valide:  '#0F6E56',
+  noeud_border_encours: '#534AB7',
+  connector_fe:         '#AFA9EC',
+  depart_fond:          '#F5C4B3',
+  depart_border:        '#D85A30',
 } as const;
 
 /* ─── Layout (coordonnées fixes pour le SVG) ─────────────────────── */
@@ -69,7 +74,11 @@ function iconeStatut(s: string): string {
 }
 
 function couleurNoeud(g: Groupe): string {
-  return g.etapes.every(e => e.statut === 'validee') ? C.validee : C.chaotique;
+  return g.etapes.every(e => e.statut === 'validee') ? C.noeud_valide : C.noeud_encours;
+}
+
+function borderNoeud(g: Groupe): string {
+  return g.etapes.every(e => e.statut === 'validee') ? C.noeud_border_valide : C.noeud_border_encours;
 }
 
 function feStyle(type?: string | null): { bg: string; border: string; color: string } {
@@ -124,12 +133,14 @@ function BulleFE({ etape }: { etape: Etape }) {
 
 /* ─── Nœud rectangle arrondi ─────────────────────────────────────── */
 function RectNoeud({ groupe }: { groupe: Groupe }) {
-  const color = couleurNoeud(groupe);
-  const label = groupe.chapitre_snapshot ?? '—';
+  const color  = couleurNoeud(groupe);
+  const border = borderNoeud(groupe);
+  const label  = groupe.chapitre_snapshot ?? '—';
   return (
     <div
       style={{
         background: color,
+        border: `2px solid ${border}`,
         borderRadius: NOEUD_H / 2,
         width: NOEUD_W,
         height: NOEUD_H,
@@ -177,6 +188,7 @@ export default function ParcoursTimeline({ etapes }: Props) {
       paddingBottom: 32,
       fontFamily: 'Georgia, serif',
       overflowX: 'auto',
+      background: C.fond,
     }}>
 
       {/* Ligne d'axe — fond gris pointillé (visible avant le 1er groupe) */}
@@ -199,8 +211,8 @@ export default function ParcoursTimeline({ etapes }: Props) {
           width: 14,
           height: 14,
           borderRadius: '50%',
-          background: C.validee,
-          boxShadow: `0 0 0 3px ${C.fond}, 0 0 0 5px ${C.validee}55`,
+          background: C.depart_fond,
+          border: `3px solid ${C.depart_border}`,
         }} />
       </div>
 
@@ -266,7 +278,7 @@ export default function ParcoursTimeline({ etapes }: Props) {
                   markerHeight="5"
                   orient="auto"
                 >
-                  <path d="M 0 0 L 8 4 L 0 8 z" fill={color} />
+                  <path d="M 0 0 L 8 4 L 0 8 z" fill={C.connector_fe} />
                 </marker>
               </defs>
 
@@ -274,7 +286,7 @@ export default function ParcoursTimeline({ etapes }: Props) {
               <line
                 x1={hLineX1} y1={noeudCY}
                 x2={hLineX2} y2={noeudCY}
-                stroke={color}
+                stroke={C.connector_fe}
                 strokeWidth="1.5"
                 markerEnd={`url(#${markerId})`}
               />
@@ -284,7 +296,7 @@ export default function ParcoursTimeline({ etapes }: Props) {
                 <line
                   x1={spineX} y1={spineY1}
                   x2={spineX} y2={spineY2}
-                  stroke={color}
+                  stroke={C.connector_fe}
                   strokeWidth="1.5"
                 />
               )}
@@ -297,7 +309,7 @@ export default function ParcoursTimeline({ etapes }: Props) {
                     key={ei}
                     x1={spineX}    y1={feCY}
                     x2={branchX2}  y2={feCY}
-                    stroke={color}
+                    stroke={C.connector_fe}
                     strokeWidth="1.5"
                     markerEnd={`url(#${markerId})`}
                   />
@@ -347,8 +359,8 @@ export default function ParcoursTimeline({ etapes }: Props) {
           width: 14,
           height: 14,
           borderRadius: '50%',
-          background: C.chaotique,
-          boxShadow: `0 0 0 3px ${C.fond}, 0 0 0 5px ${C.chaotique}55`,
+          background: C.noeud_valide,
+          boxShadow: `0 0 0 3px ${C.fond}, 0 0 0 5px ${C.noeud_valide}55`,
         }} />
       </div>
 
