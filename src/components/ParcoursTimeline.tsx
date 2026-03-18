@@ -91,15 +91,17 @@ function feStyle(type?: string | null, statut?: string): { bg: string; border: s
 }
 
 function grouperEtapes(etapes: Etape[]): Groupe[] {
-  const gs: Groupe[] = [];
-  const etapesFiltrees = etapes.filter(e => e.chapitre_snapshot);
-  for (const e of etapesFiltrees) {
-    const cle  = e.chapitre_snapshot ?? null;
-    const last = gs[gs.length - 1];
-    if (last && last.chapitre_snapshot === cle) last.etapes.push(e);
-    else gs.push({ chapitre_snapshot: cle, etapes: [e] });
+  const map  = new Map<string, Groupe>();
+  const order: string[] = [];
+  for (const e of etapes.filter(e => e.chapitre_snapshot)) {
+    const cle = e.chapitre_snapshot!;
+    if (!map.has(cle)) {
+      map.set(cle, { chapitre_snapshot: cle, etapes: [] });
+      order.push(cle);
+    }
+    map.get(cle)!.etapes.push(e);
   }
-  return gs;
+  return order.map(cle => map.get(cle)!);
 }
 
 /* ─── Bulle FE ───────────────────────────────────────────────────── */
