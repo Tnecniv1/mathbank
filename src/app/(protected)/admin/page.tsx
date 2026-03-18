@@ -731,8 +731,8 @@ function FeuilleItem({
  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-accent text-ink font-bold text-sm shrink-0">
  {feuille.ordre}
  </div>
- <div className="flex-1 min-w-0">
- <div className="font-medium text-slate-800 truncate">{feuille.titre}</div>
+ <div className="flex-1">
+ <div className="font-medium text-slate-800">{feuille.titre}</div>
  <a
  href={feuille.pdf_url}
  target="_blank"
