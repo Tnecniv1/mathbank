@@ -4,6 +4,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import GestionPrerequisAdmin from '@/components/GestionPrerequisAdmin';
 
+/* ---------- Context Difficulté ---------- */
+const DifficulteContext = React.createContext<Record<string, { score: number; nb: number }>>({});
+
 /* ---------- Types ---------- */
 type Niveau = {
  id: string;
@@ -297,7 +300,6 @@ function ItemForm({
  const [titre, setTitre] = useState(initial?.titre || '');
  const [description, setDescription] = useState(initial?.description || '');
  const [ordre, setOrdre] = useState(initial?.ordre?.toString() || '');
- const [difficulte, setDifficulte] = useState(initial?.difficulte?.toString() || '');
  const [pdfFile, setPdfFile] = useState<File | null>(null);
  const [saving, setSaving] = useState(false);
  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
@@ -313,11 +315,6 @@ function ItemForm({
  description: description || null,
  ordre: ordre && parseInt(ordre) > 0 ? parseInt(ordre) : null,
  };
- 
- // Ajouter la difficulté si c'est une feuille
- if (type === 'feuille' && difficulte) {
- data.difficulte = parseInt(difficulte);
- }
  
  // 🆕 FIX : Définir le type par défaut pour les feuilles
  if (type === 'feuille') {
@@ -368,29 +365,6 @@ function ItemForm({
  <form onSubmit={handleSubmit} className="space-y-4">
  <Input label="Titre" value={titre} onChange={setTitre} placeholder="Ex: Addition" required />
  <Input label="Ordre (optionnel)" value={ordre} onChange={setOrdre} type="number" placeholder="Laissez vide pour auto" />
- 
- {type === 'feuille' && (
- <div className="space-y-4">
- <div>
- <label className="block text-sm font-medium mb-1.5 text-ink">
- Difficulté (1-6)
- </label>
- <select
- value={difficulte}
- onChange={(e) => setDifficulte(e.target.value)}
- className="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-teal-500"
- >
- <option value="">Non définie</option>
- <option value="1">⚪ Niveau 1 - Très facile</option>
- <option value="2">⚪⚪ Niveau 2 - Facile</option>
- <option value="3">⚪⚪⚪ Niveau 3 - Moyen</option>
- <option value="4">⚪⚪⚪⚪ Niveau 4 - Difficile</option>
- <option value="5">⚪⚪⚪⚪⚪ Niveau 5 - Très difficile</option>
- <option value="6">⚪⚪⚪⚪⚪⚪ Niveau 6 - Extrême</option>
- </select>
- </div>
- </div>
- )}
  
  {type === 'feuille' && (
  <div>
@@ -661,6 +635,36 @@ function ItemActions({
  );
 }
 
+/* ---------- Score Difficulté ---------- */
+function ScoreDifficulte({ feuilleId }: { feuilleId: string }) {
+  const difficultes = React.useContext(DifficulteContext);
+  const data = difficultes[feuilleId];
+
+  if (!data) {
+    return <span className="text-gray-400 text-sm font-medium">—</span>;
+  }
+
+  const { score, nb } = data;
+  const color =
+    score < 0.2 ? 'bg-green-500'
+    : score < 0.4 ? 'bg-green-300'
+    : score < 0.6 ? 'bg-yellow-400'
+    : score < 0.8 ? 'bg-orange-400'
+    : 'bg-red-500';
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="flex gap-0.5">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div key={i} className={`w-3 h-3 rounded-sm ${color}`} />
+        ))}
+      </div>
+      <span className="text-xs font-medium text-ink">{score.toFixed(2)}</span>
+      <span className="text-xs text-ink-muted">({nb})</span>
+    </div>
+  );
+}
+
 /* ---------- Accordéon Items ---------- */
 function FeuilleItem({
  feuille,
@@ -702,29 +706,6 @@ function FeuilleItem({
  }
  };
 
- const handleDifficulteChange = async (newDifficulte: number | null) => {
- try {
- setUpdatingType(true);
- 
- const { error } = await supabase
- .from('feuille_entrainement')
- .update({ difficulte: newDifficulte })
- .eq('id', feuille.id);
-
- if (error) throw error;
-
- // Mettre à jour localement
- feuille.difficulte = newDifficulte;
- 
- console.log(`✅ Difficulté mise à jour: ${newDifficulte}`);
- } catch (error) {
- console.error('Erreur mise à jour difficulté:', error);
- alert('Erreur lors de la mise à jour de la difficulté');
- } finally {
- setUpdatingType(false);
- }
- };
-
  return (
  <div className="flex items-center justify-between p-3 bg-cream-100 rounded-lg border border-border">
  <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -745,23 +726,9 @@ function FeuilleItem({
  </a>
  </div>
 
- {/* Sélecteur de difficulté */}
+ {/* Score de difficulté calculé */}
  <div className="flex items-center gap-2 ml-4">
- <select
- value={feuille.difficulte || ''}
- onChange={(e) => handleDifficulteChange(parseInt(e.target.value) || null)}
- disabled={updatingType}
- className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border bg-cream-50 text-ink cursor-pointer hover:border-slate-400 transition-colors"
- onClick={(e) => e.stopPropagation()}
- >
- <option value="">Difficulté ?</option>
- <option value="1">⚪ Niveau 1</option>
- <option value="2">⚪⚪ Niveau 2</option>
- <option value="3">⚪⚪⚪ Niveau 3</option>
- <option value="4">⚪⚪⚪⚪ Niveau 4</option>
- <option value="5">⚪⚪⚪⚪⚪ Niveau 5</option>
- <option value="6">⚪⚪⚪⚪⚪⚪ Niveau 6</option>
- </select>
+ <ScoreDifficulte feuilleId={feuille.id} />
  </div>
 
  {/* Sélecteur de type */}
@@ -1119,6 +1086,9 @@ export default function AdminPage() {
  const [demandes, setDemandes] = useState<DemandeCreation[]>([]);
  const [loadingDemandes, setLoadingDemandes] = useState(false);
 
+ // État scores de difficulté
+ const [difficultes, setDifficultes] = useState<Record<string, { score: number; nb: number }>>({});
+
  useEffect(() => {
  checkAdminAndLoadData();
  }, []);
@@ -1147,7 +1117,7 @@ export default function AdminPage() {
  }
 
  setIsAdmin(true);
- await Promise.all([loadData(), loadDemandes()]);
+ await Promise.all([loadData(), loadDemandes(), loadDifficultes()]);
  }
 
  async function loadData() {
@@ -1187,6 +1157,19 @@ export default function AdminPage() {
  }
  }
  setLoading(false);
+ }
+
+ async function loadDifficultes() {
+ const { data } = await supabase
+ .from('difficulte_feuille')
+ .select('feuille_id, score, nb_tentatives');
+ if (data) {
+ const map: Record<string, { score: number; nb: number }> = {};
+ data.forEach((row: any) => {
+ map[row.feuille_id] = { score: row.score, nb: row.nb_tentatives };
+ });
+ setDifficultes(map);
+ }
  }
 
  async function loadDemandes() {
@@ -1405,6 +1388,7 @@ export default function AdminPage() {
  }
 
  return (
+ <DifficulteContext.Provider value={difficultes}>
  <main className="min-h-screen bg-cream-100 text-slate-800">
  <div className="max-w-5xl mx-auto px-6 py-8">
  {/* Header */}
@@ -1619,5 +1603,6 @@ export default function AdminPage() {
  </Modal>
  )}
  </main>
+ </DifficulteContext.Provider>
  );
 }
