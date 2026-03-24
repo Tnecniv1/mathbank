@@ -10,7 +10,7 @@ interface Etape {
   statut: string; // 'validee' | 'en_cours' | 'en_attente'
   validee_at?: string | null;
   autorisee_at?: string | null;
-  chapitre_snapshot?: string | null;
+  sujet_snapshot?: string | null;
   clot_noeud?: boolean;
   feuille_id?: string;
   type?: string | null;
@@ -21,7 +21,7 @@ interface Props {
 }
 
 type Groupe = {
-  chapitre_snapshot: string | null;
+  sujet_snapshot: string | null;
   etapes: Etape[];
 };
 
@@ -93,10 +93,10 @@ function feStyle(type?: string | null, statut?: string): { bg: string; border: s
 function grouperEtapes(etapes: Etape[]): Groupe[] {
   const map  = new Map<string, Groupe>();
   const order: string[] = [];
-  for (const e of etapes.filter(e => e.chapitre_snapshot)) {
-    const cle = e.chapitre_snapshot!;
+  for (const e of etapes.filter(e => e.sujet_snapshot)) {
+    const cle = e.sujet_snapshot!;
     if (!map.has(cle)) {
-      map.set(cle, { chapitre_snapshot: cle, etapes: [] });
+      map.set(cle, { sujet_snapshot: cle, etapes: [] });
       order.push(cle);
     }
     map.get(cle)!.etapes.push(e);
@@ -141,7 +141,7 @@ function BulleFE({ etape }: { etape: Etape }) {
 function RectNoeud({ groupe }: { groupe: Groupe }) {
   const color  = couleurNoeud(groupe);
   const border = borderNoeud(groupe);
-  const label  = groupe.chapitre_snapshot ?? '—';
+  const label  = groupe.sujet_snapshot ?? '—';
   return (
     <div
       style={{

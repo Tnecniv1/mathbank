@@ -210,19 +210,18 @@ async function doInsertInMathbank(sheet) {
   if (sessionId) {
     let ordreCount = 1;
     for (const exo of (sheet.exercices || []).filter(e => e.type === 'mecanique')) {
-      for (const obs of (exo.observations || [])) {
-        const { data: exoId } = await sb.rpc('insert_exercice_chef', {
-          p_session_id: sessionId, p_type: 'mecanique',
-          p_reference: obs.reference || '', p_ordre: ordreCount++,
+      const { data: exoId } = await sb.rpc('insert_exercice_chef', {
+        p_session_id: sessionId, p_type: 'mecanique',
+        p_reference: exo.reference || '', p_ordre: ordreCount++,
+      });
+      if (exoId) {
+        const v = exo.validated || {};
+        await sb.rpc('insert_score_exercice_chef', {
+          p_exercice_id: exoId, p_reussi: !!exo.reussi,
+          p_c1:!!v.C1, p_c2:!!v.C2, p_c3:!!v.C3, p_c4:!!v.C4,
+          p_s1:!!v.S1, p_s2:!!v.S2, p_s3:!!v.S3, p_s4:!!v.S4,
+          p_r1:!!v.R1, p_r2:!!v.R2, p_r3:!!v.R3, p_r4:!!v.R4, p_correction:false,
         });
-        if (exoId) {
-          await sb.rpc('insert_score_exercice_chef', {
-            p_exercice_id: exoId, p_reussi: !!obs.reussi,
-            p_c1:false, p_c2:false, p_c3:false, p_c4:false,
-            p_s1:false, p_s2:false, p_s3:false, p_s4:false,
-            p_r1:false, p_r2:false, p_r3:false, p_r4:false, p_correction:false,
-          });
-        }
       }
     }
     for (const exo of (sheet.exercices || []).filter(e => e.type === 'chaotique')) {
@@ -292,10 +291,10 @@ function WheelEditor({sheet, onChange}){
         const membreIds = membres.map(m => m.id);
         // 2. Charger les feuilles autorisées via membre_id
         sb.from('feuilles_autorisees')
-          .select('feuille_id, feuille_entrainement(id,titre,type)')
+          .select('feuille_id, noeud(id,titre,type)')
           .in('membre_id', membreIds)
           .then(({data}) => {
-            if(data) setFeuillesAutorisees(data.map(r=>r.feuille_entrainement).filter(Boolean));
+            if(data) setFeuillesAutorisees(data.map(r=>r.noeud).filter(Boolean));
           });
       });
   }, [sheet.meta.user_id]);
@@ -323,7 +322,7 @@ function WheelEditor({sheet, onChange}){
   const addMecaniqueExo = () => {
     if(sheet.closed) return;
     const id = Date.now().toString();
-    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'mecanique',feuille_id:null,reference:'',observations:[],reussi:null}]}));
+    onChange(p => ({...p, exercices:[...(p.exercices||[]), {id,type:'mecanique',feuille_id:null,reference:'',crosses:{},validated:{},reussi:null}]}));
     setActiveExoId(id);
   };
 
@@ -337,11 +336,18 @@ function WheelEditor({sheet, onChange}){
   const toggleValidated = useCallback((wedgeId, evt) => {
     evt.stopPropagation();
     if(sheet.closed) return;
-    updateActiveExo(e => { const v={...(e.validated||{})}; v[wedgeId]=!v[wedgeId]; return {...e,validated:v}; });
+    updateActiveExo(e => {
+      const v={...(e.validated||{})};
+      const cur=v[wedgeId];
+      if(!cur && cur!==null) v[wedgeId]=true;   // 0/undefined → 1
+      else if(cur===true)    v[wedgeId]=null;    // 1 → null
+      else                   v[wedgeId]=false;   // null → 0
+      return {...e,validated:v};
+    });
   }, [updateActiveExo, sheet.closed]);
 
   const handleClick = useCallback(evt => {
-    if(!activeExo || activeExo.type !== 'chaotique' || sheet.closed) return;
+    if(!activeExo || sheet.closed) return;
     const svg = svgRef.current;
     const rect = svg.getBoundingClientRect();
     const mx = (evt.clientX-rect.left)*(W/rect.width);
@@ -377,18 +383,14 @@ function WheelEditor({sheet, onChange}){
 
   const saveMeta = () => { if(sheet.closed) return; onChange(p=>({...p,meta:localMeta})); setEditMeta(false); };
 
-  const addObs    = () => { if(sheet.closed) return; updateActiveExo(e => ({...e, observations:[...(e.observations||[]),{reference:'',reussi:null}]})); };
-  const updateObs = (idx,patch) => { if(sheet.closed) return; updateActiveExo(e => { const o=[...(e.observations||[])]; o[idx]={...o[idx],...patch}; return {...e,observations:o}; }); };
-  const removeObs = (idx) => { if(sheet.closed) return; updateActiveExo(e => { const o=[...(e.observations||[])]; o.splice(idx,1); return {...e,observations:o}; }); };
-
   const crosses   = activeExo&&activeExo.crosses   ? activeExo.crosses   : {};
   const validated = activeExo&&activeExo.validated ? activeExo.validated : {};
-  const counts    = SECTORS.map(s=>({...s, total:WEDGES.filter(w=>w.sectorKey===s.key).reduce((a,w)=>a+(crosses[w.id]&&crosses[w.id].length||0),0)}));
+  const counts    = SECTORS.map(s=>({...s, total:WEDGES.filter(w=>w.sectorKey===s.key&&validated[w.id]===true).length}));
 
   const svgProps = {
     ref:svgRef, viewBox:`0 0 ${W} ${H}`, width:"100%",
     onClick:handleClick, onTouchEnd:handleTouch,
-    style:{display:"block", cursor:activeExo&&activeExo.type==='chaotique'?"crosshair":"default", touchAction:"none"},
+    style:{display:"block", cursor:activeExo?"crosshair":"default", touchAction:"none"},
   };
 
   return React.createElement("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:12}},
@@ -417,7 +419,7 @@ function WheelEditor({sheet, onChange}){
             style:{display:"flex",alignItems:"center",gap:6,padding:"6px 10px",background:sel?"#2C1810":"white",border:`1.5px solid ${sel?"#2C1810":"#D0C5B5"}`,borderRadius:8,cursor:"pointer"},
           },
             React.createElement("span",{style:{fontSize:11,fontFamily:"Georgia,serif",color:sel?"#FDFAF6":"#2C1810",maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
-              exo.reference||(exo.type==='chaotique'?'Roue':'Tableau')
+              exo.reference||(exo.type==='chaotique'?'C':'M')
             ),
             React.createElement("span",{style:{fontSize:9,fontWeight:"bold",padding:"2px 5px",borderRadius:4,background:exo.type==='chaotique'?"#3D7FD4":"#7B5A3D",color:"white"}},
               exo.type==='chaotique'?"C":"M"
@@ -429,10 +431,10 @@ function WheelEditor({sheet, onChange}){
           );
         }),
       ),
-      exercices.length === 0 && React.createElement("div",{style:{textAlign:"center",padding:"20px",color:"#B0A090",fontStyle:"italic",fontSize:12,background:"white",borderRadius:10,border:"1px solid #E8E0D4"}},"Aucun exercice. Ajoutez une roue ou un tableau."),
+      exercices.length === 0 && React.createElement("div",{style:{textAlign:"center",padding:"20px",color:"#B0A090",fontStyle:"italic",fontSize:12,background:"white",borderRadius:10,border:"1px solid #E8E0D4"}},"Aucun exercice. Ajoutez une roue."),
       !sheet.closed && React.createElement("div",{style:{display:"flex",gap:8}},
         React.createElement("button",{onClick:addChaotiqueExo,style:{padding:"8px 14px",fontSize:12,background:"transparent",border:"1.5px dashed #3D7FD4",borderRadius:8,color:"#3D7FD4",cursor:"pointer",fontFamily:"Georgia,serif"}},"+ Roue (C)"),
-        React.createElement("button",{onClick:addMecaniqueExo,style:{padding:"8px 14px",fontSize:12,background:"transparent",border:"1.5px dashed #7B5A3D",borderRadius:8,color:"#7B5A3D",cursor:"pointer",fontFamily:"Georgia,serif"}},"+ Tableau (M)"),
+        React.createElement("button",{onClick:addMecaniqueExo,style:{padding:"8px 14px",fontSize:12,background:"transparent",border:"1.5px dashed #7B5A3D",borderRadius:8,color:"#7B5A3D",cursor:"pointer",fontFamily:"Georgia,serif"}},"+ Roue (M)"),
       ),
     ),
 
@@ -448,7 +450,7 @@ function WheelEditor({sheet, onChange}){
           style:{width:"100%",padding:"8px 12px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:activeExo.feuille_id?"#2C1810":"#8B7355",background:sheet.closed?"#F5F0E8":"#FDFAF6",outline:"none",fontFamily:"Georgia,serif"},
         },
           React.createElement("option",{value:""},sheet.meta.user_id?"— Sélectionner une feuille —":"— Sélectionner un étudiant d'abord —"),
-          ...feuillesAutorisees.filter(f=>f.type===activeExo.type).map(f=>React.createElement("option",{key:f.id,value:f.id},f.titre)),
+          ...feuillesAutorisees.map(f=>React.createElement("option",{key:f.id,value:f.id},`[${f.type==='mecanique'?'M':'C'}] ${f.titre}`)),
         ),
         React.createElement("input",{
           value:activeExo.reference,
@@ -459,8 +461,8 @@ function WheelEditor({sheet, onChange}){
         }),
       ),
 
-      // ── Roue SVG (chaotique) ──
-      activeExo.type==='chaotique' && React.createElement("div",{style:{background:"#fff",borderRadius:16,boxShadow:"0 2px 20px rgba(0,0,0,0.08)",overflow:"hidden",border:"1px solid #E8E0D4",width:"100%"}},
+      // ── Roue SVG ──
+      React.createElement("div",{style:{background:"#fff",borderRadius:16,boxShadow:"0 2px 20px rgba(0,0,0,0.08)",overflow:"hidden",border:"1px solid #E8E0D4",width:"100%"}},
         React.createElement("svg",svgProps,
           React.createElement("rect",{width:W,height:H,fill:"#FDFAF6"}),
           ...WEDGES.map((w,i)=>React.createElement("path",{key:w.id,d:wedgePath(w.a1,w.a2,R_IN,R_OUT),fill:w.color,fillOpacity:i%2===0?0.09:0.04,stroke:w.color,strokeWidth:"0.8",strokeOpacity:"0.25",onTouchEnd:e=>{ e.stopPropagation(); handleTouch(e); }})),
@@ -474,10 +476,12 @@ function WheelEditor({sheet, onChange}){
             const [bx,by]=pt(mid,R_OUT+20);
             const val=validated[w.id];
             return React.createElement("g",{key:w.id+"badge",onClick:e=>toggleValidated(w.id,e),onTouchEnd:e=>{ e.preventDefault(); toggleValidated(w.id,e); },style:{cursor:"pointer"}},
-              React.createElement("circle",{cx:bx,cy:by,r:12,fill:val?w.color:"#FDFAF6",stroke:w.color,strokeWidth:"1.8"}),
-              val
+              React.createElement("circle",{cx:bx,cy:by,r:12,fill:val===true?w.color:val===null?"#B0A090":"#FDFAF6",stroke:val===null?"#B0A090":w.color,strokeWidth:"1.8"}),
+              val===true
                 ? React.createElement("text",{x:bx,y:by+0.5,textAnchor:"middle",dominantBaseline:"middle",fontSize:"12",fill:"white",fontWeight:"bold",style:{pointerEvents:"none",userSelect:"none"}},"✓")
-                : React.createElement("circle",{cx:bx,cy:by,r:4,fill:"none",stroke:w.color,strokeWidth:"1.2",opacity:"0.35"}),
+                : val===null
+                  ? React.createElement("text",{x:bx,y:by+0.5,textAnchor:"middle",dominantBaseline:"middle",fontSize:"14",fill:"white",fontWeight:"bold",style:{pointerEvents:"none",userSelect:"none"}},"—")
+                  : React.createElement("circle",{cx:bx,cy:by,r:4,fill:"none",stroke:w.color,strokeWidth:"1.2",opacity:"0.35"}),
             );
           }),
           React.createElement("circle",{cx:CX,cy:CY,r:R_IN,fill:"#FDFAF6",stroke:"#C8BBA8",strokeWidth:"1.5"}),
@@ -491,23 +495,23 @@ function WheelEditor({sheet, onChange}){
         ),
       ),
 
-      // Compteurs (chaotique)
-      activeExo.type==='chaotique' && React.createElement("div",{style:{width:"100%",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
+      // Compteurs validés
+      React.createElement("div",{style:{width:"100%",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
         ...counts.map(s=>React.createElement("div",{key:s.key,style:{background:"white",borderRadius:10,padding:"12px 8px",textAlign:"center",border:`1.5px solid ${s.color}33`}},
           React.createElement("div",{style:{fontSize:26,fontWeight:"bold",color:s.color,fontFamily:"Georgia,serif"}},s.total),
           React.createElement("div",{style:{fontSize:9.5,color:"#8B7355",marginTop:2,fontFamily:"Georgia,serif"}},s.label),
         )),
       ),
 
-      // Bouton annuler dernière croix (chaotique)
-      activeExo.type==='chaotique' && React.createElement("button",{
+      // Bouton annuler dernière croix
+      React.createElement("button",{
         onClick:undoCross,
         disabled:undoStack.length===0||sheet.closed,
         style:{width:"100%",padding:"10px",background:"transparent",border:"1.5px solid #D0C5B5",borderRadius:8,color:undoStack.length===0||sheet.closed?"#C8BBA8":"#5A4A3A",cursor:undoStack.length===0||sheet.closed?"default":"pointer",fontSize:13,fontFamily:"Georgia,serif"},
       },"↩ Annuler dernière croix"),
 
-      // Résultat global (chaotique)
-      activeExo.type==='chaotique' && React.createElement("div",{style:{background:"white",borderRadius:12,border:"1px solid #E8E0D4",padding:"14px 16px",display:"flex",alignItems:"center",gap:12}},
+      // Résultat global
+      React.createElement("div",{style:{background:"white",borderRadius:12,border:"1px solid #E8E0D4",padding:"14px 16px",display:"flex",alignItems:"center",gap:12}},
         React.createElement("span",{style:{fontSize:12,color:"#8B7355",fontFamily:"Georgia,serif",flexShrink:0}},"Résultat global"),
         React.createElement("button",{
           onClick:()=>updateActiveExo(e=>({...e,reussi:true})),
@@ -521,35 +525,9 @@ function WheelEditor({sheet, onChange}){
         },"✗ Échec"),
       ),
 
-      // Note (chaotique)
-      activeExo.type==='chaotique' && sheet.meta.note && React.createElement("div",{style:{background:"white",borderRadius:10,padding:"12px 14px",border:"1px solid #E8E0D4",fontSize:13,color:"#5A4A3A",fontStyle:"italic",lineHeight:1.5}},
+      // Note
+      sheet.meta.note && React.createElement("div",{style:{background:"white",borderRadius:10,padding:"12px 14px",border:"1px solid #E8E0D4",fontSize:13,color:"#5A4A3A",fontStyle:"italic",lineHeight:1.5}},
         `"${sheet.meta.note}"`
-      ),
-
-      // ── Tableau (mécanique) ──
-      activeExo.type==='mecanique' && React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:10}},
-        // Résultat global
-        React.createElement("div",{style:{background:"white",borderRadius:12,border:"1px solid #E8E0D4",padding:"14px 16px",display:"flex",alignItems:"center",gap:12}},
-          React.createElement("span",{style:{fontSize:12,color:"#8B7355",fontFamily:"Georgia,serif",flexShrink:0}},"Résultat global"),
-          React.createElement("button",{
-            onClick:()=>updateActiveExo(e=>({...e,reussi:true})),
-            disabled:sheet.closed,
-            style:{padding:"10px 20px",fontSize:14,borderRadius:8,border:"2px solid",borderColor:activeExo.reussi===true?"#3DAF6B":"#D0C5B5",background:activeExo.reussi===true?"#F0FBF4":"white",color:activeExo.reussi===true?"#2A8050":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"},
-          },"✓ Succès"),
-          React.createElement("button",{
-            onClick:()=>updateActiveExo(e=>({...e,reussi:false})),
-            disabled:sheet.closed,
-            style:{padding:"10px 20px",fontSize:14,borderRadius:8,border:"2px solid",borderColor:activeExo.reussi===false?"#D4503D":"#D0C5B5",background:activeExo.reussi===false?"#FFF0EE":"white",color:activeExo.reussi===false?"#C03020":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"},
-          },"✗ Échec"),
-        ),
-        (activeExo.observations||[]).length===0 && React.createElement("div",{style:{textAlign:"center",padding:"40px 20px",color:"#B0A090",fontStyle:"italic",fontSize:13,background:"white",borderRadius:14,border:"1px solid #E8E0D4"}},"Aucune observation mécanique."),
-        ...(activeExo.observations||[]).map((m,i)=>React.createElement("div",{key:i,style:{background:"white",borderRadius:12,border:"1px solid #E8E0D4",padding:"14px 16px",display:"flex",alignItems:"center",gap:10}},
-          React.createElement("input",{value:m.reference,onChange:e=>updateObs(i,{reference:e.target.value}),placeholder:"Réf. (ex: Q3)",disabled:sheet.closed,style:{flex:1,padding:"8px 10px",border:"1px solid #D0C5B5",borderRadius:8,fontSize:13,color:"#2C1810",background:sheet.closed?"#F5F0E8":"#FDFAF6",outline:"none",fontFamily:"Georgia,serif"}}),
-          React.createElement("button",{onClick:()=>updateObs(i,{reussi:true}),disabled:sheet.closed,style:{padding:"8px 14px",fontSize:16,borderRadius:8,border:"2px solid",borderColor:m.reussi===true?"#3DAF6B":"#D0C5B5",background:m.reussi===true?"#F0FBF4":"white",color:m.reussi===true?"#2A8050":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"}},"✓"),
-          React.createElement("button",{onClick:()=>updateObs(i,{reussi:false}),disabled:sheet.closed,style:{padding:"8px 14px",fontSize:16,borderRadius:8,border:"2px solid",borderColor:m.reussi===false?"#D4503D":"#D0C5B5",background:m.reussi===false?"#FFF0EE":"white",color:m.reussi===false?"#C03020":"#C8BBA8",cursor:sheet.closed?"default":"pointer",fontWeight:"bold"}},"✗"),
-          !sheet.closed && React.createElement("button",{onClick:()=>removeObs(i),style:{background:"transparent",border:"none",color:"#C8BBA8",cursor:"pointer",fontSize:15,padding:"4px 6px"}},"✕"),
-        )),
-        !sheet.closed && React.createElement("button",{onClick:addObs,style:{padding:"11px",background:"transparent",border:"1.5px dashed #C8BBA8",borderRadius:10,color:"#8B7355",cursor:"pointer",fontFamily:"Georgia,serif",fontSize:13}},"+ Ajouter une observation"),
       ),
     ),
 
@@ -635,11 +613,11 @@ function SheetCard({sheet,onOpen,onDelete,onExport,onInsert}){
   const chaotiques = exercices.filter(e => e.type === 'chaotique');
   const mecaniques = exercices.filter(e => e.type === 'mecanique');
   const counts = SECTORS.map(s=>({...s,
-    total: chaotiques.reduce((t,exo)=>
-      t + WEDGES.filter(w=>w.sectorKey===s.key).reduce((a,w)=>a+(exo.crosses&&exo.crosses[w.id]?exo.crosses[w.id].length:0),0)
+    total: exercices.reduce((t,exo)=>
+      t + WEDGES.filter(w=>w.sectorKey===s.key&&(exo.validated||{})[w.id]===true).length
     , 0)
   }));
-  const crossTotal = counts.reduce((a,s)=>a+s.total,0);
+  const validTotal = counts.reduce((a,s)=>a+s.total,0);
   // 1. Nom étudiant
   const membre = _membres.find(m => m.user_id === sheet.meta.user_id);
   const nomEtudiant = membre ? membre.full_name : (sheet.meta.prenom || 'Inconnu');
@@ -674,7 +652,7 @@ function SheetCard({sheet,onOpen,onDelete,onExport,onInsert}){
       React.createElement("div",{style:{display:"flex",alignItems:"center",gap:5,marginTop:3}},
         sheet.closed && React.createElement("span",{style:{fontSize:9,background:"#3DAF6B",color:"white",borderRadius:4,padding:"1px 6px",fontFamily:"Georgia,serif",letterSpacing:"0.03em"}},"bouclée"),
         sheet.inserted && React.createElement("span",{style:{fontSize:9,background:"#3D7FD4",color:"white",borderRadius:4,padding:"1px 6px",fontFamily:"Georgia,serif",letterSpacing:"0.03em"}},"inséré"),
-        React.createElement("span",{style:{fontSize:10,color:"#B0A090"}},`${(sheet.meta.sessions||[]).length>0?(sheet.meta.sessions||[]).length+"×":date} · ${crossTotal} croix`),
+        React.createElement("span",{style:{fontSize:10,color:"#B0A090"}},`${(sheet.meta.sessions||[]).length>0?(sheet.meta.sessions||[]).length+"×":date} · ${validTotal} validés`),
       ),
       sheet.meta.note && React.createElement("div",{style:{fontSize:10,color:"#8B7355",marginTop:2,fontStyle:"italic",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},`"${sheet.meta.note}"`),
     ),
@@ -769,10 +747,10 @@ function App(){
     sb.from('membre_equipe').select('id').then(({data:membres}) => {
       if (!membres || membres.length === 0) return;
       sb.from('feuilles_autorisees')
-        .select('feuille_id, feuille_entrainement(id,titre)')
+        .select('feuille_id, noeud(id,titre)')
         .in('membre_id', membres.map(m => m.id))
         .then(({data}) => {
-          if (data) data.forEach(r => { if (r.feuille_entrainement) _feuilles[r.feuille_entrainement.id] = r.feuille_entrainement.titre; });
+          if (data) data.forEach(r => { if (r.noeud) _feuilles[r.noeud.id] = r.noeud.titre; });
         });
     });
   }, [user]);

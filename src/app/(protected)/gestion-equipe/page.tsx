@@ -58,6 +58,7 @@ type EtapeParcours = {
  validee_at: string | null;
  feuille_id: string;
  chapitre_snapshot?: string | null;
+ sujet_snapshot?: string | null;
  clot_noeud?: boolean;
 };
 
@@ -398,11 +399,31 @@ export default function GestionEquipePage() {
   .select('id, numero, titre_snapshot, statut, autorisee_at, validee_at, feuille_id, chapitre_snapshot, clot_noeud, type')
   .eq('user_id', membre.user_id)
   .order('numero', { ascending: true });
- setEtapesParcours(data || []);
+
+ // Enrichir avec sujet_snapshot en remontant la hiérarchie noeud
+ const { data: tousNoeuds } = await supabase
+  .from('noeud')
+  .select('id, parent_id, titre, type');
+
+ const noeudMap = new Map((tousNoeuds || []).map((n: any) => [n.id, n]));
+
+ function getSujetTitre(feuilleId: string): string | null {
+  let n: any = noeudMap.get(feuilleId);
+  while (n && n.type !== 'sujet') n = noeudMap.get(n.parent_id);
+  return n?.titre ?? null;
+ }
+
+ const etapesEnrichies = (data || []).map((e: any) => ({
+  ...e,
+  sujet_snapshot: e.feuille_id ? getSujetTitre(e.feuille_id) : null,
+ }));
+
+ setEtapesParcours(etapesEnrichies);
  // Charger toutes les feuilles pour le sélecteur
  const { data: feuilles } = await supabase
-  .from('feuille_entrainement')
+  .from('noeud')
   .select('id, titre, type')
+  .in('type', ['mecanique', 'chaotique'])
   .order('ordre');
  setFeuillesDisponibles(feuilles || []);
  setLoadingParcours(false);
