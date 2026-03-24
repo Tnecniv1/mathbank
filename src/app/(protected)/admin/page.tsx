@@ -8,46 +8,20 @@ import GestionPrerequisAdmin from '@/components/GestionPrerequisAdmin';
 const DifficulteContext = React.createContext<Record<string, { score: number; nb: number }>>({});
 
 /* ---------- Types ---------- */
-type Niveau = {
+type Noeud = {
  id: string;
+ parent_id: string | null;
  ordre: number;
  titre: string;
- description: string | null;
+ type: 'niveau' | 'sujet' | 'chapitre' | 'mecanique' | 'chaotique';
+ pdf_url: string | null;
+ difficulte: number | null;
 };
 
-type Sujet = {
- id: string;
- niveau_id: string;
- ordre: number;
- titre: string;
- description: string | null;
-};
-
-type Chapitre = {
- id: string;
- sujet_id: string;
- ordre: number;
- titre: string;
- description: string | null;
-};
-
-type FeuilleEntrainement = {
- id: string;
- chapitre_id: string;
- ordre: number;
- titre: string;
- description: string | null;
- pdf_url: string;
- type: 'mecanique' | 'chaotique' | null;
-};
-
-type NiveauWithData = Niveau & {
- sujets?: (Sujet & {
- chapitres?: (Chapitre & {
- feuilles?: FeuilleEntrainement[];
- })[];
- })[];
-};
+type FeuilleEntrainement = Noeud;
+type Chapitre = Noeud & { feuilles?: FeuilleEntrainement[] };
+type Sujet = Noeud & { feuilles?: FeuilleEntrainement[]; chapitres?: Chapitre[] };
+type NiveauWithData = Noeud & { sujets?: Sujet[] };
 
 type DemandeCreation = {
  id: string;
@@ -298,7 +272,6 @@ function ItemForm({
  onCancel: () => void;
 }) {
  const [titre, setTitre] = useState(initial?.titre || '');
- const [description, setDescription] = useState(initial?.description || '');
  const [ordre, setOrdre] = useState(initial?.ordre?.toString() || '');
  const [pdfFile, setPdfFile] = useState<File | null>(null);
  const [saving, setSaving] = useState(false);
@@ -312,41 +285,32 @@ function ItemForm({
  try {
  const data: any = {
  titre,
- description: description || null,
  ordre: ordre && parseInt(ordre) > 0 ? parseInt(ordre) : null,
  };
- 
- // 🆕 FIX : Définir le type par défaut pour les feuilles
+
+ // type noeud : pour les feuilles -> mecanique/chaotique, pour les autres -> direct
  if (type === 'feuille') {
- data.type = initial?.type || 'chaotique'; // Par défaut"chaotique" si pas déjà défini
+ data.type = initial?.type || 'chaotique';
+ } else {
+ data.type = type;
  }
- 
- if (type === 'sujet' && parentId) data.niveau_id = parentId;
- if (type === 'chapitre' && parentId) data.sujet_id = parentId;
- if (type === 'feuille' && parentId) {
- data.chapitre_id = parentId;
- 
- // Si modification et pas de nouveau fichier, garder l'ancien URL
+
+ // parent_id remplace niveau_id / sujet_id / chapitre_id
+ if (type !== 'niveau' && parentId) data.parent_id = parentId;
+
+ if (type === 'feuille') {
  if (initial && !pdfFile) {
  data.pdf_url = initial.pdf_url;
  } else if (pdfFile) {
- // Upload du nouveau PDF
  setUploadProgress('Upload du PDF...');
- const { url, error } = await uploadPdfToStorage(pdfFile, parentId, parseInt(ordre));
- 
- if (error || !url) {
- throw new Error(error || 'Erreur lors de l\'upload du PDF');
- }
- 
+ const { url, error } = await uploadPdfToStorage(pdfFile, parentId!, parseInt(ordre));
+ if (error || !url) throw new Error(error || 'Erreur lors de l\'upload du PDF');
  data.pdf_url = url;
- 
- // Si modification, supprimer l'ancien PDF
  if (initial?.pdf_url) {
  setUploadProgress('Suppression de l\'ancien PDF...');
  await deletePdfFromStorage(initial.pdf_url);
  }
  } else if (!initial) {
- // Nouveau fichier sans PDF
  throw new Error('Veuillez sélectionner un fichier PDF');
  }
  }
@@ -391,7 +355,6 @@ function ItemForm({
  )}
  </div>
  )}
- <Textarea label="Description" value={description} onChange={setDescription} placeholder="Description optionnelle..." />
  {uploadProgress && (
  <div className="flex items-center gap-2 text-sm text-accent">
  <Loader />
@@ -688,7 +651,7 @@ function FeuilleItem({
  setUpdatingType(true);
  
  const { error } = await supabase
- .from('feuille_entrainement')
+ .from('noeud')
  .update({ type: newType })
  .eq('id', feuille.id);
 
@@ -865,7 +828,7 @@ function SujetItem({
  openChapitres,
  onToggleChapitre,
 }: {
- sujet: Sujet & { chapitres?: (Chapitre & { feuilles?: FeuilleEntrainement[] })[] };
+ sujet: Sujet & { feuilles?: FeuilleEntrainement[]; chapitres?: (Chapitre & { feuilles?: FeuilleEntrainement[] })[] };
  index: number;
  total: number;
  isOpen: boolean;
@@ -877,14 +840,15 @@ function SujetItem({
  onEditChapitre: (chapitre: Chapitre) => void;
  onDeleteChapitre: (id: string) => void;
  onMoveChapitre: (idx: number, direction: 'up' | 'down') => void;
- onAddFeuille: (chapitreId: string) => void;
+ onAddFeuille: (parentId: string) => void;
  onEditFeuille: (feuille: FeuilleEntrainement) => void;
  onDeleteFeuille: (id: string) => void;
- onMoveFeuille: (chapitreId: string, idx: number, direction: 'up' | 'down') => void;
+ onMoveFeuille: (parentId: string, idx: number, direction: 'up' | 'down') => void;
  openChapitres: Set<string>;
  onToggleChapitre: (id: string) => void;
 }) {
  const chapitres = sujet.chapitres || [];
+ const feuillesDirect = sujet.feuilles || [];
 
  return (
  <div className="border border-border rounded-lg overflow-hidden">
@@ -913,15 +877,37 @@ function SujetItem({
 
  <Collapse open={isOpen}>
  <div className="p-4 space-y-3 bg-cream-50">
- <div className="flex justify-end mb-2">
+ <div className="flex justify-end gap-2 mb-2">
+ <Button size="sm" variant="secondary" onClick={() => onAddFeuille(sujet.id)}>
+ <IconPlus />
+ Ajouter une feuille
+ </Button>
  <Button size="sm" onClick={onAddChapitre}>
  <IconPlus />
  Ajouter un chapitre
  </Button>
  </div>
- {chapitres.length === 0 ? (
- <p className="text-center text-ink-muted py-4">Aucun chapitre</p>
- ) : (
+
+ {/* Feuilles directement rattachées au sujet */}
+ {feuillesDirect.length > 0 && (
+ <div className="space-y-2 pb-2 border-b border-border">
+ {feuillesDirect.map((feuille, idx) => (
+ <FeuilleItem
+ key={feuille.id}
+ feuille={feuille}
+ index={idx}
+ total={feuillesDirect.length}
+ onMove={(dir) => onMoveFeuille(sujet.id, idx, dir)}
+ onEdit={() => onEditFeuille(feuille)}
+ onDelete={() => onDeleteFeuille(feuille.id)}
+ />
+ ))}
+ </div>
+ )}
+
+ {chapitres.length === 0 && feuillesDirect.length === 0 ? (
+ <p className="text-center text-ink-muted py-4">Aucun contenu</p>
+ ) : chapitres.length > 0 ? (
  chapitres.map((chapitre, idx) => (
  <ChapitreItem
  key={chapitre.id}
@@ -939,7 +925,7 @@ function SujetItem({
  onMoveFeuille={(feuilleIdx, dir) => onMoveFeuille(chapitre.id, feuilleIdx, dir)}
  />
  ))
- )}
+ ) : null}
  </div>
  </Collapse>
  </div>
@@ -1123,38 +1109,33 @@ export default function AdminPage() {
  async function loadData() {
  setLoading(true);
  const { data, error } = await supabase
- .from('niveau')
- .select(
- `
- *,
- sujets:sujet (
- *,
- chapitres:chapitre (
- *,
- feuilles:feuille_entrainement (*)
- )
- )
- `
- )
+ .from('noeud')
+ .select('*')
  .order('ordre');
 
  if (!error && data) {
- // Tri des données
- data.forEach((niveau: any) => {
- niveau.sujets?.sort((a: any, b: any) => a.ordre - b.ordre);
- niveau.sujets?.forEach((sujet: any) => {
- sujet.chapitres?.sort((a: any, b: any) => a.ordre - b.ordre);
- sujet.chapitres?.forEach((chapitre: any) => {
- // Trier par ordre (maintenant que les ordres sont corrects)
- chapitre.feuilles?.sort((a: any, b: any) => a.ordre - b.ordre);
- });
- });
- });
- setNiveaux(data);
- // Ouvrir le premier niveau par défaut
- if (data.length > 0) {
- setOpenNiveaux(new Set([data[0].id]));
- }
+ const rows = data as Noeud[];
+ const isFeuille = (n: Noeud) => n.type === 'mecanique' || n.type === 'chaotique';
+ const built: NiveauWithData[] = rows
+ .filter(n => n.type === 'niveau')
+ .map(niveau => ({
+ ...niveau,
+ sujets: rows
+ .filter(n => n.type === 'sujet' && n.parent_id === niveau.id)
+ .map(sujet => ({
+ ...sujet,
+ // feuilles directement sous le sujet (sans chapitre intermédiaire)
+ feuilles: rows.filter(n => isFeuille(n) && n.parent_id === sujet.id),
+ chapitres: rows
+ .filter(n => n.type === 'chapitre' && n.parent_id === sujet.id)
+ .map(chapitre => ({
+ ...chapitre,
+ feuilles: rows.filter(n => isFeuille(n) && n.parent_id === chapitre.id),
+ })),
+ })),
+ }));
+ setNiveaux(built);
+ if (built.length > 0) setOpenNiveaux(new Set([built[0].id]));
  }
  setLoading(false);
  }
@@ -1250,105 +1231,99 @@ export default function AdminPage() {
  }
  }
 
- async function moveItem(table: string, items: any[], index: number, direction: 'up' | 'down') {
+ async function moveItem(items: any[], index: number, direction: 'up' | 'down') {
  if (direction === 'up' && index === 0) return;
  if (direction === 'down' && index === items.length - 1) return;
 
  const item1 = items[index];
  const item2 = items[direction === 'up' ? index - 1 : index + 1];
 
- // Swap les ordres
- await supabase.from(table).update({ ordre: item2.ordre }).eq('id', item1.id);
- await supabase.from(table).update({ ordre: item1.ordre }).eq('id', item2.id);
+ await supabase.from('noeud').update({ ordre: item2.ordre }).eq('id', item1.id);
+ await supabase.from('noeud').update({ ordre: item1.ordre }).eq('id', item2.id);
 
- // Si c'est une feuille, recalculer tous les ordres du chapitre
- if (table === 'feuille_entrainement' && item1.chapitre_id) {
- await recalculerOrdresChapitre(item1.chapitre_id);
+ if ((item1.type === 'mecanique' || item1.type === 'chaotique') && item1.parent_id) {
+ await recalculerOrdres(item1.parent_id);
  }
 
  await loadData();
  }
 
- // Fonction pour recalculer tous les ordres d'un chapitre
- async function recalculerOrdresChapitre(chapitreId: string) {
- // Récupérer toutes les feuilles du chapitre triées par ordre actuel
- const { data: feuilles } = await supabase
- .from('feuille_entrainement')
+ // Recalcule les ordres de tous les enfants directs d'un nœud parent
+ async function recalculerOrdres(parentId: string) {
+ const { data: enfants } = await supabase
+ .from('noeud')
  .select('id, ordre')
- .eq('chapitre_id', chapitreId)
+ .eq('parent_id', parentId)
  .order('ordre', { ascending: true });
 
- if (!feuilles) return;
+ if (!enfants) return;
 
- // Recalculer les ordres : 1, 2, 3, 4...
- for (let i = 0; i < feuilles.length; i++) {
+ for (let i = 0; i < enfants.length; i++) {
  const nouvelOrdre = i + 1;
- if (feuilles[i].ordre !== nouvelOrdre) {
- await supabase
- .from('feuille_entrainement')
- .update({ ordre: nouvelOrdre })
- .eq('id', feuilles[i].id);
+ if (enfants[i].ordre !== nouvelOrdre) {
+ await supabase.from('noeud').update({ ordre: nouvelOrdre }).eq('id', enfants[i].id);
  }
  }
  }
 
- async function createItem(table: string, data: any) {
- // Auto-calcul de l'ordre si non fourni
+ async function createItem(data: any) {
  if (data.ordre === null || data.ordre === undefined) {
-  let query = supabase.from(table).select('ordre');
-  if (data.niveau_id) query = (query as any).eq('niveau_id', data.niveau_id);
-  else if (data.sujet_id) query = (query as any).eq('sujet_id', data.sujet_id);
-  else if (data.chapitre_id) query = (query as any).eq('chapitre_id', data.chapitre_id);
-  const { data: existing } = await query;
-  const maxOrdre = (existing as any[])?.reduce((max: number, item: any) => Math.max(max, item.ordre ?? 0), 0) ?? 0;
-  data.ordre = maxOrdre + 1;
+ let query = supabase.from('noeud').select('ordre');
+ if (data.parent_id) {
+ query = (query as any).eq('parent_id', data.parent_id);
+ } else {
+ query = (query as any).is('parent_id', null);
  }
- const { error } = await supabase.from(table).insert([data]);
+ const { data: existing } = await query;
+ const maxOrdre = (existing as any[])?.reduce((max: number, item: any) => Math.max(max, item.ordre ?? 0), 0) ?? 0;
+ data.ordre = maxOrdre + 1;
+ }
+ const { error } = await supabase.from('noeud').insert([data]);
  if (error) throw new Error(error.message);
  await loadData();
  closeModal();
  }
 
- async function updateItem(table: string, id: string, data: any) {
- const { error } = await supabase.from(table).update(data).eq('id', id);
+ async function updateItem(id: string, data: any) {
+ const { error } = await supabase.from('noeud').update(data).eq('id', id);
  if (error) throw new Error(error.message);
  await loadData();
  closeModal();
  }
 
- async function deleteItem(table: string, id: string, confirmMsg: string) {
+ async function deleteItem(type: string, id: string, confirmMsg: string) {
  if (!confirm(confirmMsg)) return;
 
- if (table === 'feuille_entrainement') {
+ if (type === 'feuille') {
    const feuille = niveaux
      .flatMap(n => n.sujets || [])
      .flatMap(s => s.chapitres || [])
      .flatMap(c => c.feuilles || [])
      .find(f => f.id === id);
 
-   const chapitreId = feuille?.chapitre_id ?? null;
+   const parentId = feuille?.parent_id ?? null;
    if (feuille?.pdf_url) await deletePdfFromStorage(feuille.pdf_url);
 
    const { error } = await supabase.rpc('delete_feuille_chef', { p_feuille_id: id });
-   if (!error && chapitreId) await recalculerOrdresChapitre(chapitreId);
+   if (!error && parentId) await recalculerOrdres(parentId);
    if (!error) await loadData();
    return;
  }
 
- if (table === 'chapitre') {
+ if (type === 'chapitre') {
    const { error } = await supabase.rpc('delete_chapitre_chef', { p_chapitre_id: id });
    if (!error) await loadData();
    return;
  }
 
- if (table === 'sujet') {
+ if (type === 'sujet') {
    const { error } = await supabase.rpc('delete_sujet_chef', { p_sujet_id: id });
    if (!error) await loadData();
    return;
  }
 
- // Autres tables (niveau, …) : suppression directe
- const { error } = await supabase.from(table).delete().eq('id', id);
+ // niveau : suppression directe (ON DELETE CASCADE dans noeud)
+ const { error } = await supabase.from('noeud').delete().eq('id', id);
  if (!error) await loadData();
  }
 
@@ -1472,7 +1447,7 @@ export default function AdminPage() {
  total={niveaux.length}
  isOpen={openNiveaux.has(niveau.id)}
  onToggle={() => toggleSet(openNiveaux, setOpenNiveaux, niveau.id)}
- onMove={(dir) => moveItem('niveau', niveaux, idx, dir)}
+ onMove={(dir) => moveItem(niveaux, idx, dir)}
  onEdit={() => openModal('niveau', niveau)}
  onDelete={() => deleteItem('niveau', niveau.id, 'Supprimer ce niveau et tout son contenu ?')}
  onAddSujet={() => openModal('sujet', undefined, niveau.id)}
@@ -1480,23 +1455,23 @@ export default function AdminPage() {
  onDeleteSujet={(id) => deleteItem('sujet', id, 'Supprimer ce sujet et tout son contenu ?')}
  onMoveSujet={(idx, dir) => {
  const sujets = niveau.sujets || [];
- moveItem('sujet', sujets, idx, dir);
+ moveItem(sujets, idx, dir);
  }}
  onAddChapitre={(sujetId) => openModal('chapitre', undefined, sujetId)}
- onEditChapitre={(chapitre) => openModal('chapitre', chapitre, chapitre.sujet_id)}
+ onEditChapitre={(chapitre) => openModal('chapitre', chapitre, chapitre.parent_id ?? undefined)}
  onDeleteChapitre={(id) => deleteItem('chapitre', id, 'Supprimer ce chapitre et tout son contenu ?')}
  onMoveChapitre={(sujetId, idx, dir) => {
  const sujet = niveau.sujets?.find((s) => s.id === sujetId);
- if (sujet?.chapitres) moveItem('chapitre', sujet.chapitres, idx, dir);
+ if (sujet?.chapitres) moveItem(sujet.chapitres, idx, dir);
  }}
  onAddFeuille={(chapitreId) => openModal('feuille', undefined, chapitreId)}
- onEditFeuille={(feuille) => openModal('feuille', feuille, feuille.chapitre_id)}
- onDeleteFeuille={(id) => deleteItem('feuille_entrainement', id, 'Supprimer cette feuille ?')}
+ onEditFeuille={(feuille) => openModal('feuille', feuille, feuille.parent_id ?? undefined)}
+ onDeleteFeuille={(id) => deleteItem('feuille', id, 'Supprimer cette feuille ?')}
  onMoveFeuille={(chapitreId, idx, dir) => {
  const chapitre = niveau.sujets
  ?.flatMap((s) => s.chapitres || [])
  .find((c) => c.id === chapitreId);
- if (chapitre?.feuilles) moveItem('feuille_entrainement', chapitre.feuilles, idx, dir);
+ if (chapitre?.feuilles) moveItem(chapitre.feuilles, idx, dir);
  }}
  openSujets={openSujets}
  onToggleSujet={(id) => toggleSet(openSujets, setOpenSujets, id)}
@@ -1595,8 +1570,7 @@ export default function AdminPage() {
  initial={editingItem}
  parentId={parentId || undefined}
  onSave={(data) => {
- const table = modalType === 'feuille' ? 'feuille_entrainement' : modalType;
- return editingItem ? updateItem(table, editingItem.id, data) : createItem(table, data);
+ return editingItem ? updateItem(editingItem.id, data) : createItem(data);
  }}
  onCancel={closeModal}
  />

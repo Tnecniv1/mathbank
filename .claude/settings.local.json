@@ -15,7 +15,13 @@
       "Bash(node:*)",
       "Read(//c/Users/vince/Desktop/Monstro/**)",
       "Read(//c/Users/vince/**)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(grep -E \"\\\\.ts$\")",
+      "Bash(grep:*)",
+      "Bash(for file:*)",
+      "Bash(do echo:*)",
+      "Read(//c/Users/vince/Desktop/Monstro/projet_zero/mathbank/**)",
+      "Bash(git log:*)"
     ]
   }
 }

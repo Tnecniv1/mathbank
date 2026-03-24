@@ -30,6 +30,7 @@ type Sujet = {
  titre: string;
  description: string | null;
  chapitres: Chapitre[];
+ feuilles?: FeuilleEntrainement[];
 };
 
 type Niveau = {
@@ -38,6 +39,17 @@ type Niveau = {
  titre: string;
  description: string | null;
  sujets: Sujet[];
+};
+
+type NoeudRow = {
+ id: string;
+ parent_id: string | null;
+ titre: string;
+ ordre: number;
+ type: 'niveau' | 'sujet' | 'chapitre' | 'mecanique' | 'chaotique';
+ pdf_url: string | null;
+ difficulte: number | null;
+ profondeur: number;
 };
 
 type SessionTravail = {
@@ -122,64 +134,69 @@ async function getParcoursComplet(niveauId: string) {
  console.log('🔄 Chargement du parcours niveau:', niveauId);
  try {
  const { data, error } = await supabase
- .from('niveau')
- .select(
- `
- id, ordre, titre, description,
- sujets:sujet (
- id, ordre, titre, description,
- chapitres:chapitre (
- id, ordre, titre, description,
- feuilles:feuille_entrainement (
- id, ordre, ordre_dans_niveau, titre, description, pdf_url, created_at, difficulte
- )
- )
- )
- `
- )
- .eq('id', niveauId)
- .single();
+ .rpc('get_arbre_noeud', { p_racine_id: niveauId });
 
  if (error) throw error;
 
- // Tri des éléments
- if (data?.sujets) {
- // Trier sujets et chapitres par ordre
- data.sujets.sort((a: any, b: any) => a.ordre - b.ordre);
- 
- data.sujets.forEach((s: any) => {
- if (s.chapitres) {
- s.chapitres.sort((a: any, b: any) => a.ordre - b.ordre);
- 
- s.chapitres.forEach((c: any) => {
- if (c.feuilles) {
- // Trier les feuilles par ordre (maintenant que les ordres sont corrects)
- c.feuilles.sort((a: any, b: any) => a.ordre - b.ordre);
- }
+ const rows = data as NoeudRow[];
+
+ const niveauRow = rows.find(r => r.type === 'niveau');
+ if (!niveauRow) throw new Error('Niveau introuvable');
+
+ const sujets: Sujet[] = rows
+ .filter(r => r.type === 'sujet')
+ .sort((a, b) => a.ordre - b.ordre)
+ .map(s => {
+ const chapitres: Chapitre[] = rows
+ .filter(r => r.type === 'chapitre' && r.parent_id === s.id)
+ .sort((a, b) => a.ordre - b.ordre)
+ .map(c => {
+ const feuilles: FeuilleEntrainement[] = rows
+ .filter(r => (r.type === 'mecanique' || r.type === 'chaotique') && r.parent_id === c.id)
+ .sort((a, b) => a.ordre - b.ordre)
+ .map(f => ({
+ id: f.id,
+ ordre: f.ordre,
+ ordre_dans_niveau: 0,
+ titre: f.titre,
+ description: null,
+ pdf_url: f.pdf_url ?? '',
+ difficulte: f.difficulte,
+ }));
+ return { id: c.id, ordre: c.ordre, titre: c.titre, description: null, feuilles };
  });
- }
+ const feuillesDirectes: FeuilleEntrainement[] = rows
+ .filter(r => (r.type === 'mecanique' || r.type === 'chaotique') && r.parent_id === s.id)
+ .sort((a, b) => a.ordre - b.ordre)
+ .map(f => ({
+ id: f.id,
+ ordre: f.ordre,
+ ordre_dans_niveau: 0,
+ titre: f.titre,
+ description: null,
+ pdf_url: f.pdf_url ?? '',
+ difficulte: f.difficulte,
+ }));
+ return { id: s.id, ordre: s.ordre, titre: s.titre, description: null, chapitres, feuilles: feuillesDirectes };
  });
- 
- // Recalculer ordre_dans_niveau en respectant l'ordre des feuilles
- let compteurGlobal = 1;
- for (const sujet of data.sujets) {
- for (const chapitre of sujet.chapitres || []) {
- for (const feuille of chapitre.feuilles || []) {
- const ancienOrdre = feuille.ordre_dans_niveau;
- feuille.ordre_dans_niveau = compteurGlobal;
- 
- // Log pour débugger
- if (process.env.NODE_ENV === 'development') {
- console.log(`📝 ${feuille.titre} : ordre=${feuille.ordre}, ordre_dans_niveau=${ancienOrdre} → ${compteurGlobal}`);
- }
- 
- compteurGlobal++;
- }
- }
- }
+
+ // Recalculer ordre_dans_niveau
+ let compteur = 1;
+ for (const sujet of sujets) {
+ for (const feuille of sujet.feuilles ?? [])
+ feuille.ordre_dans_niveau = compteur++;
+ for (const chapitre of sujet.chapitres)
+ for (const feuille of chapitre.feuilles)
+ feuille.ordre_dans_niveau = compteur++;
  }
 
- return { data: data as Niveau, error: null };
+ if (process.env.NODE_ENV === 'development')
+ console.log(`📦 ${rows.length} nœuds chargés`);
+
+ return {
+ data: { id: niveauRow.id, ordre: niveauRow.ordre, titre: niveauRow.titre, description: null, sujets } as Niveau,
+ error: null,
+ };
  } catch (e: any) {
  console.error(e);
  return { data: null, error: e };
@@ -189,8 +206,9 @@ async function getParcoursComplet(niveauId: string) {
 async function getNiveaux() {
  try {
  const { data, error } = await supabase
- .from('niveau')
- .select('id, ordre, titre, description')
+ .from('noeud')
+ .select('id, ordre, titre')
+ .eq('type', 'niveau')
  .order('ordre', { ascending: true });
 
  if (error) throw error;
@@ -952,6 +970,21 @@ function SujetSection({ sujet, progressions, onOpenPdf, onProgressionUpdate }: {
  {sujet.titre}
  </div>
 
+ {/* Feuilles directes sous le sujet (sans chapitre intermédiaire) */}
+ {(sujet.feuilles ?? []).length > 0 && (
+ <div className="space-y-3 mb-8">
+ {(sujet.feuilles ?? []).map((feuille) => (
+ <FeuilleCard
+ key={feuille.id}
+ feuille={feuille}
+ progression={progressions.get(feuille.id) || null}
+ onOpen={() => onOpenPdf(feuille.pdf_url)}
+ onUpdateProgression={onProgressionUpdate}
+ />
+ ))}
+ </div>
+ )}
+
  {/* Chapitres */}
  {sujet.chapitres.length > 0 ? (
  <div className="space-y-8">
@@ -959,11 +992,11 @@ function SujetSection({ sujet, progressions, onOpenPdf, onProgressionUpdate }: {
  <ChapitreSection key={chapitre.id} chapitre={chapitre} progressions={progressions} onOpenPdf={onOpenPdf} onProgressionUpdate={onProgressionUpdate} />
  ))}
  </div>
- ) : (
+ ) : (sujet.feuilles ?? []).length === 0 ? (
  <div className="text-center py-12 text-ink-light border border-dashed border-border rounded-lg">
  Aucun chapitre pour ce sujet
  </div>
- )}
+ ) : null}
  </div>
  );
 }
@@ -1106,16 +1139,8 @@ export default function LibraryPage() {
 
  // Si membre d'équipe, bloquer TOUTES les feuilles non autorisées
  if (membre) {
- // Parcourir toutes les feuilles du parcours
- result.data.sujets.forEach((sujet: any) => {
- sujet.chapitres.forEach((chapitre: any) => {
- chapitre.feuilles.forEach((feuille: any) => {
- // Si cette feuille n'a pas de progression
+ const bloquerFeuille = (feuille: any) => {
  if (!progMap.has(feuille.id)) {
- // Est-elle autorisée ?
- const estAutorisee = feuillesAutoriseesIds.has(feuille.id);
- 
- // Créer une entrée (bloquée si pas autorisée)
  progMap.set(feuille.id, {
  id: '',
  feuille_id: feuille.id,
@@ -1125,10 +1150,14 @@ export default function LibraryPage() {
  sessions: [],
  statut: null,
  commentaire_chef: null,
- est_bloquee: !estAutorisee, // BLOQUÉE si pas autorisée
+ est_bloquee: !feuillesAutoriseesIds.has(feuille.id),
  });
  }
- });
+ };
+ result.data.sujets.forEach((sujet: any) => {
+ (sujet.feuilles ?? []).forEach(bloquerFeuille);
+ sujet.chapitres.forEach((chapitre: any) => {
+ chapitre.feuilles.forEach(bloquerFeuille);
  });
  });
  }
@@ -1197,15 +1226,12 @@ export default function LibraryPage() {
  score,
  temps_total,
  commentaire_chef,
- feuille_entrainement:feuille_entrainement(
+ noeud:noeud(
  id,
  titre,
- description,
  pdf_url,
  ordre,
- ordre_dans_niveau,
- difficulte,
- chapitre:chapitre(titre)
+ difficulte
  )
  `)
  .eq('user_id', session.user.id)
@@ -1218,13 +1244,13 @@ export default function LibraryPage() {
 
  const feuilles = data?.map((item: any) => ({
  feuille: {
- id: item.feuille_entrainement.id,
- titre: item.feuille_entrainement.titre,
- description: item.feuille_entrainement.description,
- pdf_url: item.feuille_entrainement.pdf_url,
- ordre: item.feuille_entrainement.ordre,
- ordre_dans_niveau: item.feuille_entrainement.ordre_dans_niveau,
- difficulte: item.feuille_entrainement.difficulte,
+ id: item.noeud.id,
+ titre: item.noeud.titre,
+ description: null,
+ pdf_url: item.noeud.pdf_url,
+ ordre: item.noeud.ordre,
+ ordre_dans_niveau: 0,
+ difficulte: item.noeud.difficulte,
  },
  progression: {
  id: item.id,
@@ -1236,7 +1262,7 @@ export default function LibraryPage() {
  statut: item.statut || 'en_cours',
  commentaire_chef: item.commentaire_chef,
  },
- chapitre: item.feuille_entrainement.chapitre?.titre || 'Chapitre inconnu',
+ chapitre: 'Chapitre inconnu',
  })) || [];
 
  setFeuillesEnProgression(feuilles);
