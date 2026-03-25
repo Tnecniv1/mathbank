@@ -21,7 +21,11 @@
       "Bash(for file:*)",
       "Bash(do echo:*)",
       "Read(//c/Users/vince/Desktop/Monstro/projet_zero/mathbank/**)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(find /c/Users/vince/Desktop/Monstro/projet_zero/mathbank/src -path *progression* -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
+      "Bash(wc:*)",
+      "Bash(ls -la \"/c/Users/vince/Desktop/Monstro/projet_zero/mathbank/src/app/\\(protected\\)/progression/\")",
+      "Bash(cat:*)"
     ]
   }
 }

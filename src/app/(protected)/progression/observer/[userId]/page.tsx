@@ -148,8 +148,9 @@ export default function TableauProgression() {
  async function loadNiveaux() {
  try {
  const { data: niveauxData, error: niveauxError } = await supabase
- .from('niveau')
+ .from('noeud')
  .select('id, titre, ordre')
+ .eq('type', 'niveau')
  .order('ordre', { ascending: true });
 
  if (niveauxError) throw niveauxError;
@@ -204,46 +205,68 @@ export default function TableauProgression() {
  }
 
  async function loadDataManually(niveauId: string, userId: string) {
- const { data, error } = await supabase
- .from('sujet')
- .select(`
- id,
- titre,
- ordre,
- chapitres:chapitre(
- id,
- titre,
- ordre,
- feuilles:feuille_entrainement(
- id,
- titre,
- ordre
- )
- )
- `)
- .eq('niveau_id', niveauId)
- .order('ordre', { ascending: true });
+ const { data: arbreData, error: arbreError } = await supabase
+ .rpc('get_arbre_noeud', { p_racine_id: niveauId });
 
- if (error) throw error;
+ if (arbreError) throw arbreError;
 
- const feuilleIds = data
- ?.flatMap(s => s.chapitres?.flatMap(c => c.feuilles?.map(f => f.id) || []) || [])
- .filter(Boolean) || [];
+ const rows = arbreData || [];
+ const sujets = rows.filter((r: any) => r.type === 'sujet').sort((a: any, b: any) => a.ordre - b.ordre);
+ const chapitres = rows.filter((r: any) => r.type === 'chapitre').sort((a: any, b: any) => a.ordre - b.ordre);
+ const feuilles = rows.filter((r: any) => r.type === 'mecanique' || r.type === 'chaotique').sort((a: any, b: any) => a.ordre - b.ordre);
 
- const { data: progressions } = await supabase
+ const feuilleIds = feuilles.map((f: any) => f.id);
+
+ const { data: progressions } = feuilleIds.length > 0
+ ? await supabase
  .from('progression_feuille')
  .select('feuille_id, statut')
  .eq('user_id', userId)
- .in('feuille_id', feuilleIds);
+ .in('feuille_id', feuilleIds)
+ : { data: [] };
 
  const progressionMap = new Map(
- progressions?.map(p => [p.feuille_id, p.statut]) || []
+ progressions?.map((p: any) => [p.feuille_id, p.statut]) || []
  );
 
  const result: any[] = [];
- data?.forEach(sujet => {
- sujet.chapitres?.forEach(chapitre => {
- chapitre.feuilles?.forEach(feuille => {
+ sujets.forEach((sujet: any) => {
+ // Cas 1 : feuilles directement rattachées au sujet (sans chapitre intermédiaire)
+ const directFeuilles = feuilles.filter((f: any) => f.parent_id === sujet.id);
+ directFeuilles.forEach((feuille: any) => {
+ result.push({
+ sujet_id: sujet.id,
+ sujet_titre: sujet.titre,
+ sujet_ordre: sujet.ordre,
+ chapitre_id: sujet.id,
+ chapitre_titre: sujet.titre,
+ chapitre_ordre: sujet.ordre,
+ feuille_id: feuille.id,
+ feuille_titre: feuille.titre,
+ feuille_ordre: feuille.ordre,
+ feuille_statut: progressionMap.get(feuille.id) || null
+ });
+ });
+
+ // Cas 2 : feuilles via chapitres
+ const sujetChapitres = chapitres.filter((c: any) => c.parent_id === sujet.id);
+ sujetChapitres.forEach((chapitre: any) => {
+ const chapFeuilles = feuilles.filter((f: any) => f.parent_id === chapitre.id);
+ if (chapFeuilles.length === 0) {
+ result.push({
+ sujet_id: sujet.id,
+ sujet_titre: sujet.titre,
+ sujet_ordre: sujet.ordre,
+ chapitre_id: chapitre.id,
+ chapitre_titre: chapitre.titre,
+ chapitre_ordre: chapitre.ordre,
+ feuille_id: null,
+ feuille_titre: null,
+ feuille_ordre: null,
+ feuille_statut: null
+ });
+ } else {
+ chapFeuilles.forEach((feuille: any) => {
  result.push({
  sujet_id: sujet.id,
  sujet_titre: sujet.titre,
@@ -257,20 +280,6 @@ export default function TableauProgression() {
  feuille_statut: progressionMap.get(feuille.id) || null
  });
  });
- 
- if (!chapitre.feuilles || chapitre.feuilles.length === 0) {
- result.push({
- sujet_id: sujet.id,
- sujet_titre: sujet.titre,
- sujet_ordre: sujet.ordre,
- chapitre_id: chapitre.id,
- chapitre_titre: chapitre.titre,
- chapitre_ordre: chapitre.ordre,
- feuille_id: null,
- feuille_titre: null,
- feuille_ordre: null,
- feuille_statut: null
- });
  }
  });
  });
@@ -280,26 +289,18 @@ export default function TableauProgression() {
 
  async function loadScoresEvolution(niveauId: string, userId: string) {
  try {
- const { data: feuillesData } = await supabase
- .from('feuille_entrainement')
- .select(`
- id,
- titre,
- type,
- chapitre:chapitre!inner(
- sujet:sujet!inner(
- niveau_id
- )
- )
- `)
- .eq('chapitre.sujet.niveau_id', niveauId);
+ const { data: arbreDataScores } = await supabase
+ .rpc('get_arbre_noeud', { p_racine_id: niveauId });
+
+ const feuillesData = (arbreDataScores || [])
+ .filter((n: any) => n.type === 'mecanique' || n.type === 'chaotique');
 
  if (!feuillesData || feuillesData.length === 0) {
  setScoresEvolution([]);
  return;
  }
 
- const feuilleIds = feuillesData.map(f => f.id);
+ const feuilleIds = feuillesData.map((f: any) => f.id);
 
  const { data: progressions } = await supabase
  .from('progression_feuille')

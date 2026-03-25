@@ -94,6 +94,9 @@ export default function TableauProgression() {
  const [scoresGlobaux, setScoresGlobaux] = useState<{ date: string; scoreCumulatif: number }[]>([]);
  const [gridObjectifs, setGridObjectifs] = useState<GridData[]>([]);
  const [chartRenderKey, setChartRenderKey] = useState(0);
+ const [userName, setUserName] = useState<string | null>(null);
+ const [userCreatedAt, setUserCreatedAt] = useState<string | null>(null);
+ const [sujetsOuverts, setSujetsOuverts] = useState<Set<string>>(new Set());
 
  useEffect(() => {
  loadNiveaux();
@@ -116,8 +119,9 @@ export default function TableauProgression() {
  async function loadNiveaux() {
  try {
  const { data: niveauxData, error: niveauxError } = await supabase
- .from('niveau')
+ .from('noeud')
  .select('id, titre, ordre')
+ .eq('type', 'niveau')
  .order('ordre', { ascending: true });
 
  if (niveauxError) throw niveauxError;
@@ -145,6 +149,7 @@ export default function TableauProgression() {
  }
 
  const userId = session.user.id;
+ if (!userName) loadUserInfo(userId);
 
  const { data: rawData, error: queryError } = await supabase
  .rpc('get_tableau_progression', {
@@ -173,75 +178,68 @@ export default function TableauProgression() {
  }
 
  async function loadDataManually(niveauId: string, userId: string) {
- const { data, error } = await supabase
- .from('sujet')
- .select(`
- id,
- titre,
- ordre,
- chapitres:chapitre(
- id,
- titre,
- ordre,
- feuilles:feuille_entrainement(
- id,
- titre,
- ordre
- )
- )
- `)
- .eq('niveau_id', niveauId)
- .order('ordre', { ascending: true });
+ const { data: arbreData, error: arbreError } = await supabase
+ .rpc('get_arbre_noeud', { p_racine_id: niveauId });
 
- if (error) throw error;
+ if (arbreError) throw arbreError;
 
- const feuilleIds = data
- ?.flatMap(s => s.chapitres?.flatMap(c => c.feuilles?.map(f => f.id) || []) || [])
- .filter(Boolean) || [];
+ const rows = arbreData || [];
+ const sujets   = rows.filter((r: any) => r.type === 'sujet').sort((a: any, b: any) => a.ordre - b.ordre);
+ const chapitres = rows.filter((r: any) => r.type === 'chapitre').sort((a: any, b: any) => a.ordre - b.ordre);
+ const feuilles  = rows.filter((r: any) => r.type === 'mecanique' || r.type === 'chaotique').sort((a: any, b: any) => a.ordre - b.ordre);
 
- const { data: progressions } = await supabase
- .from('progression_feuille')
- .select('feuille_id, statut, en_cours')
- .eq('user_id', userId)
- .in('feuille_id', feuilleIds);
+ const feuilleIds = feuilles.map((f: any) => f.id);
+
+ const { data: progressions } = feuilleIds.length > 0
+ ? await supabase
+   .from('progression_feuille')
+   .select('feuille_id, statut, en_cours')
+   .eq('user_id', userId)
+   .in('feuille_id', feuilleIds)
+ : { data: [] };
 
  const progressionMap = new Map(
- progressions?.map(p => [p.feuille_id, { statut: p.statut, en_cours: p.en_cours }]) || []
+ progressions?.map((p: any) => [p.feuille_id, { statut: p.statut, en_cours: p.en_cours }]) || []
  );
 
  const result: any[] = [];
- data?.forEach(sujet => {
- sujet.chapitres?.forEach(chapitre => {
- chapitre.feuilles?.forEach(feuille => {
- result.push({
- sujet_id: sujet.id,
- sujet_titre: sujet.titre,
- sujet_ordre: sujet.ordre,
- chapitre_id: chapitre.id,
- chapitre_titre: chapitre.titre,
- chapitre_ordre: chapitre.ordre,
- feuille_id: feuille.id,
- feuille_titre: feuille.titre,
- feuille_ordre: feuille.ordre,
- feuille_statut: progressionMap.get(feuille.id)?.statut || null,
- feuille_en_cours: progressionMap.get(feuille.id)?.en_cours || false
+ sujets.forEach((sujet: any) => {
+ // Cas 1 : feuilles directement rattachées au sujet
+ const directFeuilles = feuilles.filter((f: any) => f.parent_id === sujet.id);
+ directFeuilles.forEach((feuille: any) => {
+   const prog = progressionMap.get(feuille.id);
+   result.push({
+     sujet_id: sujet.id, sujet_titre: sujet.titre, sujet_ordre: sujet.ordre,
+     chapitre_id: sujet.id, chapitre_titre: sujet.titre, chapitre_ordre: sujet.ordre,
+     feuille_id: feuille.id, feuille_titre: feuille.titre, feuille_ordre: feuille.ordre,
+     feuille_statut: prog?.statut || null, feuille_en_cours: prog?.en_cours || false,
+     feuille_type: feuille.type,
+   });
  });
- });
- 
- if (!chapitre.feuilles || chapitre.feuilles.length === 0) {
- result.push({
- sujet_id: sujet.id,
- sujet_titre: sujet.titre,
- sujet_ordre: sujet.ordre,
- chapitre_id: chapitre.id,
- chapitre_titre: chapitre.titre,
- chapitre_ordre: chapitre.ordre,
- feuille_id: null,
- feuille_titre: null,
- feuille_ordre: null,
- feuille_statut: null
- });
- }
+
+ // Cas 2 : feuilles via chapitres
+ const sujetChapitres = chapitres.filter((c: any) => c.parent_id === sujet.id);
+ sujetChapitres.forEach((chapitre: any) => {
+   const chapFeuilles = feuilles.filter((f: any) => f.parent_id === chapitre.id);
+   if (chapFeuilles.length === 0) {
+     result.push({
+       sujet_id: sujet.id, sujet_titre: sujet.titre, sujet_ordre: sujet.ordre,
+       chapitre_id: chapitre.id, chapitre_titre: chapitre.titre, chapitre_ordre: chapitre.ordre,
+       feuille_id: null, feuille_titre: null, feuille_ordre: null,
+       feuille_statut: null, feuille_en_cours: false, feuille_type: null,
+     });
+   } else {
+     chapFeuilles.forEach((feuille: any) => {
+       const prog = progressionMap.get(feuille.id);
+       result.push({
+         sujet_id: sujet.id, sujet_titre: sujet.titre, sujet_ordre: sujet.ordre,
+         chapitre_id: chapitre.id, chapitre_titre: chapitre.titre, chapitre_ordre: chapitre.ordre,
+         feuille_id: feuille.id, feuille_titre: feuille.titre, feuille_ordre: feuille.ordre,
+         feuille_statut: prog?.statut || null, feuille_en_cours: prog?.en_cours || false,
+         feuille_type: feuille.type,
+       });
+     });
+   }
  });
  });
 
@@ -252,18 +250,11 @@ export default function TableauProgression() {
 
  async function loadScoresLocauxAvecType(niveauId: string, userId: string) {
  try {
- // Récupérer toutes les feuilles du niveau
- const { data: feuillesData } = await supabase
- .from('feuille_entrainement')
- .select(`
- id,
- chapitre:chapitre!inner(
- sujet:sujet!inner(
- niveau_id
- )
- )
- `)
- .eq('chapitre.sujet.niveau_id', niveauId);
+ const { data: arbreDataScores } = await supabase
+ .rpc('get_arbre_noeud', { p_racine_id: niveauId });
+
+ const feuillesData = (arbreDataScores || [])
+ .filter((n: any) => n.type === 'mecanique' || n.type === 'chaotique');
 
  if (!feuillesData || feuillesData.length === 0) {
  setScoresParSessionMeca([]);
@@ -423,24 +414,18 @@ export default function TableauProgression() {
 
  async function loadConcentrationData(niveauId: string, userId: string) {
  try {
- const { data: feuillesData } = await supabase
- .from('feuille_entrainement')
- .select(`
- id,
- chapitre:chapitre!inner(
- sujet:sujet!inner(
- niveau_id
- )
- )
- `)
- .eq('chapitre.sujet.niveau_id', niveauId);
+ const { data: arbreDataConc } = await supabase
+ .rpc('get_arbre_noeud', { p_racine_id: niveauId });
+
+ const feuillesData = (arbreDataConc || [])
+ .filter((n: any) => n.type === 'mecanique' || n.type === 'chaotique');
 
  if (!feuillesData || feuillesData.length === 0) {
  setConcentrationData([]);
  return;
  }
 
- const feuilleIds = feuillesData.map(f => f.id);
+ const feuilleIds = feuillesData.map((f: any) => f.id);
 
  const { data: progressions } = await supabase
  .from('progression_feuille')
@@ -591,6 +576,17 @@ export default function TableauProgression() {
  }
  }
 
+ async function loadUserInfo(userId: string) {
+ try {
+   const [{ data: profile }, { data: membre }] = await Promise.all([
+     supabase.from('profiles').select('full_name').eq('user_id', userId).single(),
+     supabase.from('membre_equipe').select('created_at').eq('user_id', userId).single(),
+   ]);
+   if (profile?.full_name) setUserName(profile.full_name);
+   if (membre?.created_at) setUserCreatedAt(membre.created_at);
+ } catch {}
+ }
+
  function processData(rawData: any[]) {
  console.log('🔍 DONNÉES BRUTES REÇUES:', rawData[0]);
  if (!rawData || rawData.length === 0) {
@@ -626,7 +622,8 @@ export default function TableauProgression() {
  ordre: row.feuille_ordre,
  chapitre_id: row.chapitre_id,
  statut: row.feuille_statut || 'non_faite',
- en_cours: row.feuille_en_cours || false
+ en_cours: row.feuille_en_cours || false,
+ type: row.feuille_type || undefined,
  });
  }
  });
@@ -714,27 +711,54 @@ export default function TableauProgression() {
  };
 
  const sujetsGroupes = data ? data.chapitres.reduce((acc, chapitre) => {
- if (!acc[chapitre.sujet_titre]) {
- acc[chapitre.sujet_titre] = [];
- }
+ if (!acc[chapitre.sujet_titre]) acc[chapitre.sujet_titre] = [];
  acc[chapitre.sujet_titre].push(chapitre);
  return acc;
  }, {} as Record<string, ChapitreRow[]>) : {};
 
+ const toutesLesFeuilles = data ? data.chapitres.flatMap(c => c.feuilles) : [];
+ const nbValidees = toutesLesFeuilles.filter(f => f.statut === 'validee').length;
+ const nbEnCours  = toutesLesFeuilles.filter(f => f.en_cours && f.statut !== 'validee').length;
+ const nbAVenir   = toutesLesFeuilles.length - nbValidees - nbEnCours;
+
+ const semaines = userCreatedAt
+ ? Math.floor((Date.now() - new Date(userCreatedAt).getTime()) / (7 * 24 * 3600 * 1000))
+ : null;
+
+ const initiales = userName
+ ? userName.split(' ').filter(Boolean).map((w: string) => w[0]).join('').substring(0, 2).toUpperCase()
+ : '?';
+
+ const getStatut = (f: FeuilleData): 'validee' | 'en_cours' | 'a_venir' => {
+ if (f.statut === 'validee') return 'validee';
+ if (f.en_cours) return 'en_cours';
+ return 'a_venir';
+ };
+
+ const toggleSujet = (key: string) => {
+ setSujetsOuverts(prev => {
+   const next = new Set(prev);
+   if (next.has(key)) next.delete(key);
+   else next.add(key);
+   return next;
+ });
+ };
+
  if (loading) {
  return (
- <div className="bg-cream-50 rounded-lg border border-border p-8 shadow-sm">
- <div className="text-center text-ink-muted">Chargement du tableau...</div>
- </div>
+   <div className="min-h-screen bg-[#F5F4EF] flex items-center justify-center">
+     <span className="text-sm text-[#999]">Chargement...</span>
+   </div>
  );
  }
 
  if (error) {
  return (
- <div className="bg-red-100/30 border border-red-300 rounded-lg p-6">
- <h3 className="font-semibold text-red-900 mb-2">Erreur</h3>
- <p className="text-red-700">{error}</p>
- </div>
+   <div className="min-h-screen bg-[#F5F4EF] flex items-center justify-center p-6">
+     <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-sm w-full">
+       <p className="text-red-700 text-sm">{error}</p>
+     </div>
+   </div>
  );
  }
 
@@ -772,161 +796,152 @@ export default function TableauProgression() {
  );
 
  return (
- <div className="min-h-screen bg-cream-50 p-6">
- <style jsx global>{`
- @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Lora:wght@400;500;600;700&display=swap');
- h1, h2, h3, h4, h5, h6, .font-mono { font-family: 'IBM Plex Mono', monospace; }
- body { font-family: 'Lora', serif; }
- p, span, div { font-family: 'Lora', serif; }
- `}</style>
- <div className="max-w-7xl mx-auto">
- <div className="space-y-6">
- {niveaux.length > 1 && (
- <div className="bg-cream-50 rounded-xl border border-border p-3 shadow-sm">
- <label className="block text-xs font-medium text-ink mb-1.5">
- Niveau
- </label>
- <select
- value={niveauSelectionne || ''}
- onChange={(e) => setNiveauSelectionne(e.target.value)}
- className="w-full max-w-xs px-3 py-1.5 text-sm rounded-lg border border-border bg-cream-50 text-ink focus:outline-none focus:ring-2 focus:ring-teal-500"
- >
- {niveaux.map((niveau) => (
- <option key={niveau.id} value={niveau.id}>
- {niveau.titre}
- </option>
- ))}
- </select>
- </div>
- )}
+ <div className="min-h-screen bg-[#F5F4EF]">
 
- <div className={`bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden ${fullscreenBlock === 'tableau' ? 'fixed inset-4 z-50 h-full flex flex-col' : ''}`}>
- <div className="bg-accent px-4 py-2.5 flex items-center justify-between flex-shrink-0">
- <div>
- <h2 className="text-base font-bold text-ink">Parcours d'apprentissage</h2>
- <p className="text-teal-100 text-xs">Ensemble des entrainement fait</p>
- </div>
- <div className="flex items-center gap-2">
- <div className="bg-cream-50/20 backdrop-blur-sm rounded-lg px-4 py-2">
- <div className="text-xs text-teal-100">TxSat Global</div>
- <div className="text-xl font-bold text-ink">{data.txSatGlobal}%</div>
- </div>
- <FullscreenButton blockId="tableau" />
- </div>
- </div>
+ {/* ── Nouvelle section : avatar + métriques + onglets + sujets ── */}
+ <div className="p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
 
- <div className={`overflow-x-auto overflow-y-auto ${fullscreenBlock === 'tableau' ? 'flex-1' : 'max-h-[35vh]'}`}>
- <table className="w-full text-xs">
- <thead>
- <tr className="border-b border-border">
- <th className="sticky left-0 bg-cream-200 px-3 py-2 text-center font-bold text-ink border-r-2 border-border min-w-[100px]">
- Sujet
- </th>
- <th className="sticky left-0 bg-cream-50 px-3 py-2 text-left font-semibold text-ink border-r border-border min-w-[150px]">
- Chapitre
- </th>
- <th className="px-3 py-2 text-center font-semibold text-ink border-r border-border min-w-[60px]">
- TxSat
- </th>
- {Array.from({ length: COLONNES_AFFICHEES }, (_, i) => (
- <th
- key={i}
- className="px-1.5 py-2 text-center font-medium text-ink-light border-r border-border min-w-[40px]"
- >
- F{i + 1}
- </th>
- ))}
- </tr>
- </thead>
- <tbody>
- {Object.entries(sujetsGroupes).map(([sujetTitre, chapitres], sujetIndex) => (
- <React.Fragment key={sujetTitre}>
- {chapitres.map((chapitre, chapIndex) => (
- <tr
- key={chapitre.id}
- className={`hover:bg-cream-100/50 transition-colors ${
- chapIndex === chapitres.length - 1
- ? 'border-b-2 border-border'
- : 'border-b border-border'
- }`}
- >
- {chapIndex === 0 && (
- <td
- rowSpan={chapitres.length}
- className="sticky left-0 bg-cream-200 px-3 py-2 border-r-2 border-border text-center align-middle"
- >
- <span className="font-bold text-accent text-sm">
- {sujetTitre}
- </span>
- </td>
- )}
+   {/* En-tête étudiant */}
+   <div className="flex items-center gap-4 pt-2">
+     <div className="w-11 h-11 rounded-full bg-[#185FA5] flex items-center justify-center
+                     text-white font-bold text-sm shrink-0 select-none">
+       {initiales}
+     </div>
+     <div className="min-w-0">
+       <div className="font-semibold text-[#1A1A1A] text-base leading-tight truncate">
+         {userName || 'Étudiant'}
+       </div>
+       {semaines !== null && (
+         <div className="text-xs text-[#999] mt-0.5">
+           Semaine {semaines} d'entraînement
+         </div>
+       )}
+     </div>
+   </div>
 
- <td className="sticky left-0 bg-cream-50 px-3 py-2 border-r border-border">
- <span className="text-ink text-xs">
- {chapitre.titre}
- {chapitre.partNumber && (
- <span className="text-ink-muted ml-1">
- ({chapitre.partNumber})
- </span>
- )}
- </span>
- </td>
+   {/* Métriques */}
+   <div className="grid grid-cols-3 gap-3">
+     <div className="rounded-xl p-4 bg-[#EAF3DE]">
+       <div className="text-2xl font-bold text-[#639922]">{nbValidees}</div>
+       <div className="text-xs font-medium text-[#639922] mt-0.5">Validées</div>
+     </div>
+     <div className="rounded-xl p-4 bg-[#E6F1FB]">
+       <div className="text-2xl font-bold text-[#185FA5]">{nbEnCours}</div>
+       <div className="text-xs font-medium text-[#185FA5] mt-0.5">En cours</div>
+     </div>
+     <div className="rounded-xl p-4 bg-white border border-[#E8E8E8]">
+       <div className="text-2xl font-bold text-[#AAAAAA]">{nbAVenir}</div>
+       <div className="text-xs font-medium text-[#AAAAAA] mt-0.5">À venir</div>
+     </div>
+   </div>
 
- <td className="px-3 py-2 text-center border-r border-border">
- <span className="font-semibold text-ink text-xs">
- {calculateTxSat(chapitre.feuilles)}%
- </span>
- </td>
+   {/* Onglets niveaux */}
+   {niveaux.length > 1 && (
+     <div className="flex gap-2 overflow-x-auto flex-nowrap pb-1">
+       {niveaux.map(n => (
+         <button
+           key={n.id}
+           onClick={() => setNiveauSelectionne(n.id)}
+           className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors border whitespace-nowrap shrink-0 ${
+             niveauSelectionne === n.id
+               ? 'bg-[#185FA5] text-white border-[#185FA5]'
+               : 'bg-white text-[#555] border-[#E0E0E0] hover:bg-[#F5F5F5]'
+           }`}
+         >
+           {n.titre}
+         </button>
+       ))}
+     </div>
+   )}
 
- {Array.from({ length: COLONNES_AFFICHEES }, (_, i) => {
- const feuille = chapitre.feuilles.find((f, idx) => idx === i);
- const statut = feuille ? feuille.statut : null;
+   {/* Sujets dépliables */}
+   <div className="space-y-2 pb-4">
+     {Object.entries(sujetsGroupes).map(([sujetTitre, chapitres]) => {
+       const toutesFeuilles = chapitres.flatMap(c => c.feuilles);
+       const validees = toutesFeuilles.filter(f => f.statut === 'validee').length;
+       const total    = toutesFeuilles.length;
+       const pct      = total > 0 ? Math.round((validees / total) * 100) : 0;
+       const ouvert   = sujetsOuverts.has(sujetTitre);
+       return (
+         <div key={sujetTitre} className="bg-white rounded-xl border border-[#E8E8E8] overflow-hidden">
+           <button
+             onClick={() => toggleSujet(sujetTitre)}
+             className="w-full px-4 py-3.5 flex items-center gap-3 hover:bg-[#FAFAFA] transition-colors text-left"
+           >
+             <span className="font-semibold text-[#1A1A1A] text-sm flex-1 min-w-0 truncate">{sujetTitre}</span>
+             <span className="text-xs text-[#AAA] shrink-0 tabular-nums">{validees}/{total}</span>
+             <div className="w-16 h-1.5 bg-[#EEEEEE] rounded-full shrink-0">
+               <div className="h-full bg-[#639922] rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
+             </div>
+             <svg className={`w-3.5 h-3.5 text-[#CCCCCC] shrink-0 transition-transform duration-200 ${ouvert ? 'rotate-180' : ''}`}
+               fill="none" viewBox="0 0 24 24" stroke="currentColor">
+               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+             </svg>
+           </button>
+           {ouvert && (
+             <div className="border-t border-[#F3F3F3]">
+               {chapitres.map(chapitre => {
+                 const isVirtual = chapitre.titre === sujetTitre;
+                 return (
+                   <div key={chapitre.id}>
+                     {!isVirtual && (
+                       <div className="px-4 py-2 bg-[#F7F7F7] border-b border-[#EFEFEF]">
+                         <span className="text-[11px] font-semibold text-[#AAA] uppercase tracking-wider">{chapitre.titre}</span>
+                       </div>
+                     )}
+                     {chapitre.feuilles.length === 0 ? (
+                       <div className="px-4 py-3 text-xs text-[#CCC] italic">Aucune feuille</div>
+                     ) : (
+                       chapitre.feuilles.map(feuille => {
+                         const statut  = getStatut(feuille);
+                         const isMeca  = feuille.type === 'mecanique';
+                         const isChaos = feuille.type === 'chaotique';
+                         const dotColor =
+                           statut === 'validee'  ? '#639922' :
+                           statut === 'en_cours' ? '#185FA5' : '#D8D8D8';
+                         const statutStyle =
+                           statut === 'validee'  ? 'bg-[#EAF3DE] text-[#639922]' :
+                           statut === 'en_cours' ? 'bg-[#E6F1FB] text-[#185FA5]' :
+                           'bg-[#F3F3F3] text-[#AAAAAA]';
+                         const statutLabel =
+                           statut === 'validee'  ? 'Validée' :
+                           statut === 'en_cours' ? 'En cours' : 'À venir';
+                         return (
+                           <div key={feuille.id}
+                             className="flex items-center gap-3 px-4 py-2.5 border-b border-[#F7F7F7] last:border-0">
+                             <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: dotColor }} />
+                             <span className="text-sm text-[#2A2A2A] flex-1 min-w-0 truncate">{feuille.titre}</span>
+                             {isMeca && (
+                               <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#E6F1FB] text-[#185FA5] shrink-0">M</span>
+                             )}
+                             {isChaos && (
+                               <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#EEEDFE] text-[#534AB7] shrink-0">C</span>
+                             )}
+                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium shrink-0 ${statutStyle}`}>
+                               {statutLabel}
+                             </span>
+                           </div>
+                         );
+                       })
+                     )}
+                   </div>
+                 );
+               })}
+             </div>
+           )}
+         </div>
+       );
+     })}
+     {Object.keys(sujetsGroupes).length === 0 && (
+       <div className="bg-white rounded-xl border border-[#E8E8E8] p-10 text-center">
+         <div className="text-[#CCC] text-sm">Aucun contenu pour ce niveau</div>
+       </div>
+     )}
+   </div>
 
-
- 
- return (
- <td
- key={i}
- className="px-1.5 py-2 text-center border-r border-border"
- >
- <div
- className={`inline-flex items-center justify-center w-6 h-6 rounded font-semibold text-xs ${getCellColor(feuille || null)}`}
- >
- {getCellContent(feuille || null, feuille?.nbSessions || 0)}
  </div>
- </td>
- );
- })}
- </tr>
- ))}
- </React.Fragment>
- ))}
- </tbody>
- </table>
- </div>
-
- <div className="bg-cream-100/50 px-4 py-2 border-t border-border flex-shrink-0">
- <div className="flex items-center gap-4 text-xs">
- <span className="text-ink-light font-semibold">Légende :</span>
- <div className="flex items-center gap-1.5">
- <div className="w-5 h-5 rounded bg-status-success flex items-center justify-center text-ink font-semibold text-xs">✓</div>
- <span className="text-ink-light">Validée</span>
- </div>
- <div className="flex items-center gap-1.5">
- <div className="w-5 h-5 rounded bg-accent flex items-center justify-center text-ink font-semibold text-xs">1</div>
- <span className="text-ink-light">En progression</span>
- </div>
- <div className="flex items-center gap-1.5">
- <div className="w-5 h-5 rounded bg-cream-200 flex items-center justify-center text-ink-light font-semibold text-xs">0</div>
- <span className="text-ink-light">Non faite</span>
- </div>
- <div className="flex items-center gap-1.5">
- <div className="w-5 h-5 rounded bg-cream-50 border border-border flex items-center justify-center text-ink-muted font-semibold text-xs">x</div>
- <span className="text-ink-light">N'existe pas</span>
- </div>
- </div>
- </div>
- </div>
+ {/* ── Graphiques ─────────────────────────────────────────────── */}
+ <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-8">
 
  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
  {/* Graphique des scores avec toggle */}
@@ -1295,7 +1310,6 @@ export default function TableauProgression() {
      <FullscreenButton blockId="objectifs" />
    </div>
    <GridObjectifs data={gridObjectifs} />
- </div>
  </div>
  </div>
  </div>
