@@ -12,7 +12,7 @@ export async function GET(req: Request) {
 
   const { data, error } = await supabase
     .from('conversation_history')
-    .select('id, exercice_numero, messages, created_at')
+    .select('id, exercice_numero, terminee, messages, created_at')
     .eq('user_id', user.id)
     .eq('feuille_id', feuille_id)
     .order('created_at', { ascending: false });

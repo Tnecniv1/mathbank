@@ -267,6 +267,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Erreur BDD' }, { status: 500 });
   }
 
+  // Marquer la session conversation comme terminée (fire-and-forget)
+  service
+    .from('conversation_history')
+    .update({ terminee: true })
+    .eq('user_id', user.id)
+    .eq('feuille_id', feuille_id)
+    .eq('exercice_numero', exercice_numero)
+    .eq('terminee', false)
+    .then(({ error }) => {
+      if (error) console.error('[evaluate] conversation_history terminee update error:', error);
+    });
+
   return NextResponse.json({
     success: true,
     grille_id: id,

@@ -44,65 +44,21 @@ type EvalResult = {
 type HistoryEntry = {
   id: string;
   exercice_numero: number;
+  terminee: boolean;
   messages: { role: 'user' | 'assistant'; content: string; timestamp?: string; photo_url?: string }[];
   created_at: string;
 };
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
-const SESSION_DURATION = 30 * 60; // 30 minutes en secondes
 const STORAGE_BASE =
   'https://rvonutomiuvsxjxeuipq.supabase.co/storage/v1/object/public/pdfs';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-  const s = (seconds % 60).toString().padStart(2, '0');
-  return `${m}:${s}`;
-}
-
 function pdfUrl(pdf_url: string | null): string | null {
   if (!pdf_url) return null;
   return `${STORAGE_BASE}/${pdf_url}`;
-}
-
-// ── Composant Minuteur ────────────────────────────────────────────────────────
-
-function Timer({ running }: { running: boolean }) {
-  const [remaining, setRemaining] = useState(SESSION_DURATION);
-
-  useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => {
-      setRemaining((s) => Math.max(0, s - 1));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [running]);
-
-  const pct = ((SESSION_DURATION - remaining) / SESSION_DURATION) * 100;
-  const urgent = remaining < 5 * 60;
-
-  return (
-    <div className="flex items-center gap-3">
-      {/* Barre de progression */}
-      <div className="w-24 h-1.5 bg-[#E8E8E8] rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-1000 ${
-            urgent ? 'bg-red-400' : 'bg-[#185FA5]'
-          }`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span
-        className={`text-sm font-mono font-semibold tabular-nums ${
-          urgent ? 'text-red-500' : 'text-[#555]'
-        }`}
-      >
-        {formatTime(remaining)}
-      </span>
-    </div>
-  );
 }
 
 // ── Rendu LaTeX + Markdown léger ──────────────────────────────────────────────
@@ -259,6 +215,14 @@ export default function SessionPage() {
 
   const feuille = ctx?.feuilles.find((f) => f.id === feuilleId) ?? null;
   const prenom = ctx?.profil.full_name.split(' ')[0] ?? 'Élève';
+
+  // Session non terminée pour l'exercice en cours (détectée depuis l'historique)
+  const sessionEnCours: HistoryEntry | null =
+    feuille && !started
+      ? (history.find(
+          (e) => !e.terminee && e.exercice_numero === feuille.prochain_exercice
+        ) ?? null)
+      : null;
 
   // ── Envoi d'un message + streaming ─────────────────────────────────────
   const sendMessage = useCallback(
@@ -430,6 +394,69 @@ export default function SessionPage() {
     startSession(currentExercice + 1);
   }, [startSession, currentExercice]);
 
+  // ── Reprise d'une session interrompue ───────────────────────────────────
+  const handleReprendre = useCallback(async (entry: HistoryEntry) => {
+    if (!feuille) return;
+    const exo = entry.exercice_numero;
+    setCurrentExercice(exo);
+    setSessionStartTime(Date.now());
+
+    // Restaurer les messages précédents dans l'UI
+    const restoredMessages: Message[] = entry.messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+      photo_url: m.photo_url,
+    }));
+    setMessages(restoredMessages);
+    setStarted(true);
+    setLastPhotoSent(null);
+    setEvaluation(null);
+    setSending(true);
+    setAiTyping(true);
+
+    // Envoyer un signal de reprise à Claude
+    const resumeMessages = [
+      ...restoredMessages.map(({ imagePreview: _, ...m }) => m),
+      { role: 'user' as const, content: 'Je reprends la session.' },
+    ];
+    try {
+      const res = await fetch('/api/session/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: resumeMessages,
+          feuille_id: feuille.id,
+          prochain_exercice: exo,
+          prenom,
+          reprise: true,
+        }),
+      });
+      if (!res.ok || !res.body) throw new Error(`Erreur ${res.status}`);
+      setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
+      setAiTyping(false);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+        setMessages((prev) => [
+          ...prev.slice(0, -1),
+          { role: 'assistant', content: accumulated },
+        ]);
+      }
+    } catch (err) {
+      setAiTyping(false);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: '⚠️ Impossible de reprendre la session.' },
+      ]);
+    } finally {
+      setSending(false);
+    }
+  }, [feuille, prenom]);
+
   // ── Gestion photo ───────────────────────────────────────────────────────
   const handlePhotoChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -520,9 +547,8 @@ export default function SessionPage() {
           </div>
         </div>
 
-        {/* Droite : minuteur + PDF */}
+        {/* Droite : PDF */}
         <div className="flex items-center gap-3 shrink-0">
-          <Timer running={started} />
           {feuille?.pdf_url && (
             <button
               onClick={() => setPdfOpen(true)}
@@ -562,7 +588,44 @@ export default function SessionPage() {
         <div className="flex-1 overflow-y-auto">
           <div className="flex flex-col items-center px-4 py-6 gap-6 max-w-lg mx-auto">
 
+            {/* Card session en cours (reprise) */}
+            {sessionEnCours && (
+              <div className="bg-[#FFF8E7] border border-[#F5D48B] rounded-2xl p-6 w-full space-y-4 shadow-sm">
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-[#8B6800]">⚡ Session en cours</p>
+                  <p className="text-sm text-[#555]">
+                    Tu as une session interrompue sur l'exercice n°{sessionEnCours.exercice_numero} —{' '}
+                    {new Date(sessionEnCours.created_at).toLocaleDateString('fr-FR', {
+                      day: '2-digit', month: 'short',
+                    })}
+                  </p>
+                  <p className="text-xs text-[#999]">
+                    {sessionEnCours.messages.length} messages échangés
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => handleReprendre(sessionEnCours)}
+                    disabled={sending}
+                    className="flex-1 py-2.5 rounded-xl bg-[#185FA5] text-white font-semibold text-sm
+                               hover:bg-[#1450A3] transition-colors disabled:opacity-40"
+                  >
+                    {sending ? 'Connexion…' : 'Reprendre →'}
+                  </button>
+                  <button
+                    onClick={() => startSession()}
+                    disabled={sending}
+                    className="flex-1 py-2.5 rounded-xl bg-white border border-[#E8E8E8] text-[#555] font-semibold text-sm
+                               hover:bg-[#F5F5F5] transition-colors disabled:opacity-40"
+                  >
+                    Nouvelle session
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Card de démarrage */}
+            {!sessionEnCours && (
             <div className="bg-white border border-[#E8E8E8] rounded-2xl p-8 w-full text-center space-y-5 shadow-sm">
               <div className="space-y-1">
                 <p className="text-lg font-bold text-[#1A1A1A]">Bonjour, {prenom} 👋</p>
@@ -573,7 +636,7 @@ export default function SessionPage() {
                       <span className="font-semibold text-[#1A1A1A]">{feuille.titre}</span>
                     </p>
                     <p className="text-sm text-[#999]">
-                      Exercice n°{feuille.prochain_exercice} · Session de 30 min
+                      Exercice n°{feuille.prochain_exercice}
                     </p>
                   </>
                 ) : (
@@ -590,6 +653,7 @@ export default function SessionPage() {
                 {sending ? 'Connexion…' : 'Démarrer la session'}
               </button>
             </div>
+            )}
 
             {/* Historique des sessions */}
             {feuilleId && (

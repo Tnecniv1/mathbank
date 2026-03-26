@@ -181,10 +181,12 @@ export async function POST(req: Request) {
     messages,
     feuille_id,
     prochain_exercice,
+    reprise,
   }: {
     messages: ClientMessage[];
     feuille_id: string;
     prochain_exercice: number;
+    reprise?: boolean;
   } = body;
 
   if (!feuille_id || !Array.isArray(messages)) {
@@ -233,12 +235,15 @@ export async function POST(req: Request) {
 
   // 5. System prompt rempli
   const exerciceLabel = feuilleType === 'mecanique' ? 'Exercice' : 'Problème';
-  const system = SYSTEM_PROMPT
+  const baseSystem = SYSTEM_PROMPT
     .replace(/{prenom}/g, prenom)
     .replace(/{feuille_titre}/g, feuilleTitre)
     .replace(/{type}/g, feuilleType)
     .replace(/{exercice_label}/g, exerciceLabel)
     .replace(/{prochain_exercice}/g, String(prochain_exercice ?? 1));
+  const system = reprise
+    ? baseSystem + '\n\n[NOTE DE REPRISE : L\'élève reprend une session interrompue. L\'historique ci-dessus correspond aux échanges précédents. Accueille sa reprise naturellement, en continuant là où vous en étiez — pas de message d\'accueil, pas de répétition de l\'énoncé.]'
+    : baseSystem;
 
   // 6. Construction des messages Anthropic
   //    Le PDF est injecté dans le PREMIER message utilisateur (index 0).
