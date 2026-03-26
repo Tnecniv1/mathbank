@@ -345,6 +345,7 @@ function BadgesSection() {
 }
 
 const navItems = [
+ { href: '/session', emoji: '🏋️', title: 'Entraînement', description: 'Sessions de coaching IA' },
  { href: '/library', emoji: '📚', title: 'Bibliothèque', description: 'Feuilles d\'entraînement et parcours' },
  { href: '/library/sessions', emoji: '📝', title: 'Mes Sessions', description: 'Entraînements quotidiens et historique' },
  { href: '/progression', emoji: '📊', title: 'Progression', description: 'Statistiques et évolution' },
@@ -357,8 +358,6 @@ export default function HomePage() {
  return (
  <main className="min-h-screen p-6">
  <div className="max-w-4xl mx-auto space-y-8">
-
- <BadgesSection />
 
  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
  {navItems.map((item) => (

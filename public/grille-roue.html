@@ -485,13 +485,6 @@ function WheelEditor({sheet, onChange}){
             );
           }),
           React.createElement("circle",{cx:CX,cy:CY,r:R_IN,fill:"#FDFAF6",stroke:"#C8BBA8",strokeWidth:"1.5"}),
-          React.createElement("g",{onClick:e=>{ e.stopPropagation(); if(!sheet.closed){ setEditMeta(true); setLocalMeta(sheet.meta); } },style:{cursor:"pointer"}},
-            React.createElement("text",{x:CX,y:CY-20,textAnchor:"middle",fontSize:"9",fill:"#5A4A3A",fontFamily:"Georgia,serif",fontWeight:"600"},[sheet.meta.prenom,sheet.meta.nom].filter(Boolean).join(" ")||"—"),
-            React.createElement("text",{x:CX,y:CY-7,textAnchor:"middle",fontSize:"8.5",fill:"#8B7355",fontFamily:"Georgia,serif",fontStyle:"italic"},sheet.meta.feuille||"Feuille —"),
-            React.createElement("text",{x:CX,y:CY+6,textAnchor:"middle",fontSize:"8.5",fill:"#8B7355",fontFamily:"Georgia,serif"},activeExo.reference||"Exo —"),
-            React.createElement("text",{x:CX,y:CY+19,textAnchor:"middle",fontSize:"8",fill:"#B0A090",fontFamily:"Georgia,serif"},(sheet.meta.sessions||[]).length>0?`${(sheet.meta.sessions||[]).length} session${(sheet.meta.sessions||[]).length>1?"s":""}`:sheet.meta.date||""),
-            React.createElement("text",{x:CX,y:CY+32,textAnchor:"middle",fontSize:"8",fill:"#B0A090",fontFamily:"Georgia,serif",fontStyle:"italic"},"✎"),
-          ),
         ),
       ),
 
@@ -669,6 +662,81 @@ function SheetCard({sheet,onOpen,onDelete,onExport,onInsert}){
   );
 }
 
+// ─── Modal lecture seule ──────────────────────────────────────────
+const CRIT_ORDER  = ['C1','C2','C3','C4','S1','S2','S3','S4','R1','R2','R3','R4','B1'];
+const CRIT_COLORS = {C:'#3D7FD4', S:'#D4503D', R:'#3DAF6B', B:'#8B5CF6'};
+
+function ReadOnlyModal({sheet, onClose}){
+  const exercices = sheet.exercices || [];
+  const e = s => React.createElement;
+  return e("div")("div",{onClick:onClose,style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.42)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:200,padding:"20px 16px",overflowY:"auto"}},
+    e("div")("div",{onClick:ev=>ev.stopPropagation(),style:{background:"#FDFAF6",borderRadius:16,padding:"26px 24px 20px",width:"100%",maxWidth:360,boxShadow:"0 8px 40px rgba(0,0,0,0.18)",border:"1px solid #E0D5C5",marginTop:20}},
+
+      // En-tête nom + feuille
+      e("div")("div",{style:{fontSize:15,fontWeight:"bold",color:"#2C1810",marginBottom:3,fontFamily:"Georgia,serif"}},
+        [sheet.meta.prenom,sheet.meta.nom].filter(Boolean).join(" ")||"—"),
+      e("div")("div",{style:{fontSize:12,color:"#8B7355",fontStyle:"italic",marginBottom:12,fontFamily:"Georgia,serif"}},
+        sheet.meta.feuille||"—"),
+
+      // Badges statut
+      e("div")("div",{style:{display:"flex",gap:6,marginBottom:14}},
+        sheet.closed   && e("span")("span",{style:{fontSize:9,background:"#3DAF6B",color:"white",borderRadius:4,padding:"2px 8px",fontFamily:"Georgia,serif",letterSpacing:"0.03em"}},"bouclée"),
+        sheet.inserted && e("span")("span",{style:{fontSize:9,background:"#3D7FD4",color:"white",borderRadius:4,padding:"2px 8px",fontFamily:"Georgia,serif",letterSpacing:"0.03em"}},"insérée"),
+      ),
+
+      // Sessions
+      (sheet.meta.sessions||[]).length > 0 && e("div")("div",{style:{marginBottom:14}},
+        e("div")("div",{style:{fontSize:10,color:"#8B7355",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6,fontFamily:"Georgia,serif"}},"Sessions"),
+        ...(sheet.meta.sessions||[]).map((s,i)=>
+          e("div")("div",{key:i,style:{fontSize:12,color:"#5A4A3A",padding:"4px 0",borderBottom:"1px solid #F0EAE0",fontFamily:"Georgia,serif"}},
+            `${s.date||"—"}  ·  ${s.duree||"—"}`)
+        ),
+      ),
+
+      // Note libre
+      sheet.meta.note && e("div")("div",{style:{background:"white",borderRadius:8,padding:"10px 12px",border:"1px solid #E8E0D4",fontSize:12,color:"#5A4A3A",fontStyle:"italic",marginBottom:14,fontFamily:"Georgia,serif"}},
+        `"${sheet.meta.note}"`),
+
+      // Exercices
+      exercices.length > 0 && e("div")("div",{style:{marginBottom:14}},
+        e("div")("div",{style:{fontSize:10,color:"#8B7355",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:8,fontFamily:"Georgia,serif"}},"Exercices"),
+        ...exercices.map(exo=>{
+          const v = exo.validated||{};
+          const critPresents = CRIT_ORDER.filter(k=>k in v);
+          return e("div")("div",{key:exo.id,style:{background:"white",borderRadius:10,padding:"12px 14px",border:"1px solid #E8E0D4",marginBottom:8}},
+            // Header exercice
+            e("div")("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:critPresents.length>0?8:0}},
+              e("span")("span",{style:{fontSize:12,fontWeight:"600",color:"#2C1810",fontFamily:"Georgia,serif"}},
+                exo.reference||(exo.type==='chaotique'?"Chaotique":"Mécanique")),
+              e("span")("span",{style:{fontSize:9,fontWeight:"bold",padding:"2px 6px",borderRadius:4,background:exo.type==='chaotique'?"#3D7FD4":"#7B5A3D",color:"white"}},
+                exo.type==='chaotique'?"C":"M"),
+              exo.reussi===true  && e("span")("span",{style:{fontSize:11,color:"#3DAF6B",fontWeight:"bold",marginLeft:"auto"}},"✓ Réussi"),
+              exo.reussi===false && e("span")("span",{style:{fontSize:11,color:"#D4503D",fontWeight:"bold",marginLeft:"auto"}},"✗ Échec"),
+            ),
+            // Critères
+            critPresents.length > 0 && e("div")("div",{style:{display:"flex",flexWrap:"wrap",gap:4}},
+              ...critPresents.map(k=>{
+                const ok    = v[k]===true;
+                const color = CRIT_COLORS[k[0]]||'#8B7355';
+                return e("span")("span",{key:k,style:{
+                  fontSize:10,padding:"2px 7px",borderRadius:10,fontWeight:"bold",fontFamily:"Georgia,serif",
+                  background: ok ? color+'22' : '#F5F0E8',
+                  color:      ok ? color      : '#C8BBA8',
+                  border:    `1px solid ${ok ? color+'66' : '#E0D5C5'}`,
+                }}, `${ok?"✓":"✗"} ${k}`);
+              }),
+            ),
+          );
+        }),
+      ),
+
+      // Bouton Fermer
+      e("button")("button",{onClick:onClose,style:{width:"100%",padding:10,background:"#2C1810",color:"#FDFAF6",border:"none",borderRadius:8,fontSize:13,cursor:"pointer",fontFamily:"Georgia,serif",marginTop:4}},
+        "Fermer"),
+    ),
+  );
+}
+
 // ─── Écran de connexion ───────────────────────────────────────────
 function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -713,6 +781,7 @@ function App(){
   const [authLoading, setAuthLoading] = useState(true);
   const [saveStatus,  setSaveStatus]  = useState(null);
   const [filter,      setFilter]      = useState('en_cours');
+  const [readOnlySheet, setReadOnlySheet] = useState(null);
   const importRef = useRef(null);
 
   useEffect(() => { _setSaveStatus = setSaveStatus; }, []);
@@ -830,6 +899,7 @@ function App(){
 
   return React.createElement("div",{style:{minHeight:"100vh",background:"#F5F0E8"}},
     topBar,
+    readOnlySheet && React.createElement(ReadOnlyModal,{sheet:readOnlySheet,onClose:()=>setReadOnlySheet(null)}),
     error && React.createElement("div",{style:{background:"#FFF0EE",border:"1px solid #F0C0BB",color:"#C06060",padding:"10px 20px",fontSize:13,display:"flex",justifyContent:"space-between",alignItems:"center"}},
       error,
       React.createElement("button",{onClick:()=>setError(null),style:{background:"transparent",border:"none",cursor:"pointer",color:"#C06060",fontSize:16}},"✕"),
@@ -856,7 +926,7 @@ function App(){
                 },f.label)),
               ),
               React.createElement("div",{style:{fontSize:11,color:"#8B7355",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:4}},`${filteredSheets.length} feuille${filteredSheets.length>1?"s":""} enregistrée${filteredSheets.length>1?"s":""}`),
-              ...filteredSheets.map(s=>React.createElement(SheetCard,{key:s.id,sheet:s,onOpen:()=>setActiveId(s.id),onDelete:()=>remove(s.id),onExport:()=>exportSheet(s),onInsert:()=>insertSheet(s)})),
+              ...filteredSheets.map(s=>React.createElement(SheetCard,{key:s.id,sheet:s,onOpen:()=>{ if(s.closed||s.inserted){ setReadOnlySheet(s); } else { setActiveId(s.id); } },onDelete:()=>remove(s.id),onExport:()=>exportSheet(s),onInsert:()=>insertSheet(s)})),
               filteredSheets.length===0 && React.createElement("div",{style:{textAlign:"center",padding:"30px 20px",color:"#B0A090",fontStyle:"italic",fontSize:13,background:"white",borderRadius:12,border:"1px solid #E8E0D4"}},"Aucune feuille dans cette catégorie."),
             ),
     ),

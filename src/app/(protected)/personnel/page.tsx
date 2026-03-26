@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
+import ProfileCompletionModal from './_components/ProfileCompletionModal';
 
 /* ---------- TYPES ---------- */
 type Notification = {
@@ -37,6 +38,12 @@ type UserInfo = {
  city: string;
  postal_code: string;
  role: string;
+ // Nouvelles colonnes
+ pseudo: string;
+ telephone: string;
+ adresse: string;
+ date_naissance: string;
+ user_role: string;
 };
 
 type Feuille = {
@@ -63,6 +70,12 @@ export default function PersonnelPage() {
  const [showRejetModal, setShowRejetModal] = useState(false);
  const [showEditModal, setShowEditModal] = useState(false);
  const [showEditEquipeModal, setShowEditEquipeModal] = useState(false);
+ const [showProfileModal, setShowProfileModal] = useState(false);
+
+ // Accordéon
+ const [openInfos, setOpenInfos] = useState(true);
+ const [openEquipes, setOpenEquipes] = useState(false);
+ const [openNotifs, setOpenNotifs] = useState(false);
  // ❌ SUPPRIMÉ : showValidationModal (validation directe maintenant)
  const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
  const [equipeSelectionnee, setEquipeSelectionnee] = useState<MonEquipe | null>(null);
@@ -77,6 +90,11 @@ export default function PersonnelPage() {
  city: '',
  postal_code: '',
  role: '',
+ pseudo: '',
+ telephone: '',
+ adresse: '',
+ date_naissance: '',
+ user_role: '',
  });
 
  // État pour l'édition d'équipe
@@ -126,7 +144,7 @@ export default function PersonnelPage() {
  async function loadUserInfo(user: any) {
  const { data, error } = await supabase
  .from('profiles')
- .select('preferences')
+ .select('preferences, pseudo, telephone, adresse, date_naissance, user_role')
  .eq('user_id', user.id)
  .single();
 
@@ -136,8 +154,9 @@ export default function PersonnelPage() {
  }
 
  const prefs = data?.preferences || {};
+ const displayEmail = (user.email || '').endsWith('@mathbank.internal') ? '' : (user.email || '');
  const info: UserInfo = {
- email: user.email || '',
+ email: displayEmail,
  first_name: prefs.first_name || '',
  last_name: prefs.last_name || '',
  birth_date: prefs.birth_date || '',
@@ -145,6 +164,11 @@ export default function PersonnelPage() {
  city: prefs.city || '',
  postal_code: prefs.postal_code || '',
  role: prefs.role || '',
+ pseudo: data?.pseudo || '',
+ telephone: data?.telephone || '',
+ adresse: data?.adresse || '',
+ date_naissance: data?.date_naissance || '',
+ user_role: data?.user_role || '',
  };
 
  setUserInfo(info);
@@ -494,241 +518,248 @@ export default function PersonnelPage() {
  </p>
  </div>
 
- {/* Informations personnelles */}
- <div className="bg-cream-50 rounded-lg p-6 border border-border shadow-sm">
- <div className="flex justify-between items-center mb-4">
- <h2 className="text-xl font-bold text-ink">
- 📋 Mes Informations
- </h2>
- <button
- onClick={() => setShowEditModal(true)}
- className="px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors shadow-sm"
- >
- ✏️ Modifier
- </button>
+ {/* Raccourcis */}
+ <div className="bg-cream-100 rounded-lg px-5 py-4 border border-border">
+  <p className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-3">Raccourcis</p>
+  <div className="flex gap-3 flex-wrap">
+   {monEquipe && (
+    <button
+     onClick={() => router.push(`/gestion-equipe?id=${monEquipe.id}`)}
+     className="px-4 py-2 bg-white border border-border rounded-lg text-sm font-medium text-ink hover:bg-cream-50 transition-colors shadow-sm"
+    >
+     👥 Mon équipe →
+    </button>
+   )}
+   <a
+    href="https://mathbank.onrender.com/grille-roue.html"
+    target="_blank"
+    rel="noopener noreferrer"
+    className="px-4 py-2 bg-white border border-border rounded-lg text-sm font-medium text-ink hover:bg-cream-50 transition-colors shadow-sm"
+   >
+    📊 Grille d'observation →
+   </a>
+  </div>
  </div>
 
- {userInfo ? (
- <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
- <InfoItem label="Email" value={userInfo.email} />
- <InfoItem label="Prénom" value={userInfo.first_name} />
- <InfoItem label="Nom" value={userInfo.last_name} />
- <InfoItem label="Date de naissance" value={userInfo.birth_date} />
- <InfoItem label="Adresse" value={userInfo.address} />
- <InfoItem label="Ville" value={userInfo.city} />
- <InfoItem label="Code postal" value={userInfo.postal_code} />
- <InfoItem label="Rôle" value={userInfo.role} />
- </div>
- ) : (
- <div className="text-ink-muted">Aucune information disponible</div>
- )}
+ {/* Accordéon — Mes Informations */}
+ <div className="bg-cream-50 rounded-lg border border-border shadow-sm overflow-hidden">
+  <button
+   type="button"
+   onClick={() => setOpenInfos(!openInfos)}
+   className="w-full flex justify-between items-center px-6 py-4 hover:bg-cream-100 transition-colors"
+  >
+   <h2 className="text-xl font-bold text-ink">📋 Mes Informations</h2>
+   <span className="text-ink-muted text-lg">{openInfos ? '▲' : '▼'}</span>
+  </button>
+  {openInfos && (
+   <div className="px-6 pb-6">
+    <div className="flex justify-end gap-2 mb-4">
+     <button
+      onClick={() => setShowEditModal(true)}
+      className="px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors shadow-sm text-sm"
+     >
+      ✏️ Modifier
+     </button>
+     <button
+      onClick={() => setShowProfileModal(true)}
+      className="px-4 py-2 bg-[#185FA5] hover:bg-[#1450a3] text-white font-medium rounded-lg transition-colors shadow-sm text-sm"
+     >
+      Modifier mes informations
+     </button>
+    </div>
+    {userInfo ? (
+     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <InfoItem label="Email" value={userInfo.email} />
+      <InfoItem label="Prénom" value={userInfo.first_name} />
+      <InfoItem label="Nom" value={userInfo.last_name} />
+      <InfoItem label="Date de naissance" value={userInfo.birth_date} />
+      <InfoItem label="Adresse" value={userInfo.address} />
+      <InfoItem label="Ville" value={userInfo.city} />
+      <InfoItem label="Code postal" value={userInfo.postal_code} />
+      <InfoItem label="Rôle" value={userInfo.role} />
+      {userInfo.pseudo && <InfoItem label="Pseudo" value={userInfo.pseudo} />}
+      {userInfo.telephone && <InfoItem label="Téléphone" value={userInfo.telephone} />}
+      {userInfo.adresse && <InfoItem label="Adresse (profil)" value={userInfo.adresse} />}
+      {userInfo.date_naissance && <InfoItem label="Date de naissance (profil)" value={userInfo.date_naissance} />}
+      {userInfo.user_role && <InfoItem label="Profil" value={userInfo.user_role} />}
+     </div>
+    ) : (
+     <div className="text-ink-muted">Aucune information disponible</div>
+    )}
+   </div>
+  )}
  </div>
 
- {/* Mon équipe */}
- {monEquipe && (
- <div className="bg-cream-50 rounded-lg p-6 border border-border shadow-sm">
- <h2 className="text-xl font-bold text-ink mb-4">
- 👥 Mon Équipe
- </h2>
- <div
- className="p-4 rounded-lg border transition-colors"
- style={{ borderColor: monEquipe.couleur }}
- >
- <div className="flex items-center justify-between">
- <div>
- <div className="text-xl font-bold text-ink">
- {monEquipe.nom}
- </div>
- <div className="text-sm text-ink-light">
- {monEquipe.nb_membres} membre{monEquipe.nb_membres > 1 ? 's' : ''}
- </div>
- </div>
- <button
- onClick={() => router.push(`/gestion-equipe?id=${monEquipe.id}`)}
- className="px-4 py-2 bg-accent hover:bg-accent-hover text-ink font-semibold rounded-lg transition-all shadow-sm"
- >
- Voir mon équipe →
- </button>
- </div>
- </div>
- </div>
- )}
-
- {/* Mes équipes (si chef) - GRILLE 3x3 */}
+ {/* Accordéon — Mes Équipes (Chef) */}
  {isChef && mesEquipes.length > 0 && (
- <div className="bg-cream-50 rounded-lg p-6 border border-border shadow-sm">
- <h2 className="text-xl font-bold text-ink mb-4">
- 🏆 Mes Équipes (Chef)
- </h2>
- <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
- {mesEquipes.map(equipe => (
- <div
- key={equipe.id}
- className="p-4 rounded-lg border transition-all hover:shadow-sm hover:scale-105"
- style={{ borderColor: equipe.couleur }}
- >
- {/* Nom et nombre de membres */}
- <div className="mb-3">
- <div className="text-lg font-bold text-ink mb-1">
- {equipe.nom}
- </div>
- <div className="text-sm text-ink-light">
- {equipe.nb_membres} membre{equipe.nb_membres > 1 ? 's' : ''}
- </div>
- </div>
-
- {/* Boutons empilés verticalement */}
- <div className="space-y-2">
- <button
- onClick={() => router.push(`/gestion-equipe?id=${equipe.id}`)}
- className="w-full px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors shadow-sm"
- >
- Gérer l'équipe
- </button>
- <div className="flex gap-2">
- <button
- onClick={() => {
- setEquipeSelectionnee(equipe);
- setEditEquipeData({
- nom: equipe.nom,
- description: '',
- couleur: equipe.couleur,
- });
- setShowEditEquipeModal(true);
- }}
- className="flex-1 px-3 py-2 bg-cream-200 hover:bg-cream-200 text-ink font-medium rounded-lg transition-colors"
- >
- ✏️ Modifier
- </button>
- <button
- onClick={() => handleSupprimerEquipe(equipe.id)}
- className="flex-1 px-3 py-2 bg-red-100 hover:bg-red-200 text-red-600 font-medium rounded-lg transition-colors"
- >
- 🗑️ Supprimer
- </button>
- </div>
- </div>
- </div>
- ))}
- </div>
- </div>
+  <div className="bg-cream-50 rounded-lg border border-border shadow-sm overflow-hidden">
+   <button
+    type="button"
+    onClick={() => setOpenEquipes(!openEquipes)}
+    className="w-full flex justify-between items-center px-6 py-4 hover:bg-cream-100 transition-colors"
+   >
+    <h2 className="text-xl font-bold text-ink">🏆 Mes Équipes (Chef)</h2>
+    <span className="text-ink-muted text-lg">{openEquipes ? '▲' : '▼'}</span>
+   </button>
+   {openEquipes && (
+    <div className="px-6 pb-6">
+     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {mesEquipes.map(equipe => (
+       <div
+        key={equipe.id}
+        className="p-4 rounded-lg border transition-all hover:shadow-sm hover:scale-105"
+        style={{ borderColor: equipe.couleur }}
+       >
+        <div className="mb-3">
+         <div className="text-lg font-bold text-ink mb-1">{equipe.nom}</div>
+         <div className="text-sm text-ink-light">
+          {equipe.nb_membres} membre{equipe.nb_membres > 1 ? 's' : ''}
+         </div>
+        </div>
+        <div className="space-y-2">
+         <button
+          onClick={() => router.push(`/gestion-equipe?id=${equipe.id}`)}
+          className="w-full px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors shadow-sm"
+         >
+          Gérer l'équipe
+         </button>
+         <div className="flex gap-2">
+          <button
+           onClick={() => {
+            setEquipeSelectionnee(equipe);
+            setEditEquipeData({ nom: equipe.nom, description: '', couleur: equipe.couleur });
+            setShowEditEquipeModal(true);
+           }}
+           className="flex-1 px-3 py-2 bg-cream-200 hover:bg-cream-200 text-ink font-medium rounded-lg transition-colors"
+          >
+           ✏️ Modifier
+          </button>
+          <button
+           onClick={() => handleSupprimerEquipe(equipe.id)}
+           className="flex-1 px-3 py-2 bg-red-100 hover:bg-red-200 text-red-600 font-medium rounded-lg transition-colors"
+          >
+           🗑️ Supprimer
+          </button>
+         </div>
+        </div>
+       </div>
+      ))}
+     </div>
+    </div>
+   )}
+  </div>
  )}
 
- {/* Notifications - GRILLE 3x3 avec SCROLL */}
- <div className="bg-cream-50 rounded-lg p-6 border border-border shadow-sm">
- <div className="flex items-center justify-between mb-4">
- <h2 className="text-xl font-bold text-ink">
- 🔔 Notifications
- </h2>
- {notifsNonLues > 0 && (
- <span className="px-3 py-1 bg-accent-light0 text-ink text-sm font-bold rounded-full shadow-sm">
- {notifsNonLues} nouvelle{notifsNonLues > 1 ? 's' : ''}
- </span>
- )}
- </div>
-
- {notifications.length === 0 ? (
- <div className="text-center py-12 text-ink-muted">
- Aucune notification pour le moment
- </div>
- ) : (
- <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-2">
- {notifications.map(notif => {
- const isDemandeEnAttente = notif.type === 'demande_rejointe' && !notif.lu;
- const isSoumissionEnAttente = notif.type === 'soumission_feuille' && !notif.lu;
- 
- return (
- <div
- key={notif.id}
- className={`p-4 rounded-lg border transition-all hover:scale-105 flex flex-col ${
- notif.lu
- ? 'border-border bg-cream-100/50'
- : 'border-border bg-accent-light/20 shadow-sm'
- }`}
- >
- {/* Header avec badge */}
- <div className="flex items-start justify-between mb-2">
- <h3 className="font-semibold text-ink text-sm">
- {notif.type === 'demande_rejointe' && '👤 '}
- {notif.type === 'soumission_feuille' && '📝 '}
- {notif.type === 'demande_acceptee' && '✅ '}
- {notif.type === 'demande_refusee' && '❌ '}
- {notif.titre}
- </h3>
- {!notif.lu && (
- <span className="px-2 py-1 bg-accent-light0 text-ink text-xs font-bold rounded shadow-sm whitespace-nowrap ml-2">
- NOUVEAU
- </span>
- )}
- </div>
-
- {/* Message */}
- <p className="text-sm text-ink-light mb-3 flex-1">
- {notif.message}
- </p>
-
- {/* Date */}
- <span className="text-xs text-ink-muted mb-3 block">
- {new Date(notif.created_at).toLocaleDateString('fr-FR', {
- day: 'numeric',
- month: 'short',
- hour: '2-digit',
- minute: '2-digit'
- })}
- </span>
- 
- {/* Boutons d'action empilés */}
- {isDemandeEnAttente && (
- <div className="space-y-2">
- <button
- onClick={() => handleAccepterDemande(notif)}
- className="w-full px-3 py-2 bg-green-50/30 hover:bg-green-200/50 text-status-success text-sm font-medium rounded-lg transition-colors"
- >
- ✓ Accepter
- </button>
- <button
- onClick={() => handleRefuserDemande(notif)}
- className="w-full px-3 py-2 bg-red-100/30 hover:bg-red-200/50 text-red-600 text-sm font-medium rounded-lg transition-colors"
- >
- ✗ Refuser
- </button>
- </div>
- )}
-
- {isSoumissionEnAttente && (
- <div className="space-y-2">
- <button
- onClick={() => handleValiderSoumission(notif)}
- className="w-full px-3 py-2 bg-green-50/30 hover:bg-green-200/50 text-status-success text-sm font-medium rounded-lg transition-colors"
- >
- ✓ Valider
- </button>
- <button
- onClick={() => {
- setNotificationSelectionnee(notif);
- setShowRejetModal(true);
- }}
- className="w-full px-3 py-2 bg-red-100/30 hover:bg-red-200/50 text-red-600 text-sm font-medium rounded-lg transition-colors"
- >
- ✗ Rejeter
- </button>
- </div>
- )}
- 
- {notif.lu && (
- <span className="text-xs text-gray-400 italic text-center">
- Notification traitée
- </span>
- )}
- </div>
- );
- })}
- </div>
- )}
+ {/* Accordéon — Notifications */}
+ <div className="bg-cream-50 rounded-lg border border-border shadow-sm overflow-hidden">
+  <button
+   type="button"
+   onClick={() => setOpenNotifs(!openNotifs)}
+   className="w-full flex justify-between items-center px-6 py-4 hover:bg-cream-100 transition-colors"
+  >
+   <div className="flex items-center gap-3">
+    <h2 className="text-xl font-bold text-ink">🔔 Notifications</h2>
+    {notifsNonLues > 0 && (
+     <span className="inline-flex items-center justify-center w-6 h-6 bg-red-500 text-white text-xs font-bold rounded-full">
+      {notifsNonLues}
+     </span>
+    )}
+   </div>
+   <span className="text-ink-muted text-lg">{openNotifs ? '▲' : '▼'}</span>
+  </button>
+  {openNotifs && (
+   <div className="px-6 pb-6">
+    {notifications.length === 0 ? (
+     <div className="text-center py-12 text-ink-muted">
+      Aucune notification pour le moment
+     </div>
+    ) : (
+     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-2">
+      {notifications.map(notif => {
+       const isDemandeEnAttente = notif.type === 'demande_rejointe' && !notif.lu;
+       const isSoumissionEnAttente = notif.type === 'soumission_feuille' && !notif.lu;
+       return (
+        <div
+         key={notif.id}
+         className={`p-4 rounded-lg border transition-all hover:scale-105 flex flex-col ${
+          notif.lu
+           ? 'border-border bg-cream-100/50'
+           : 'border-border bg-accent-light/20 shadow-sm'
+         }`}
+        >
+         <div className="flex items-start justify-between mb-2">
+          <h3 className="font-semibold text-ink text-sm">
+           {notif.type === 'demande_rejointe' && '👤 '}
+           {notif.type === 'soumission_feuille' && '📝 '}
+           {notif.type === 'demande_acceptee' && '✅ '}
+           {notif.type === 'demande_refusee' && '❌ '}
+           {notif.titre}
+          </h3>
+          {!notif.lu && (
+           <span className="px-2 py-1 bg-accent-light0 text-ink text-xs font-bold rounded shadow-sm whitespace-nowrap ml-2">
+            NOUVEAU
+           </span>
+          )}
+         </div>
+         <p className="text-sm text-ink-light mb-3 flex-1">{notif.message}</p>
+         <span className="text-xs text-ink-muted mb-3 block">
+          {new Date(notif.created_at).toLocaleDateString('fr-FR', {
+           day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+          })}
+         </span>
+         {isDemandeEnAttente && (
+          <div className="space-y-2">
+           <button
+            onClick={() => handleAccepterDemande(notif)}
+            className="w-full px-3 py-2 bg-green-50/30 hover:bg-green-200/50 text-status-success text-sm font-medium rounded-lg transition-colors"
+           >✓ Accepter</button>
+           <button
+            onClick={() => handleRefuserDemande(notif)}
+            className="w-full px-3 py-2 bg-red-100/30 hover:bg-red-200/50 text-red-600 text-sm font-medium rounded-lg transition-colors"
+           >✗ Refuser</button>
+          </div>
+         )}
+         {isSoumissionEnAttente && (
+          <div className="space-y-2">
+           <button
+            onClick={() => handleValiderSoumission(notif)}
+            className="w-full px-3 py-2 bg-green-50/30 hover:bg-green-200/50 text-status-success text-sm font-medium rounded-lg transition-colors"
+           >✓ Valider</button>
+           <button
+            onClick={() => { setNotificationSelectionnee(notif); setShowRejetModal(true); }}
+            className="w-full px-3 py-2 bg-red-100/30 hover:bg-red-200/50 text-red-600 text-sm font-medium rounded-lg transition-colors"
+           >✗ Rejeter</button>
+          </div>
+         )}
+         {notif.lu && (
+          <span className="text-xs text-gray-400 italic text-center">Notification traitée</span>
+         )}
+        </div>
+       );
+      })}
+     </div>
+    )}
+   </div>
+  )}
  </div>
  </div>
 
  {/* Modals */}
+ {showProfileModal && (
+ <ProfileCompletionModal
+ closable={true}
+ onClose={() => { setShowProfileModal(false); loadData(); }}
+ initialData={{
+ firstName: editData.first_name,
+ lastName: editData.last_name,
+ telephone: editData.telephone,
+ adresse: editData.adresse,
+ dateNaissance: editData.date_naissance,
+ userRole: editData.user_role as any,
+ }}
+ />
+ )}
+
  {showEditModal && (
  <ModalEditUserInfo
  data={editData}

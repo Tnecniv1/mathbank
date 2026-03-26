@@ -175,6 +175,12 @@ export default function GestionEquipePage() {
  const [showClotureNoeudModal, setShowClotureNoeudModal] = useState(false);
  const [etapeACloturer, setEtapeACloturer] = useState<string | null>(null);
 
+ // Sessions IA
+ const [sessionsIAMembre, setSessionsIAMembre] = useState<Membre | null>(null);
+ const [sessionsIAData, setSessionsIAData] = useState<{id:string;exercice_numero:number;messages:{role:'user'|'assistant';content:string;photo_url?:string}[];created_at:string;feuille_id:string;feuille_titre:string}[]>([]);
+ const [sessionsIALoading, setSessionsIALoading] = useState(false);
+ const [sessionsIAEntry, setSessionsIAEntry] = useState<{id:string;exercice_numero:number;messages:{role:'user'|'assistant';content:string;photo_url?:string}[];created_at:string;feuille_titre:string}|null>(null);
+
  useEffect(() => {
  // Récupérer l'ID de l'équipe depuis l'URL
  const params = new URLSearchParams(window.location.search);
@@ -784,6 +790,23 @@ export default function GestionEquipePage() {
  >
  🎯 Objectifs
  </button>
+ <button
+ onClick={async () => {
+  setSessionsIAMembre(membre);
+  setSessionsIAData([]);
+  setSessionsIAEntry(null);
+  setSessionsIALoading(true);
+  try {
+   const res = await fetch(`/api/session/history/chef?user_id=${membre.user_id}`);
+   const data = await res.json();
+   setSessionsIAData(Array.isArray(data) ? data : []);
+  } catch { setSessionsIAData([]); }
+  finally { setSessionsIALoading(false); }
+ }}
+ className="px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors"
+ >
+ 🤖 Sessions IA
+ </button>
  </div>
  </div>
  ))}
@@ -1237,6 +1260,82 @@ export default function GestionEquipePage() {
  </div>
  </div>
  )}
+ {/* ── Modal Sessions IA ─────────────────────────────────────── */}
+ {sessionsIAMembre && !sessionsIAEntry && (
+  <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto">
+   <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mt-10 p-6">
+    <div className="flex items-center justify-between mb-4">
+     <h3 className="text-lg font-bold text-ink">
+      🤖 Sessions IA — {sessionsIAMembre.membre_nom}
+     </h3>
+     <button
+      onClick={() => setSessionsIAMembre(null)}
+      className="text-ink-muted hover:text-ink text-xl leading-none"
+     >✕</button>
+    </div>
+    {sessionsIALoading && <p className="text-sm text-ink-muted">Chargement…</p>}
+    {!sessionsIALoading && sessionsIAData.length === 0 && (
+     <p className="text-sm text-ink-muted italic">Aucune session IA enregistrée.</p>
+    )}
+    <div className="space-y-2">
+     {sessionsIAData.map((entry) => (
+      <button
+       key={entry.id}
+       onClick={() => setSessionsIAEntry(entry)}
+       className="w-full text-left px-4 py-3 border border-border rounded-lg hover:border-accent transition-colors"
+      >
+       <div className="font-medium text-ink text-sm">
+        Session du{' '}
+        {new Date(entry.created_at).toLocaleDateString('fr-FR', {day:'2-digit',month:'short',year:'numeric'})}
+        {' '}— {entry.feuille_titre}
+       </div>
+       <div className="text-xs text-ink-muted mt-0.5">
+        Exo {entry.exercice_numero} · {entry.messages.length} messages
+       </div>
+      </button>
+     ))}
+    </div>
+   </div>
+  </div>
+ )}
+
+ {/* ── Modal détail conversation IA ────────────────────────── */}
+ {sessionsIAEntry && (
+  <div className="fixed inset-0 z-50 bg-white flex flex-col">
+   <div className="border-b border-border px-4 py-3 flex items-center gap-3 shrink-0">
+    <button
+     onClick={() => setSessionsIAEntry(null)}
+     className="text-sm text-accent font-medium"
+    >← Retour</button>
+    <span className="text-sm font-semibold text-ink">
+     Session du{' '}
+     {new Date(sessionsIAEntry.created_at).toLocaleDateString('fr-FR', {day:'2-digit',month:'short',year:'numeric'})}
+     {' '}— {sessionsIAEntry.feuille_titre} — Exo {sessionsIAEntry.exercice_numero}
+    </span>
+   </div>
+   <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 max-w-2xl mx-auto w-full">
+    {sessionsIAEntry.messages
+     .filter((m) => !(m.role === 'user' && m.content === 'Démarre la session.'))
+     .map((msg, i) => (
+      <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+       <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+        msg.role === 'user'
+         ? 'bg-accent text-ink rounded-br-sm'
+         : 'bg-cream-50 border border-border text-ink rounded-bl-sm'
+       }`}>
+        {msg.photo_url && (
+         <img src={msg.photo_url} alt="photo" className="rounded-xl mb-2 max-w-[240px] border border-[#E8E8E8] object-contain" />
+        )}
+        {msg.content.split('\n').map((line, j) => (
+         <React.Fragment key={j}>{line}{j < msg.content.split('\n').length - 1 && <br/>}</React.Fragment>
+        ))}
+       </div>
+      </div>
+     ))}
+   </div>
+  </div>
+ )}
+
  </main>
  );
 }
