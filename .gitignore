@@ -10,9 +10,13 @@ dist
 
 # Env (ne JAMAIS commit tes vraies clés)
 .env
+.env.local
 .env.*
 !/.env.example
 
 # OS
 .DS_Store
 Thumbs.db
+
+.claude/
+.claude/settings.local.json
