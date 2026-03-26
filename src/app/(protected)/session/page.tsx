@@ -7,6 +7,8 @@ import React, {
   useCallback,
   ChangeEvent,
 } from 'react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -103,10 +105,59 @@ function Timer({ running }: { running: boolean }) {
   );
 }
 
+// ── Rendu LaTeX + Markdown léger ──────────────────────────────────────────────
+
+function renderContent(text: string): string {
+  // 1. Échappe les caractères HTML de base avant injection
+  const escapeHtml = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // 2. Remplace les blocs $$...$$ (display) et $...$ (inline) par du KaTeX
+  //    On traite d'abord display ($$) pour éviter la collision avec inline ($)
+  const renderLatex = (src: string): string => {
+    // Display blocks : $$...$$
+    src = src.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
+      try {
+        return katex.renderToString(math.trim(), { displayMode: true, throwOnError: false });
+      } catch {
+        return escapeHtml(`$$${math}$$`);
+      }
+    });
+    // Inline : $...$  (pas de $ seul au milieu d'un nombre : \$\d évité)
+    src = src.replace(/\$([^$\n]+?)\$/g, (_, math) => {
+      try {
+        return katex.renderToString(math.trim(), { displayMode: false, throwOnError: false });
+      } catch {
+        return escapeHtml(`$${math}$`);
+      }
+    });
+    return src;
+  };
+
+  // 3. Markdown léger ligne par ligne (gras, tirets) + LaTeX
+  const lines = text.split('\n');
+  const html = lines.map((line) => {
+    // Applique LaTeX sur la ligne brute
+    let out = renderLatex(escapeHtml(line));
+    // Gras : **...**
+    out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Tiret de liste : "- " en début de ligne
+    if (/^-\s/.test(line)) {
+      out = `<span class="block pl-3 before:content-['–'] before:mr-2">${out.replace(/^-\s/, '')}</span>`;
+    }
+    return out;
+  });
+
+  return html.join('<br />');
+}
+
 // ── Composant Bulle ───────────────────────────────────────────────────────────
 
-function MessageBubble({ msg }: { msg: Message }) {
+function MessageBubble({ msg }: { msg: Message | { role: 'user' | 'assistant'; content: string; photo_url?: string } }) {
   const isUser = msg.role === 'user';
+  const imagePreview = 'imagePreview' in msg ? msg.imagePreview : undefined;
+  const photoUrl = msg.photo_url;
+
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
       <div
@@ -116,20 +167,17 @@ function MessageBubble({ msg }: { msg: Message }) {
             : 'bg-white border border-[#E8E8E8] text-[#1A1A1A] rounded-bl-sm'
         }`}
       >
-        {(msg.imagePreview || msg.photo_url) && (
+        {(imagePreview || photoUrl) && (
           <img
-            src={msg.imagePreview ?? msg.photo_url}
+            src={imagePreview ?? photoUrl}
             alt="photo"
-            className="rounded-lg mb-2 max-w-[240px] rounded-xl border border-[#E8E8E8] object-contain"
+            className="rounded-xl mb-2 max-w-[240px] border border-[#E8E8E8] object-contain"
           />
         )}
-        {/* Rendu avec sauts de ligne */}
-        {msg.content.split('\n').map((line, i) => (
-          <React.Fragment key={i}>
-            {line}
-            {i < msg.content.split('\n').length - 1 && <br />}
-          </React.Fragment>
-        ))}
+        <div
+          className="katex-content"
+          dangerouslySetInnerHTML={{ __html: renderContent(msg.content) }}
+        />
       </div>
     </div>
   );
