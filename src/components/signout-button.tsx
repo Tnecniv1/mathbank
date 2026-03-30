@@ -4,30 +4,28 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function SignOutButton() {
- const router = useRouter();
+  const router = useRouter();
 
- const handleSignOut = async () => {
- try {
- // Déconnexion Supabase
- await supabase.auth.signOut();
- 
- // Forcer la suppression du cache et redirection
- router.push('/auth');
- router.refresh();
- 
- // Recharger la page pour nettoyer complètement
- window.location.href = '/auth';
- } catch (error) {
- console.error('Erreur déconnexion:', error);
- }
- };
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+      router.push('/auth');
+      router.refresh();
+      window.location.href = '/auth';
+    } catch (error) {
+      console.error('Erreur déconnexion:', error);
+    }
+  };
 
- return (
- <button
- onClick={handleSignOut}
- className="px-3 py-1.5 text-sm bg-red-100 hover:bg-red-200 text-red-700 font-medium rounded-lg transition-colors"
- >
- Se déconnecter
- </button>
- );
+  return (
+    <button
+      onClick={handleSignOut}
+      className="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
+      style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'transparent' }}
+      onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
+      onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+    >
+      Se déconnecter
+    </button>
+  );
 }

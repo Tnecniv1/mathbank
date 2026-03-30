@@ -26,6 +26,7 @@ const { useState, useRef, useCallback, useEffect } = React;
 const SUPABASE_URL      = 'https://rvonutomiuvsxjxeuipq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2b251dG9taXV2c3hqeGV1aXBxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgxMjAxMDUsImV4cCI6MjA3MzY5NjEwNX0.uAfN8Eadx9aMjBOwnZFTxEv_VgdnZZbXMQgPILqC_GI';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const _urlParams = new URLSearchParams(window.location.search);
 
 // ─── State module-level ────────────────────────────────────────────
 let _membres = []; // [{user_id, full_name}]
@@ -58,7 +59,7 @@ function wedgePath(a1,a2,r1,r2){
 
 // ─── Nouveau format ────────────────────────────────────────────────
 function newSheet(id){
-  return {id, createdAt:Date.now(), meta:{prenom:"",nom:"",feuille:"",note:"",sessions:[],user_id:null}, exercices:[], closed:false, inserted:false};
+  return {id, createdAt:Date.now(), meta:{prenom:"",nom:"",feuille:"",note:"",sessions:[],user_id:null}, exercices:[], entrainement_id:null, closed:false, inserted:false};
 }
 
 // Rétrocompat : ancien format (crosses/validated/mecanique) → nouveau (exercices[])
@@ -131,6 +132,7 @@ const db = {
       const { error } = await sb.from('grille_observation').upsert({
         id: sheet.id, user_id: currentUserId,
         data: sheet, closed: sheet.closed ?? false, inserted: sheet.inserted ?? false,
+        entrainement_id: sheet.entrainement_id || null,
         updated_at: new Date().toISOString(),
       });
       if (error) throw error;
@@ -796,7 +798,36 @@ function App(){
 
   useEffect(() => {
     if (!user) return;
-    db.loadAll().then(loaded => setSheets(loaded));
+    console.log('[grille-roue] user:', user?.id ?? 'null');
+    console.log('[grille-roue] URL params:', window.location.search);
+    console.log('[grille-roue] feuille_id:', _urlParams.get('feuille_id'));
+    db.loadAll().then(loaded => {
+      const feuilleId = _urlParams.get('feuille_id');
+      if (feuilleId) {
+        const feuilleTitre   = _urlParams.get('feuille_titre') || '';
+        const exerciceRef    = _urlParams.get('exercice') || '';
+        const typeParam      = _urlParams.get('type') || 'chaotique';
+        const entrainementId = _urlParams.get('entrainement_id') || null;
+        const id = Date.now().toString();
+        const prefilled = {
+          ...newSheet(id),
+          entrainement_id: entrainementId,
+          meta: { prenom: '', nom: '', feuille: feuilleTitre, note: '', sessions: [], user_id: currentUserId },
+          exercices: [{
+            id: id + '_exo',
+            type: typeParam === 'mecanique' ? 'mecanique' : 'chaotique',
+            feuille_id: feuilleId,
+            reference: exerciceRef,
+            crosses: {}, validated: {}, reussi: null,
+          }],
+        };
+        setSheets([prefilled, ...loaded]);
+        setActiveId(prefilled.id);
+        db.saveNow(prefilled);
+      } else {
+        setSheets(loaded);
+      }
+    });
   }, [user]);
 
   // Charge _membres et _feuilles dès que l'utilisateur est connecté

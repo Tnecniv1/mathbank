@@ -14,6 +14,8 @@ type FeuilleEntrainement = {
  description: string | null;
  pdf_url: string;
  difficulte: number | null;
+ type: 'mecanique' | 'chaotique';
+ nb_exercices: number | null;
 };
 
 type Chapitre = {
@@ -50,6 +52,7 @@ type NoeudRow = {
  pdf_url: string | null;
  difficulte: number | null;
  profondeur: number;
+ nb_exercices?: number | null;
 };
 
 type SessionTravail = {
@@ -60,32 +63,18 @@ type SessionTravail = {
  commentaire: string | null;
 };
 
-type ScoreLocalDetail = {
- id: string;
- exercice: string;
- question: string;
- comprehension: number;
- savoir: number;
- redaction: number;
- correction: number;
- score_calcule: number;
-};
-
-type ScoresParExercice = {
- exercice: string;
- questions: ScoreLocalDetail[];
-};
-
 type Progression = {
  id: string;
  feuille_id: string;
  est_termine: boolean;
+ en_cours?: boolean;
  score: number | null;
+ score_moyen?: number | null;
+ nb_exercices_valides?: number | null;
  temps_total: number;
  sessions: SessionTravail[];
  statut: string;
  commentaire_chef: string | null;
- est_bloquee?: boolean; // NOUVEAU : Feuille bloquée par le chef
 };
 
 /* ---------- Icônes ---------- */
@@ -162,6 +151,8 @@ async function getParcoursComplet(niveauId: string) {
  description: null,
  pdf_url: f.pdf_url ?? '',
  difficulte: f.difficulte,
+ type: f.type as 'mecanique' | 'chaotique',
+ nb_exercices: f.nb_exercices ?? null,
  }));
  return { id: c.id, ordre: c.ordre, titre: c.titre, description: null, feuilles };
  });
@@ -176,6 +167,8 @@ async function getParcoursComplet(niveauId: string) {
  description: null,
  pdf_url: f.pdf_url ?? '',
  difficulte: f.difficulte,
+ type: f.type as 'mecanique' | 'chaotique',
+ nb_exercices: f.nb_exercices ?? null,
  }));
  return { id: s.id, ordre: s.ordre, titre: s.titre, description: null, chapitres, feuilles: feuillesDirectes };
  });
@@ -220,119 +213,113 @@ async function getNiveaux() {
 }
 
 /* ---------- Composant Feuille ---------- */
-function FeuilleCard({ 
- feuille, 
+function FeuilleCard({
+ feuille,
  progression,
- onOpen, 
- onUpdateProgression 
-}: { 
- feuille: FeuilleEntrainement; 
+ typesActifs,
+ feuillesDebloquees,
+ feuillesAccessibles,
+ onOpen,
+ onUpdateProgression,
+ onConclureDone,
+}: {
+ feuille: FeuilleEntrainement;
  progression: Progression | null;
+ typesActifs: Set<string>;
+ feuillesDebloquees: Set<string>;
+ feuillesAccessibles: Set<string>;
  onOpen: () => void;
- onUpdateProgression: () => void;
+ onUpdateProgression: () => Promise<void>;
+ onConclureDone: (type: 'mecanique' | 'chaotique') => void;
 }) {
  const [showModal, setShowModal] = useState(false);
- const [isAuthorized, setIsAuthorized] = useState(false);
+ const [adding, setAdding] = useState(false);
+ const [typeBlockMsg, setTypeBlockMsg] = useState<string | null>(null);
 
- // Vérifier si cette feuille est autorisée (nouveau système)
- useEffect(() => {
- (async () => {
- const { data: { session } } = await supabase.auth.getSession();
- if (!session || !session.user) return;
+ // ── Calcul des états ──────────────────────────────────────────────────
+ const estTerminee = progression?.est_termine === true || progression?.statut === 'validee';
+ const estEnCours = progression?.en_cours === true && !estTerminee;
+ const nbExo = feuille.nb_exercices;
+ const nbValides = progression?.nb_exercices_valides ?? 0;
+ const scoreMoyen = progression?.score_moyen ?? 0;
+ const seuilAtteint = nbExo != null && nbExo > 0 && nbValides >= nbExo && scoreMoyen >= 70;
+ const pretAConclure = estEnCours && seuilAtteint;
+ const estAccessible = feuillesAccessibles.has(feuille.id);
+ const estVerrouilee = !estTerminee && !estEnCours && !estAccessible;
+ const peutAjouter = estAccessible && !estEnCours && !estTerminee;
+ const typeEstBloque = peutAjouter && typesActifs.has(feuille.type);
 
- // Récupérer l'ID du membre
- const { data: membre } = await supabase
- .from('membre_equipe')
- .select('id')
- .eq('user_id', session.user.id)
- .single();
-
- if (membre) {
- // Vérifier si cette feuille est dans les feuilles autorisées
- const { data: autorisee, count } = await supabase
- .from('feuilles_autorisees')
- .select('feuille_id', { count: 'exact', head: true })
- .eq('membre_id', membre.id)
- .eq('feuille_id', feuille.id);
- 
- if (count && count > 0) {
- setIsAuthorized(true);
- }
- }
- })();
- }, [feuille.id]);
-
- // Déterminer le statut de la feuille
- const estValidee = progression?.statut === 'validee';
- const estBloquee = progression?.est_bloquee;
-
- console.log('🔍 Feuille:', feuille.titre, {
- statut: progression?.statut,
- est_bloquee: progression?.est_bloquee,
- estValidee,
- estBloquee
- });
-
- const handlePastilleClick = (e: React.MouseEvent) => {
+ // ── Handlers ──────────────────────────────────────────────────────────
+ const handleAjouter = async (e: React.MouseEvent | React.KeyboardEvent) => {
  e.stopPropagation();
- 
- // Si bloquée, afficher message
- if (estBloquee) {
- alert('🔒 Cette feuille est bloquée. Votre chef doit d\'abord valider votre travail en cours.');
+ if (typeEstBloque || adding) return;
+ setAdding(true);
+ setTypeBlockMsg(null);
+ const { data: { session } } = await supabase.auth.getSession();
+ if (session) {
+ // Vérification contrainte : 1 feuille active par type
+ const { data: actives } = await supabase
+ .from('progression_feuille')
+ .select('feuille_id')
+ .eq('user_id', session.user.id)
+ .eq('en_cours', true)
+ .eq('est_termine', false);
+
+ if (actives && actives.length > 0) {
+ const ids = actives.map((f: any) => f.feuille_id);
+ const { data: noeuds } = await supabase
+ .from('noeud')
+ .select('type')
+ .in('id', ids);
+ if (noeuds?.some((n: any) => n.type === feuille.type)) {
+ const label = feuille.type === 'mecanique' ? 'mécanique' : 'chaotique';
+ setTypeBlockMsg(`Tu as déjà une feuille ${label} en cours. Termine-la avant d'en commencer une nouvelle.`);
+ setAdding(false);
  return;
  }
- 
- setShowModal(true);
+ }
+
+ const { error } = await supabase
+ .from('progression_feuille')
+ .upsert(
+ { user_id: session.user.id, feuille_id: feuille.id, en_cours: true, est_termine: false, auto_inscrit: true },
+ { onConflict: 'user_id,feuille_id' }
+ );
+ if (!error) {
+ // Enregistrer dans feuille_debloquee si c'était une première connexion
+ if (!feuillesDebloquees.has(feuille.id)) {
+ await supabase.from('feuille_debloquee').insert({ user_id: session.user.id, feuille_id: feuille.id });
+ }
+ onUpdateProgression();
+ }
+ }
+ setAdding(false);
  };
 
- const handleCardClick = () => {
- // Si bloquée, empêcher l'ouverture
- if (estBloquee) {
- alert('🔒 Cette feuille est bloquée. Seule la feuille autorisée par votre chef est accessible.');
- return;
- }
- 
- onOpen();
+ const handleConclure = async (e: React.MouseEvent | React.KeyboardEvent) => {
+ e.stopPropagation();
+ const { data: { session } } = await supabase.auth.getSession();
+ if (!session) return;
+ await supabase
+ .from('progression_feuille')
+ .update({ en_cours: false, est_termine: true })
+ .eq('user_id', session.user.id)
+ .eq('feuille_id', feuille.id);
+ await onUpdateProgression();
+ onConclureDone(feuille.type);
  };
 
  return (
  <>
  <button
- onClick={handleCardClick}
- disabled={estBloquee}
- className={`group relative flex items-center gap-4 w-full px-4 py-3 rounded-lg border transition-all duration-200 ${
- estBloquee
- ? 'border-gray-700 bg-cream-50/50 opacity-60 cursor-not-allowed'
- : isAuthorized && !estValidee
- ? 'border-green-400 bg-green-50/20 hover:border-status-success hover:shadow-sm'
- : 'border-border bg-cream-50 border border-accent/30 hover:border-accent hover:shadow-sm'
+ onClick={estVerrouilee ? undefined : onOpen}
+ disabled={estVerrouilee}
+ className={`group relative flex items-center gap-4 w-full px-4 py-3 rounded-lg border transition-all duration-200 border-border bg-cream-50 ${
+ estVerrouilee ? 'opacity-50 cursor-default' : 'hover:border-accent hover:shadow-sm'
  }`}
  >
- {/* Badge de blocage */}
- {estBloquee && (
- <div className="absolute top-2 right-2 z-10">
- <span className="px-2 py-1 bg-cream-100 text-ink-light text-xs font-medium rounded-full flex items-center gap-1">
- <IconLock />
- Bloquée
- </span>
- </div>
- )}
-
- {/* Badge feuille autorisée */}
- {isAuthorized && !estValidee && !estBloquee && (
- <div className="absolute top-2 right-2 z-10">
- <span className="px-3 py-1 from-green-500 to-emerald-500 text-ink text-xs font-bold rounded-full flex items-center gap-1 shadow-sm animate-pulse">
- ✓ À faire
- </span>
- </div>
- )}
-
- {/* Numéro d'ordre avec pastille */}
- <div className={`flex items-center justify-center w-10 h-10 rounded-full text-ink font-bold text-lg shadow-sm transition-transform ${
- estBloquee 
- ? 'bg-slate-400'
- : 'bg-status-success group-hover:scale-110'
- }`}>
+ {/* Numéro d'ordre */}
+ <div className="flex items-center justify-center w-10 h-10 rounded-full text-ink font-bold text-lg shadow-sm transition-transform bg-status-success group-hover:scale-110">
  {feuille.ordre_dans_niveau}
  </div>
 
@@ -344,13 +331,11 @@ function FeuilleCard({
  <div className="flex items-center gap-1 px-2 py-1 bg-cream-200 rounded-md flex-shrink-0">
  <div className="grid grid-cols-2 gap-0.5">
  {[...Array(6)].map((_, i) => (
- <div 
- key={i} 
+ <div
+ key={i}
  className={`w-2 h-2 rounded-full transition-colors ${
- i < feuille.difficulte 
- ? 'bg-ink-light' 
- : 'bg-slate-300'
- }`} 
+ i < feuille.difficulte! ? 'bg-ink-light' : 'bg-slate-300'
+ }`}
  />
  ))}
  </div>
@@ -362,51 +347,93 @@ function FeuilleCard({
  )}
  {progression && progression.temps_total > 0 && (
  <div className="text-xs text-blue-500 mt-1">
- {progression.temps_total} min • {progression.score !== null ? `Score: ${progression.score}` : 'Pas de score'}
+ {progression.temps_total} min{progression.score !== null ? ` • Score: ${progression.score}` : ''}
  </div>
  )}
  </div>
 
  {/* Icône PDF */}
- <div className={`transition-colors ${
- estBloquee 
- ? 'text-ink-light'
- : 'text-ink-light group-hover:text-accent'
- }`}>
+ <div className="text-ink-light group-hover:text-accent transition-colors">
  <IconFile />
  </div>
 
- {/* Pastille de progression - 3 COULEURS */}
- <div
- onClick={handlePastilleClick}
- className="absolute -top-2 -right-2 cursor-pointer hover:scale-110 transition-transform"
- >
- {estValidee ? (
- /* 🟣 VIOLET = Validée */
- <div className="text-status-success drop-shadow-sm">
- <IconCircleFilled />
+ {/* Pastille état */}
+ <div className="absolute -top-2 -right-2" onClick={(e) => e.stopPropagation()}>
+ {estTerminee ? (
+ <div className="px-2 py-0.5 bg-blue-100 text-blue-600 text-[11px] font-semibold rounded-full border border-blue-300">
+ Terminée
  </div>
- ) : isAuthorized && !estBloquee ? (
- /* 🟠 ORANGE = Autorisée/Disponible */
- <div className="text-orange-500 drop-shadow-sm">
- <IconCircleFilled />
+ ) : pretAConclure ? (
+ <div
+ role="button" tabIndex={0}
+ onClick={() => setShowModal(true)}
+ onKeyDown={(e) => e.key === 'Enter' && setShowModal(true)}
+ className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[11px] font-semibold rounded-full border border-amber-300 cursor-pointer hover:bg-amber-200 transition-colors"
+ >
+ Prêt à conclure
+ </div>
+ ) : estEnCours ? (
+ <div
+ role="button" tabIndex={0}
+ onClick={() => setShowModal(true)}
+ onKeyDown={(e) => e.key === 'Enter' && setShowModal(true)}
+ className="px-2 py-0.5 bg-status-success/20 text-status-success text-[11px] font-semibold rounded-full border border-status-success/40 cursor-pointer hover:bg-status-success/30 transition-colors"
+ >
+ En cours
+ </div>
+ ) : estVerrouilee ? (
+ <div className="px-2 py-0.5 bg-slate-100 text-slate-400 text-[11px] font-semibold rounded-full border border-slate-200">
+ 🔒
  </div>
  ) : (
- /* ⚫ NOIR = Bloquée/Non autorisée */
- <div className="text-ink hover:text-status-success transition-colors">
- <IconCircleEmpty />
+ <div className="px-2 py-0.5 bg-orange-100 text-orange-700 text-[11px] font-semibold rounded-full border border-orange-200">
+ Disponible
  </div>
  )}
  </div>
  </button>
 
+ {/* Bouton Conclure (état prêt à conclure) */}
+ {pretAConclure && (
+ <div className="flex justify-end mt-1 pr-1">
+ <div
+ role="button" tabIndex={0}
+ onClick={handleConclure}
+ onKeyDown={(e) => e.key === 'Enter' && handleConclure(e)}
+ className="text-xs px-3 py-1 bg-amber-50 text-amber-700 rounded-full border border-amber-300 cursor-pointer hover:bg-amber-100 transition-colors"
+ >
+ Conclure cette feuille →
+ </div>
+ </div>
+ )}
+
+ {/* Bouton Ajouter (état débloquée) */}
+ {peutAjouter && !typeEstBloque && (
+ <div className="flex justify-end mt-1 pr-1">
+ <div
+ role="button" tabIndex={0}
+ onClick={handleAjouter}
+ onKeyDown={(e) => e.key === 'Enter' && handleAjouter(e)}
+ className="text-xs px-3 py-1 bg-accent text-ink rounded-full border border-accent/30 cursor-pointer hover:bg-accent-hover transition-colors"
+ >
+ {adding ? '…' : '+ Ajouter'}
+ </div>
+ </div>
+ )}
+
+ {/* Message blocage type */}
+ {(typeEstBloque || typeBlockMsg) && (
+ <p className="mt-1 px-3 text-xs text-ink-muted italic">
+ {typeBlockMsg ?? `Tu as déjà une feuille ${feuille.type === 'mecanique' ? 'mécanique' : 'chaotique'} en cours. Termine-la avant d'en commencer une nouvelle.`}
+ </p>
+ )}
+
  {/* Modal de progression */}
- {showModal && !estBloquee && (
+ {showModal && progression && (
  <ProgressionModal
  feuille={feuille}
  progression={progression}
  onClose={() => setShowModal(false)}
- onSave={onUpdateProgression}
  />
  )}
  </>
@@ -418,485 +445,180 @@ function ProgressionModal({
  feuille,
  progression,
  onClose,
- onSave,
 }: {
  feuille: FeuilleEntrainement;
  progression: Progression | null;
  onClose: () => void;
- onSave: () => void;
 }) {
- const [sessions, setSessions] = useState<any[]>([]);
- const [loading, setLoading] = useState(true);
- const [score, setScore] = useState(''); // Score saisi par le membre
- const [saving, setSaving] = useState(false);
- const [scoresLocaux, setScoresLocaux] = useState<ScoreLocalDetail[]>([]);
- const [scoreGlobal, setScoreGlobal] = useState<number>(0);
- const [scoreMax, setScoreMax] = useState<number>(0);
- const [scoreComprehension, setScoreComprehension] = useState<number>(0);
- const [scoreSavoir, setScoreSavoir] = useState<number>(0);
- const [scoreRedaction, setScoreRedaction] = useState<number>(0);
- const [nbSessions, setNbSessions] = useState<number>(0);
- const [tempsTotal, setTempsTotal] = useState<number>(0);
-
- useEffect(() => {
- loadSessions();
- }, []);
-
- async function loadSessions() {
- try {
- const { data: { session: userSession } } = await supabase.auth.getSession();
- if (!userSession || !userSession.user) return;
- const userId = userSession.user.id;
-
- // ── 1. Ancien système : session_entrainement ──
- const { data: oldSessions } = await supabase
- .from('session_entrainement')
- .select('*')
- .eq('user_id', userId)
- .or(`feuille_mecanique_id.eq.${feuille.id},feuille_chaotique_id.eq.${feuille.id}`)
- .order('date_session', { ascending: false });
-
- const oldSessionsFiltered = (oldSessions || []).map((s: any) => {
- const isMecanique = s.feuille_mecanique_id === feuille.id;
- return {
- id: s.id,
- numero: s.numero_session,
- date: s.date_session,
- heure: s.heure_session,
- temps: isMecanique ? s.temps_mecanique : s.temps_chaotique,
- type: isMecanique ? 'mecanique' : 'chaotique',
- };
- }).filter((s: any) => s.temps !== null && s.temps > 0);
-
- // ── 2. Nouveau système : session ──
- const { data: newSessions } = await supabase
- .from('session')
- .select('id, duree, date_session, feuille_mecanique_id, feuille_chaotique_id')
- .eq('user_id', userId)
- .or(`feuille_mecanique_id.eq.${feuille.id},feuille_chaotique_id.eq.${feuille.id}`)
- .order('date_session', { ascending: false });
-
- const newSessionsFiltered = (newSessions || []).map((s: any) => {
- const isMecanique = s.feuille_mecanique_id === feuille.id;
- return {
- id: s.id,
- date: s.date_session,
- temps: s.duree || 0,
- type: isMecanique ? 'mecanique' : 'chaotique',
- };
- }).filter((s: any) => s.temps > 0);
-
- const allSessions = [...oldSessionsFiltered, ...newSessionsFiltered];
- setSessions(allSessions);
-
- // ── 3. Scores ancien système ──
- const scores: ScoreLocalDetail[] = [];
- const oldSessionIds = (oldSessions || []).map((s: any) => s.id);
-
- if (oldSessionIds.length > 0) {
- const { data: scoresData } = await supabase
- .from('score_local')
- .select('*')
- .in('session_id', oldSessionIds)
- .order('created_at', { ascending: true });
-
- if (scoresData) {
- for (const s of scoresData) {
- scores.push({
- id: s.id,
- exercice: s.exercice || 'Question',
- question: s.question,
- comprehension: s.comprehension,
- savoir: s.savoir,
- redaction: s.redaction,
- correction: s.correction,
- score_calcule: parseFloat(s.score_calcule) || 0,
- });
- }
- }
- }
-
- // ── 4. Scores nouveau système ──
- const newSessionIds = (newSessions || []).map((s: any) => s.id);
- if (newSessionIds.length > 0) {
- const { data: exercicesData } = await supabase
- .from('exercice')
- .select('id, type, score_exercice(reussi, c1, c2, c3, c4, s1, s2, s3, s4, r1, r2, r3, r4, correction)')
- .in('session_id', newSessionIds);
-
- if (exercicesData) {
- for (const ex of exercicesData as any[]) {
- const se = Array.isArray(ex.score_exercice) ? ex.score_exercice[0] : ex.score_exercice;
- if (!se) continue;
-
- if (ex.type === 'mecanique') {
- scores.push({
- id: ex.id,
- exercice: 'Exercice mécanique',
- question: '',
- comprehension: se.reussi ? 100 : 0,
- savoir: se.reussi ? 100 : 0,
- redaction: 0,
- correction: se.reussi ? 1 : 0,
- score_calcule: se.reussi ? 1 : 0,
- });
- } else {
- const cPts = [se.c1, se.c2, se.c3, se.c4].filter(Boolean).length;
- const sPts = [se.s1, se.s2, se.s3, se.s4].filter(Boolean).length;
- const rPts = [se.r1, se.r2, se.r3, se.r4].filter(Boolean).length;
- const totalBools = cPts + sPts + rPts + (se.correction ? 1 : 0);
- scores.push({
- id: ex.id,
- exercice: 'Exercice chaotique',
- question: '',
- comprehension: (cPts / 4) * 100,
- savoir: (sPts / 4) * 100,
- redaction: (rPts / 4) * 100,
- correction: se.correction ? 1 : 0,
- score_calcule: totalBools / 10,
- });
- }
- }
- }
- }
-
- // ── 5. Calcul des statistiques ──
- setScoresLocaux(scores);
-
- if (scores.length > 0) {
- const total = scores.reduce((acc, s) => acc + s.score_calcule, 0);
- setScoreGlobal((total / scores.length) * 100);
- setScoreMax(scores.length * 1.3);
- setScoreComprehension(scores.reduce((acc, s) => acc + s.comprehension, 0) / (scores.length * 100));
- setScoreSavoir(scores.reduce((acc, s) => acc + s.savoir, 0) / (scores.length * 100));
- setScoreRedaction(scores.reduce((acc, s) => acc + s.redaction, 0) / (scores.length * 100));
- }
-
- setNbSessions(allSessions.length);
- setTempsTotal(allSessions.reduce((acc: number, s: any) => acc + (s.temps || 0), 0));
-
- setLoading(false);
- } catch (error) {
- console.error('Erreur chargement sessions:', error);
- setLoading(false);
- }
- }
-
- const handleValider = async () => {
- try {
- console.log('=== DÉBUT handleValider ===');
- console.log('scoreGlobal:', scoreGlobal);
- console.log('tempsTotal:', tempsTotal);
- console.log('sessions.length:', sessions.length);
- console.log('scoresLocaux.length:', scoresLocaux.length);
- console.log('progression:', progression);
- 
- setSaving(true);
- 
- // Vérifier qu'on a des sessions
- if (sessions.length === 0) {
- alert('❌ Vous devez d\'abord enregistrer des sessions d\'entraînement sur cette feuille.\n\nRendez-vous sur"Mes Sessions" pour ajouter vos sessions quotidiennes.');
- setSaving(false);
- return;
- }
-
- // Utiliser le score calculé automatiquement
- const scoreValue = scoreGlobal;
- 
- if (scoresLocaux.length === 0) {
- alert('❌ Aucune question enregistrée. Enregistrez des sessions avec des questions avant de soumettre.');
- setSaving(false);
- return;
- }
-
-
- const { data: { session: userSession } } = await supabase.auth.getSession();
- if (!userSession || !userSession.user) {
- alert('Vous devez être connecté');
- setSaving(false);
- return;
- }
-
- // Vérifier si l'utilisateur est dans une équipe
- const { data: membreData } = await supabase
- .from('membre_equipe')
- .select('equipe_id')
- .eq('user_id', userSession.user.id)
- .single();
-
- if (membreData) {
- // ========================================
- // CAS 1 : MEMBRE D'UNE ÉQUIPE
- // → Soumettre pour validation par le chef
- // ========================================
- 
- // Mettre à jour la progression avec le score et temps calculés
- const { error: updateError } = await supabase
- .from('progression_feuille')
- .update({
- score: scoreValue,
- temps_total: tempsTotal,
- est_termine: true,
- })
- .eq('id', progression!.id);
-
- if (updateError) throw updateError;
-
- console.log('=== Appel RPC soumettre_feuille ===');
- console.log('progression.id:', progression!.id);
-
-
- // Appeler la fonction de soumission
- const { data, error } = await supabase.rpc('soumettre_feuille', {
- p_progression_id: progression!.id
- });
-
- console.log('=== Retour RPC ===');
- console.log('data:', data);
- console.log('error:', error);
-
- if (error) throw error;
-
- if (!data || !data.success) {
- alert(data?.error || 'Erreur lors de la soumission');
- setSaving(false);
- return;
- }
-
- alert(`✅ Feuille soumise au chef pour validation !\n\n📊 Score : ${(scoreValue / 100).toFixed(2)}\n⏱️ Temps total : ${tempsTotal} min`);
- } else {
- // ========================================
- // CAS 2 : PAS DANS UNE ÉQUIPE
- // → Validation automatique
- // ========================================
- 
- const { error } = await supabase
- .from('progression_feuille')
- .update({
- est_termine: true,
- en_cours: false,
- statut: 'validee',
- score: scoreValue,
- temps_total: tempsTotal,
- validee_at: new Date().toISOString()
- })
- .eq('id', progression!.id);
-
- if (error) throw error;
-
- alert(`✅ Feuille terminée !\n\n📊 Score : ${(scoreValue / 100).toFixed(2)}\n⏱️ Temps total : ${tempsTotal} min`);
- }
-
- onClose();
- onSave();
- } catch (error: any) {
- console.error('Erreur validation:', error);
- alert('Erreur lors de la validation');
- } finally {
- setSaving(false);
- }
- };
-
- const estValidee = progression?.statut === 'validee';
- const estEnAttente = progression?.statut === 'en_attente';
-
- if (loading) {
- return (
- <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
- <div className="bg-cream-50 rounded-lg p-8">
- <Loader />
- </div>
- </div>
- );
- }
+ const nbValides = progression?.nb_exercices_valides ?? 0;
+ const scoreMoyen = progression?.score_moyen ?? 0;
+ const nbTotal = feuille.nb_exercices;
+ const seuilAtteint = nbTotal != null && nbTotal > 0 && nbValides >= nbTotal && scoreMoyen >= 70;
+ const pourcentageExo = nbTotal != null && nbTotal > 0
+ ? Math.min(100, Math.round((nbValides / nbTotal) * 100))
+ : null;
+ const pourcentageScore = Math.min(100, Math.round(scoreMoyen));
 
  return (
  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
- <div className="bg-cream-50 rounded-lg shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+ <div className="bg-cream-50 rounded-lg shadow-2xl max-w-md w-full">
  {/* Header */}
- <div className="sticky top-0 from-accent to-accentaccent p-6 rounded-t-2xl">
- <h2 className="text-2xl font-[\'IBM_Plex_Mono\'] font-bold text-ink">{feuille.titre}</h2>
- {feuille.description && (
- <p className="text-teal-100 mt-1">{feuille.description}</p>
- )}
+ <div className="p-6 border-b border-border">
+ <h2 className="text-xl font-bold text-ink">{feuille.titre}</h2>
+ <p className="text-sm text-ink-muted mt-1 capitalize">{feuille.type}</p>
  </div>
 
- <div className="p-6 space-y-6">
- {/* Afficher le commentaire du chef si présent */}
- {progression?.commentaire_chef && (
- <div className="p-4 bg-accent-light/20 border border-border rounded-lg">
- <div className="flex items-start gap-3">
- <div className="text-2xl">💬</div>
- <div className="flex-1">
- <div className="font-semibold text-accent mb-1">
- Commentaire du chef :
+ <div className="p-6 space-y-5">
+ {/* Stats textuelles */}
+ <div className="text-center">
+ {nbTotal != null && nbTotal > 0 ? (
+ <>
+ <div className="text-3xl font-bold text-ink">
+ {nbValides}
+ <span className="text-ink-muted font-normal"> / {nbTotal}</span>
  </div>
- <p className="text-accent">
- {progression.commentaire_chef}
- </p>
- </div>
- </div>
- </div>
+ <div className="text-sm text-ink-muted mt-1">exercices validés</div>
+ </>
+ ) : (
+ <>
+ <div className="text-3xl font-bold text-ink">{nbValides}</div>
+ <div className="text-sm text-ink-muted mt-1">exercice{nbValides !== 1 ? 's' : ''} validé{nbValides !== 1 ? 's' : ''}</div>
+ </>
  )}
+ <div className="text-sm text-ink-muted mt-2">
+ Score moyen : <span className="font-semibold text-ink">{Math.round(scoreMoyen)}%</span>
+ </div>
+ </div>
 
- {/* Afficher si en attente */}
- {estEnAttente && (
- <div className="p-4 bg-orange-50/20 border border-status-success/30 rounded-lg text-center">
- <div className="text-3xl mb-2">⏳</div>
- <div className="font-semibold text-status-success">
- Feuille en attente de validation
+ {/* Barre progression exercices */}
+ {pourcentageExo !== null && (
+ <div>
+ <div className="flex justify-between text-xs text-ink-muted mb-1">
+ <span>Exercices</span>
+ <span>{pourcentageExo}%</span>
  </div>
- <p className="text-sm text-orange-700 mt-2">
- Votre chef d'équipe doit valider votre soumission avant que vous puissiez continuer.
- </p>
- </div>
- )}
-
- {/* Afficher si validée avec score */}
- {estValidee && progression?.score !== null && (
- <div className="p-4 bg-green-50/20 border border-green-200 rounded-lg text-center">
- <div className="text-3xl mb-2">✅</div>
- <div className="font-semibold text-status-success">
- Feuille validée !
- </div>
- <div className="text-2xl font-[\'IBM_Plex_Mono\'] font-bold text-status-success mt-2">
- {progression.score}/100
+ <div className="w-full h-3 bg-cream-200 rounded-full overflow-hidden">
+ <div
+ className="h-full rounded-full transition-all duration-500 bg-status-success"
+ style={{ width: `${pourcentageExo}%` }}
+ />
  </div>
  </div>
  )}
 
- {/* Statistiques */}
- <div className="grid grid-cols-2 gap-4">
- <div className="p-4 bg-cream-50 rounded-lg text-center">
- <div className="text-2xl font-[\'IBM_Plex_Mono\'] font-bold text-blue-500">
- {sessions.length}
+ {/* Barre score moyen */}
+ <div>
+ <div className="flex justify-between text-xs text-ink-muted mb-1">
+ <span>Score moyen</span>
+ <span>{Math.round(scoreMoyen)}% / 70% requis</span>
  </div>
- <div className="text-sm text-ink-light">Session{sessions.length > 1 ? 's' : ''}</div>
- </div>
- <div className="p-4 bg-cream-50 rounded-lg text-center">
- <div className="text-2xl font-[\'IBM_Plex_Mono\'] font-bold text-blue-500">
- {tempsTotal} min
- </div>
- <div className="text-sm text-ink-light">Temps total</div>
+ <div className="w-full h-3 bg-cream-200 rounded-full overflow-hidden">
+ <div
+ className={`h-full rounded-full transition-all duration-500 ${scoreMoyen >= 70 ? 'bg-status-success' : 'bg-amber-400'}`}
+ style={{ width: `${pourcentageScore}%` }}
+ />
  </div>
  </div>
 
- {/* Nouvelle synthèse simplifiée */}
- {!estValidee && !estEnAttente && scoresLocaux.length > 0 && (
- <div className="space-y-4">
- {/* En-tête : Résumé de Travail */}
- <div className="border border-border rounded-lg p-4">
- <h3 className="text-lg font-bold text-ink mb-3">📋 Résumé de Travail</h3>
- 
- {/* Informations de la feuille */}
- {progression && (
- <div className="space-y-1 text-sm">
- <div className="flex items-center gap-2 text-ink flex-wrap">
- <span className="font-semibold">{progression.niveau?.nom || 'Niveau'}</span>
- <span>•</span>
- <span>{progression.sujet?.nom || 'Sujet'}</span>
- <span>•</span>
- <span>{progression.chapitre?.nom || 'Chapitre'}</span>
- </div>
- <div className="text-base font-semibold text-ink mt-2">
- {feuille.titre}
- </div>
- </div>
- )}
- </div>
-
- {/* Volume de travail */}
- <div className="bg-cream-50 border border-border rounded-lg p-4">
- <div className="flex items-center gap-2 mb-2">
- <span className="text-lg">📊</span>
- <h4 className="font-semibold text-ink">Volume de travail</h4>
- </div>
- <div className="text-ink">
- <span className="font-bold text-accent">{nbSessions}</span> session{nbSessions > 1 ? 's' : ''} • <span className="font-bold text-accent">{tempsTotal}</span> minutes
- </div>
- </div>
-
- {/* Niveau de maîtrise */}
- <div className="bg-cream-50 border border-border rounded-lg p-4">
- <div className="flex items-center gap-2 mb-3">
- <span className="text-lg">🎯</span>
- <h4 className="font-semibold text-ink">Niveau de maîtrise</h4>
- </div>
-
- {/* Score Global */}
- <div className="mb-4 pb-4 border-b border-border">
- <div className="text-sm text-ink-light mb-1">Score Global</div>
- <div className="text-3xl font-bold text-accent">
- {(scoreGlobal / 100).toFixed(2)}
- </div>
- <div className="text-xs text-ink-muted mt-1">
- sur {scoresLocaux.length} question{scoresLocaux.length > 1 ? 's' : ''}
- </div>
- </div>
-
- {/* Détail par composante */}
- <div className="space-y-2">
- <div className="text-sm font-medium text-ink mb-2">
- Détail par composante :
- </div>
- 
- <div className="flex items-center justify-between p-2 bg-accent-light rounded-lg">
- <span className="text-sm text-ink">🧠 Compréhension</span>
- <span className="text-lg font-bold text-accent">{scoreComprehension.toFixed(2)}</span>
- </div>
- 
- <div className="flex items-center justify-between p-2 bg-green-50 rounded-lg">
- <span className="text-sm text-ink">🛠️ Savoir-faire</span>
- <span className="text-lg font-bold text-status-success">{scoreSavoir.toFixed(2)}</span>
- </div>
- 
- <div className="flex items-center justify-between p-2 bg-purple-50 rounded-lg">
- <span className="text-sm text-ink">✍️ Rédaction</span>
- <span className="text-lg font-bold text-accent">{scoreRedaction.toFixed(2)}</span>
- </div>
- </div>
- </div>
- </div>
- )}
-
- {/* Message d'info si pas de sessions */}
- {sessions.length === 0 && (
- <div className="p-4 bg-amber-50/20 border border-yellow-200 rounded-lg">
- <div className="flex items-start gap-3">
- <div className="text-2xl">ℹ️</div>
- <div className="flex-1 text-sm">
- <p className="text-status-success font-medium mb-1">
- Comment ça marche ?
- </p>
- <ol className="text-status-success space-y-1 list-decimal list-inside">
- <li>Allez sur"Mes Sessions" depuis la page d'accueil</li>
- <li>Enregistrez vos sessions d'entraînement quotidiennes</li>
- <li>Revenez ici quand vous avez terminé la feuille</li>
- <li>Entrez votre score et cliquez sur"Soumettre"</li>
- </ol>
- </div>
- </div>
+ {/* Message seuil atteint */}
+ {seuilAtteint && (
+ <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-center">
+ <div className="font-semibold text-green-700">Tu peux conclure cette feuille !</div>
+ <div className="text-sm text-green-600 mt-1">Utilise le bouton "Conclure →" sur la feuille.</div>
  </div>
  )}
  </div>
 
  {/* Footer */}
- <div className="sticky bottom-0 bg-cream-50 border-t border-border p-6 flex gap-3">
+ <div className="p-6 border-t border-border">
  <button
  onClick={onClose}
- className="flex-1 px-4 py-2 bg-cream-100 hover:bg-[#3d3b58] text-ink font-medium rounded-lg transition-colors"
+ className="w-full px-4 py-2 bg-cream-200 hover:bg-cream-300 text-ink font-medium rounded-lg transition-colors"
  >
  Fermer
  </button>
- {!estValidee && !estEnAttente && progression && (
- <button
- onClick={handleValider}
- disabled={saving || scoresLocaux.length === 0}
- className="flex-1 px-4 py-2 bg-accent-light0 hover:bg-accent-light0 disabled:bg-slate-300 disabled:cursor-not-allowed text-ink font-medium rounded-lg transition-colors"
- >
- {saving ? 'Envoi...' : 'Soumettre pour validation'}
- </button>
+ </div>
+ </div>
+ </div>
+ );
+}
+
+
+/* ---------- Modal de Déblocage ---------- */
+function DeblocageModal({
+ type,
+ parcours,
+ progressions,
+ feuillesAccessibles,
+ onDebloquer,
+ onClose,
+}: {
+ type: 'mecanique' | 'chaotique';
+ parcours: Niveau | null;
+ progressions: Map<string, Progression>;
+ feuillesAccessibles: Set<string>;
+ onDebloquer: (feuilleId: string) => void;
+ onClose: () => void;
+}) {
+ const toutes: FeuilleEntrainement[] = [];
+ if (parcours) {
+ parcours.sujets.forEach(sujet => {
+ (sujet.feuilles ?? []).forEach(f => { if (f.type === type) toutes.push(f); });
+ sujet.chapitres.forEach(ch => ch.feuilles.forEach(f => { if (f.type === type) toutes.push(f); }));
+ });
+ }
+
+ const disponibles = toutes.filter(f => {
+ const prog = progressions.get(f.id);
+ const estFinie = prog?.est_termine === true || prog?.statut === 'validee';
+ const estActive = prog?.en_cours === true && !estFinie;
+ return !estFinie && !estActive && !feuillesAccessibles.has(f.id);
+ });
+
+ const label = type === 'mecanique' ? 'mécanique' : 'chaotique';
+
+ return (
+ <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+ <div className="bg-cream-50 rounded-lg shadow-2xl max-w-lg w-full max-h-[80vh] flex flex-col">
+ <div className="p-6 border-b border-border">
+ <h2 className="text-xl font-bold text-ink">Quelle feuille veux-tu débloquer ?</h2>
+ <p className="text-sm text-ink-muted mt-1">Feuille {label}</p>
+ </div>
+ <div className="flex-1 overflow-y-auto p-6 space-y-3">
+ {disponibles.length === 0 ? (
+ <p className="text-center text-ink-muted py-8">
+ Bravo ! Tu as terminé toutes les feuilles de ce type.
+ </p>
+ ) : (
+ disponibles.map(f => (
+ <div key={f.id} className="flex items-center gap-4 p-3 rounded-lg border border-border bg-cream-100 hover:border-accent transition-colors">
+ <div className="flex-1 min-w-0">
+ <div className="font-medium text-ink truncate">{f.titre}</div>
+ {f.difficulte && (
+ <div className="flex items-center gap-0.5 mt-1">
+ {[...Array(6)].map((_, i) => (
+ <div key={i} className={`w-2 h-2 rounded-full ${i < f.difficulte! ? 'bg-ink-light' : 'bg-slate-300'}`} />
+ ))}
+ </div>
  )}
+ </div>
+ <button
+ onClick={() => onDebloquer(f.id)}
+ className="flex-shrink-0 px-3 py-1.5 bg-orange-100 text-orange-700 text-sm font-medium rounded-lg border border-orange-200 hover:bg-orange-200 transition-colors"
+ >
+ Débloquer →
+ </button>
+ </div>
+ ))
+ )}
+ </div>
+ <div className="p-6 border-t border-border flex justify-end">
+ <button
+ onClick={onClose}
+ className="px-4 py-2 bg-cream-200 hover:bg-cream-300 text-ink rounded-lg transition-colors"
+ >
+ Plus tard
+ </button>
  </div>
  </div>
  </div>
@@ -905,7 +627,7 @@ function ProgressionModal({
 
 
 /* ---------- Composant Chapitre ---------- */
-function ChapitreSection({ chapitre, progressions, onOpenPdf, onProgressionUpdate }: { chapitre: Chapitre; progressions: Map<string, Progression>; onOpenPdf: (url: string) => void; onProgressionUpdate: () => void }) {
+function ChapitreSection({ chapitre, progressions, typesActifs, feuillesDebloquees, feuillesAccessibles, onOpenPdf, onProgressionUpdate, onConclureDone }: { chapitre: Chapitre; progressions: Map<string, Progression>; typesActifs: Set<string>; feuillesDebloquees: Set<string>; feuillesAccessibles: Set<string>; onOpenPdf: (url: string) => void; onProgressionUpdate: () => Promise<void>; onConclureDone: (type: 'mecanique' | 'chaotique') => void }) {
  const [isOpen, setIsOpen] = useState(false);
  
  return (
@@ -940,12 +662,16 @@ function ChapitreSection({ chapitre, progressions, onOpenPdf, onProgressionUpdat
  {chapitre.feuilles.length > 0 ? (
  <div className="space-y-3">
  {chapitre.feuilles.map((feuille) => (
- <FeuilleCard 
- key={feuille.id} 
- feuille={feuille} 
+ <FeuilleCard
+ key={feuille.id}
+ feuille={feuille}
  progression={progressions.get(feuille.id) || null}
- onOpen={() => onOpenPdf(feuille.pdf_url)} 
+ typesActifs={typesActifs}
+ feuillesDebloquees={feuillesDebloquees}
+ feuillesAccessibles={feuillesAccessibles}
+ onOpen={() => onOpenPdf(feuille.pdf_url)}
  onUpdateProgression={onProgressionUpdate}
+ onConclureDone={onConclureDone}
  />
  ))}
  </div>
@@ -962,7 +688,7 @@ function ChapitreSection({ chapitre, progressions, onOpenPdf, onProgressionUpdat
 
 
 /* ---------- Composant Sujet ---------- */
-function SujetSection({ sujet, progressions, onOpenPdf, onProgressionUpdate }: { sujet: Sujet; progressions: Map<string, Progression>; onOpenPdf: (url: string) => void; onProgressionUpdate: () => void }) {
+function SujetSection({ sujet, progressions, typesActifs, feuillesDebloquees, feuillesAccessibles, onOpenPdf, onProgressionUpdate, onConclureDone }: { sujet: Sujet; progressions: Map<string, Progression>; typesActifs: Set<string>; feuillesDebloquees: Set<string>; feuillesAccessibles: Set<string>; onOpenPdf: (url: string) => void; onProgressionUpdate: () => Promise<void>; onConclureDone: (type: 'mecanique' | 'chaotique') => void }) {
  return (
  <div className="mb-12">
  {/* En-tête du sujet */}
@@ -978,8 +704,12 @@ function SujetSection({ sujet, progressions, onOpenPdf, onProgressionUpdate }: {
  key={feuille.id}
  feuille={feuille}
  progression={progressions.get(feuille.id) || null}
+ typesActifs={typesActifs}
+ feuillesDebloquees={feuillesDebloquees}
+ feuillesAccessibles={feuillesAccessibles}
  onOpen={() => onOpenPdf(feuille.pdf_url)}
  onUpdateProgression={onProgressionUpdate}
+ onConclureDone={onConclureDone}
  />
  ))}
  </div>
@@ -989,7 +719,7 @@ function SujetSection({ sujet, progressions, onOpenPdf, onProgressionUpdate }: {
  {sujet.chapitres.length > 0 ? (
  <div className="space-y-8">
  {sujet.chapitres.map((chapitre) => (
- <ChapitreSection key={chapitre.id} chapitre={chapitre} progressions={progressions} onOpenPdf={onOpenPdf} onProgressionUpdate={onProgressionUpdate} />
+ <ChapitreSection key={chapitre.id} chapitre={chapitre} progressions={progressions} typesActifs={typesActifs} feuillesDebloquees={feuillesDebloquees} feuillesAccessibles={feuillesAccessibles} onOpenPdf={onOpenPdf} onProgressionUpdate={onProgressionUpdate} onConclureDone={onConclureDone} />
  ))}
  </div>
  ) : (sujet.feuilles ?? []).length === 0 ? (
@@ -1018,6 +748,10 @@ export default function LibraryPage() {
  const [progressionOuverte, setProgressionOuverte] = useState(false);
  const [parcoursOuvert, setParcoursOuvert] = useState(true);
  const [etapesParcours, setEtapesParcours] = useState<{numero: number; titre_snapshot: string; statut: string; validee_at: string | null}[]>([]);;
+ const [typesActifs, setTypesActifs] = useState<Set<string>>(new Set());
+ const [feuillesDebloquees, setFeuillesDebloquees] = useState<Set<string>>(new Set());
+ const [feuillesAccessibles, setFeuillesAccessibles] = useState<Set<string>>(new Set());
+ const [deblocageModal, setDeblocageModal] = useState<{ type: 'mecanique' | 'chaotique' } | null>(null);
 
  // Chargement initial des niveaux
  useEffect(() => {
@@ -1079,31 +813,8 @@ export default function LibraryPage() {
  } else {
  setParcours(result.data);
  
- // ========================================
- // NOUVEAU : Charger progressions + feuilles autorisées
- // ========================================
  if (result.data) {
- // Vérifier si membre d'une équipe et charger TOUTES les feuilles autorisées
- const { data: membre } = await supabase
- .from('membre_equipe')
- .select('id')
- .eq('user_id', user.id)
- .single();
-
- // Charger les feuilles autorisées (plusieurs feuilles possibles)
- let feuillesAutoriseesIds = new Set<string>();
- if (membre) {
- const { data: autorisees } = await supabase
- .from('feuilles_autorisees')
- .select('feuille_id')
- .eq('membre_id', membre.id);
- 
- if (autorisees) {
- feuillesAutoriseesIds = new Set(autorisees.map(a => a.feuille_id));
- }
- }
-
- // Charger progressions
+ // Charger progressions directement
  const { data: progressionsData } = await supabase
  .from('progression_feuille')
  .select(`
@@ -1114,55 +825,56 @@ export default function LibraryPage() {
 
  const progMap = new Map<string, Progression>();
 
- // Remplir avec les progressions existantes
  if (progressionsData) {
  progressionsData.forEach((prog: any) => {
- // Calculer si la feuille est bloquée
- // Bloquée = membre d'équipe ET (pas autorisée ET pas validée)
- const estBloquee = membre && 
- !feuillesAutoriseesIds.has(prog.feuille_id) && 
- prog.statut !== 'validee';
-
  progMap.set(prog.feuille_id, {
  id: prog.id,
  feuille_id: prog.feuille_id,
  est_termine: prog.est_termine,
+ en_cours: prog.en_cours,
  score: prog.score,
+ score_moyen: prog.score_moyen,
+ nb_exercices_valides: prog.nb_exercices_valides,
  temps_total: prog.temps_total || 0,
  sessions: prog.sessions || [],
  statut: prog.statut,
  commentaire_chef: prog.commentaire_chef,
- est_bloquee: estBloquee,
  });
  });
  }
 
- // Si membre d'équipe, bloquer TOUTES les feuilles non autorisées
- if (membre) {
- const bloquerFeuille = (feuille: any) => {
- if (!progMap.has(feuille.id)) {
- progMap.set(feuille.id, {
- id: '',
- feuille_id: feuille.id,
- est_termine: false,
- score: null,
- temps_total: 0,
- sessions: [],
- statut: null,
- commentaire_chef: null,
- est_bloquee: !feuillesAutoriseesIds.has(feuille.id),
- });
- }
- };
+ // Calculer les types actuellement actifs
+ const ftm = new Map<string, 'mecanique' | 'chaotique'>();
  result.data.sujets.forEach((sujet: any) => {
- (sujet.feuilles ?? []).forEach(bloquerFeuille);
- sujet.chapitres.forEach((chapitre: any) => {
- chapitre.feuilles.forEach(bloquerFeuille);
+ (sujet.feuilles ?? []).forEach((f: any) => ftm.set(f.id, f.type));
+ sujet.chapitres.forEach((ch: any) => ch.feuilles.forEach((f: any) => ftm.set(f.id, f.type)));
  });
- });
+ const ta = new Set<string>();
+ progMap.forEach((prog, feuilleId) => {
+ if (prog.en_cours && !prog.est_termine) {
+ const t = ftm.get(feuilleId);
+ if (t) ta.add(t);
  }
-
+ });
+ setTypesActifs(ta);
  setProgressions(progMap);
+
+ // Charger les feuilles débloquées et calculer les accessibles
+ const { data: debloquees } = await supabase
+ .from('feuille_debloquee')
+ .select('feuille_id')
+ .eq('user_id', user.id);
+ const debSet = new Set<string>(debloquees?.map((d: any) => d.feuille_id) ?? []);
+ setFeuillesDebloquees(debSet);
+
+ const accessibles = new Set<string>(debSet);
+ for (const tp of ['mecanique', 'chaotique'] as const) {
+ const ids = [...ftm.entries()].filter(([_, t]) => t === tp).map(([id]) => id);
+ if (!ids.some(id => debSet.has(id)) && !ids.some(id => progMap.has(id))) {
+ ids.forEach(id => accessibles.add(id));
+ }
+ }
+ setFeuillesAccessibles(accessibles);
  }
  }
  setLoading(false);
@@ -1198,17 +910,65 @@ export default function LibraryPage() {
  id: prog.id,
  feuille_id: prog.feuille_id,
  est_termine: prog.est_termine,
+ en_cours: prog.en_cours,
  score: prog.score,
+ score_moyen: prog.score_moyen,
+ nb_exercices_valides: prog.nb_exercices_valides,
  temps_total: prog.temps_total || 0,
  sessions: prog.sessions || [],
  statut: prog.statut || 'en_cours',
  commentaire_chef: prog.commentaire_chef,
- est_bloquee: newProgMap.get(prog.feuille_id)?.est_bloquee || false,
  });
  });
 
+ // Recalculer typesActifs
+ const ftm = new Map<string, 'mecanique' | 'chaotique'>();
+ if (parcours) {
+ parcours.sujets.forEach(sujet => {
+ (sujet.feuilles ?? []).forEach(f => ftm.set(f.id, f.type));
+ sujet.chapitres.forEach(ch => ch.feuilles.forEach(f => ftm.set(f.id, f.type)));
+ });
+ }
+ const ta = new Set<string>();
+ newProgMap.forEach((prog, feuilleId) => {
+ if (prog.en_cours && !prog.est_termine) {
+ const t = ftm.get(feuilleId);
+ if (t) ta.add(t);
+ }
+ });
+ setTypesActifs(ta);
  setProgressions(newProgMap);
+
+ // Recharger les feuilles débloquées et recalculer les accessibles
+ const { data: debloquees } = await supabase
+ .from('feuille_debloquee')
+ .select('feuille_id')
+ .eq('user_id', session.user.id);
+ const debSet = new Set<string>(debloquees?.map((d: any) => d.feuille_id) ?? []);
+ setFeuillesDebloquees(debSet);
+
+ const accessibles = new Set<string>(debSet);
+ for (const tp of ['mecanique', 'chaotique'] as const) {
+ const ids = [...ftm.entries()].filter(([_, t]) => t === tp).map(([id]) => id);
+ if (!ids.some(id => debSet.has(id)) && !ids.some(id => newProgMap.has(id))) {
+ ids.forEach(id => accessibles.add(id));
+ }
+ }
+ setFeuillesAccessibles(accessibles);
+
  await loadFeuillesEnProgression();
+ };
+
+ const handleConclureDone = (type: 'mecanique' | 'chaotique') => {
+ setDeblocageModal({ type });
+ };
+
+ const handleDebloquer = async (feuilleId: string) => {
+ const { data: { session } } = await supabase.auth.getSession();
+ if (!session) return;
+ await supabase.from('feuille_debloquee').insert({ user_id: session.user.id, feuille_id: feuilleId });
+ setDeblocageModal(null);
+ await handleProgressionUpdate();
  };
 
  const loadFeuillesEnProgression = async () => {
@@ -1224,6 +984,8 @@ export default function LibraryPage() {
  en_cours,
  est_termine,
  score,
+ score_moyen,
+ nb_exercices_valides,
  temps_total,
  commentaire_chef,
  noeud:noeud(
@@ -1231,7 +993,9 @@ export default function LibraryPage() {
  titre,
  pdf_url,
  ordre,
- difficulte
+ difficulte,
+ type,
+ nb_exercices
  )
  `)
  .eq('user_id', session.user.id)
@@ -1251,12 +1015,17 @@ export default function LibraryPage() {
  ordre: item.noeud.ordre,
  ordre_dans_niveau: 0,
  difficulte: item.noeud.difficulte,
+ type: item.noeud.type as 'mecanique' | 'chaotique',
+ nb_exercices: item.noeud.nb_exercices ?? null,
  },
  progression: {
  id: item.id,
  feuille_id: item.feuille_id,
  est_termine: item.est_termine,
+ en_cours: item.en_cours,
  score: item.score,
+ score_moyen: item.score_moyen,
+ nb_exercices_valides: item.nb_exercices_valides,
  temps_total: item.temps_total,
  sessions: [],
  statut: item.statut || 'en_cours',
@@ -1340,8 +1109,12 @@ export default function LibraryPage() {
    key={feuille.id}
    feuille={feuille}
    progression={progression}
+   typesActifs={typesActifs}
+   feuillesDebloquees={feuillesDebloquees}
+   feuillesAccessibles={feuillesAccessibles}
    onOpen={() => handleOpenPdf(feuille.pdf_url)}
    onUpdateProgression={handleProgressionUpdate}
+   onConclureDone={handleConclureDone}
    />
   ))}
   </div>
@@ -1401,11 +1174,23 @@ export default function LibraryPage() {
  ) : (
  <div className="space-y-12">
  {parcours.sujets.map((sujet) => (
- <SujetSection key={sujet.id} sujet={sujet} progressions={progressions} onOpenPdf={handleOpenPdf} onProgressionUpdate={handleProgressionUpdate} />
+ <SujetSection key={sujet.id} sujet={sujet} progressions={progressions} typesActifs={typesActifs} feuillesDebloquees={feuillesDebloquees} feuillesAccessibles={feuillesAccessibles} onOpenPdf={handleOpenPdf} onProgressionUpdate={handleProgressionUpdate} onConclureDone={handleConclureDone} />
  ))}
  </div>
  )}
  </div>
+
+ {/* Modal de déblocage */}
+ {deblocageModal && (
+ <DeblocageModal
+ type={deblocageModal.type}
+ parcours={parcours}
+ progressions={progressions}
+ feuillesAccessibles={feuillesAccessibles}
+ onDebloquer={handleDebloquer}
+ onClose={() => setDeblocageModal(null)}
+ />
+ )}
  </main>
  );
 }

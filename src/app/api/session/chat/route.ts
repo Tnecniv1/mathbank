@@ -158,12 +158,78 @@ RÈGLES ABSOLUES
    Exemple : "(1/5 - 2/4) × (3/7 - 1/2)" devient \
    "$\\left(\\frac{1}{5} - \\frac{2}{4}\\right) \\times \\left(\\frac{3}{7} - \\frac{1}{2}\\right)$"`;
 
+// ── Libellés critères ─────────────────────────────────────────────────────────
+const CRITERES_LABELS: Record<string, string> = {
+  C1: 'Reformuler le problème, définir précisément l\'objectif',
+  C2: 'Observer et explorer ce que l\'on sait, et ce que l\'on ne sait pas',
+  C3: 'Démarrer quelque part, et converger par itération',
+  C4: 'Développer une intuition du problème, et construire une image mentale',
+  S1: 'Construire un raisonnement logique, nécessaire et suffisant',
+  S2: 'Décrire le problème en langage mathématique, et mettre en équation',
+  S3: 'Trouver les algorithmes de travail pertinents, et les exécuter correctement',
+  S4: 'Calculer sans erreur, vérifier son brouillon, et le mettre à l\'épreuve',
+  R1: 'Respecter la structure, la langue et les conventions de publication',
+  R2: 'Décrire l\'ensemble du raisonnement, et le prouver par les calculs',
+  R3: 'Décrire clairement les gestes, faisant danser élégamment calcul avec la narration',
+  R4: 'Faire des dessins pour expliquer les points compliqués',
+  B1: 'Est-ce que le problème a été résolu ?',
+};
+
+const CRITERES_SECTIONS: Array<{ label: string; keys: string[] }> = [
+  { label: 'Compréhension', keys: ['C1', 'C2', 'C3', 'C4'] },
+  { label: 'Savoir',        keys: ['S1', 'S2', 'S3', 'S4'] },
+  { label: 'Rédaction',     keys: ['R1', 'R2', 'R3', 'R4'] },
+  { label: 'Bilan',         keys: ['B1'] },
+];
+
+function buildRoueEnCoursSection(
+  reference: string,
+  validated: Record<string, boolean | null> | null
+): string {
+  const lines: string[] = [
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    'CONTINUITÉ D\'UNE ROUE EN COURS',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    `Le professeur a déjà observé cet exercice (${reference}) en classe.`,
+    'Voici l\'état actuel des critères :',
+    '',
+  ];
+
+  for (const section of CRITERES_SECTIONS) {
+    lines.push(`${section.label} :`);
+    for (const key of section.keys) {
+      const val = validated?.[key];
+      const status = val === true ? 'validé' : 'non observé';
+      lines.push(`  ${key} (${CRITERES_LABELS[key]}) : ${status}`);
+    }
+    lines.push('');
+  }
+
+  lines.push(
+    'Ton rôle est de compléter l\'observation en guidant l\'élève sur les critères',
+    'non encore observés, tout en vérifiant les critères déjà validés si nécessaire.',
+    '',
+    'À la fin, selon la décision de l\'élève :',
+    '- Exercice terminé → demande photo, évalue, propose de boucler',
+    '- Exercice non terminé → sauvegarde l\'état sans boucler',
+  );
+
+  return lines.join('\n');
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 type ClientMessage = {
   role: 'user' | 'assistant';
   content: string;
   imageBase64?: string;
   imageMime?: string;
+};
+
+type RoueEnCours = {
+  roue_id: string;
+  reference: string;
+  validated: Record<string, boolean | null> | null;
+  type: 'mecanique' | 'chaotique';
 };
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -182,11 +248,13 @@ export async function POST(req: Request) {
     feuille_id,
     prochain_exercice,
     reprise,
+    roue_en_cours,
   }: {
     messages: ClientMessage[];
     feuille_id: string;
     prochain_exercice: number;
     reprise?: boolean;
+    roue_en_cours?: RoueEnCours;
   } = body;
 
   if (!feuille_id || !Array.isArray(messages)) {
@@ -241,9 +309,13 @@ export async function POST(req: Request) {
     .replace(/{type}/g, feuilleType)
     .replace(/{exercice_label}/g, exerciceLabel)
     .replace(/{prochain_exercice}/g, String(prochain_exercice ?? 1));
-  const system = reprise
+  let system = reprise
     ? baseSystem + '\n\n[NOTE DE REPRISE : L\'élève reprend une session interrompue. L\'historique ci-dessus correspond aux échanges précédents. Accueille sa reprise naturellement, en continuant là où vous en étiez — pas de message d\'accueil, pas de répétition de l\'énoncé.]'
     : baseSystem;
+
+  if (roue_en_cours) {
+    system += '\n\n' + buildRoueEnCoursSection(roue_en_cours.reference, roue_en_cours.validated);
+  }
 
   // 6. Construction des messages Anthropic
   //    Le PDF est injecté dans le PREMIER message utilisateur (index 0).

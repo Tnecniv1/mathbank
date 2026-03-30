@@ -84,6 +84,10 @@ export async function POST(req: Request) {
     reference,
     photo_base64,
     photo_mime,
+    session_start_time,
+    roue_id,
+    boucler,
+    entrainement_id,
   }: {
     messages: ConvMessage[];
     feuille_id: string;
@@ -93,7 +97,23 @@ export async function POST(req: Request) {
     photo_base64: string;
     photo_mime: string;
     session_start_time: number;
+    roue_id?: string;
+    boucler?: boolean;
+    entrainement_id?: string;
   } = body;
+
+  // Cas spécial : bouclage sans photo (juste fermer la roue)
+  if (roue_id && boucler && !photo_base64) {
+    const { error: closeError } = await service
+      .from('grille_observation')
+      .update({ closed: true })
+      .eq('id', roue_id);
+    if (closeError) {
+      console.error('[evaluate] close roue error:', closeError);
+      return NextResponse.json({ error: 'Erreur BDD' }, { status: 500 });
+    }
+    return NextResponse.json({ success: true, closed: true });
+  }
 
   if (!feuille_id || !photo_base64) {
     return NextResponse.json({ error: 'Paramètres manquants' }, { status: 400 });
@@ -251,21 +271,103 @@ export async function POST(req: Request) {
     inserted: false,
   };
 
-  // 10. INSERT dans grille_observation (service-role, bypass RLS)
-  const { error: insertError } = await service
-    .from('grille_observation')
-    .insert({
-      id,
-      user_id: user.id,
-      data,
-      closed: true,
-      inserted: false,
-    });
+  // 10. INSERT ou UPDATE dans grille_observation (service-role, bypass RLS)
+  if (roue_id) {
+    // ── Mise à jour d'une roue existante ────────────────────────────────
+    const { data: existingRow, error: fetchError } = await service
+      .from('grille_observation')
+      .select('data')
+      .eq('id', roue_id)
+      .single();
 
-  if (insertError) {
-    console.error('[evaluate] grille_observation insert error:', insertError);
-    return NextResponse.json({ error: 'Erreur BDD' }, { status: 500 });
+    if (fetchError || !existingRow) {
+      console.error('[evaluate] roue introuvable:', fetchError);
+      return NextResponse.json({ error: 'Roue introuvable' }, { status: 404 });
+    }
+
+    const updatedData = { ...existingRow.data };
+    const exoIndex = (updatedData.exercices ?? []).findIndex(
+      (e: any) => e.reference === reference
+    );
+    if (exoIndex !== -1) {
+      updatedData.exercices[exoIndex] = {
+        ...updatedData.exercices[exoIndex],
+        reussi: evalResult.reussi,
+        ...(evalResult.validated !== undefined && { validated: evalResult.validated }),
+      };
+    }
+    updatedData.meta = {
+      ...updatedData.meta,
+      note: evalResult.note ?? updatedData.meta?.note ?? '',
+    };
+
+    console.log('[evaluate] UPDATE grille_observation, roue_id =', roue_id);
+    const updatePayload: Record<string, unknown> = { data: updatedData, closed: boucler ?? false };
+    if (entrainement_id) updatePayload.entrainement_id = entrainement_id;
+
+    const { error: updateError } = await service
+      .from('grille_observation')
+      .update(updatePayload)
+      .eq('id', roue_id);
+
+    console.log('[evaluate] UPDATE résultat :', JSON.stringify(updateError ?? 'OK'));
+
+    if (updateError) {
+      console.error('[evaluate] grille_observation update error:', updateError);
+      return NextResponse.json({ error: 'Erreur BDD' }, { status: 500 });
+    }
+  } else {
+    // ── Création d'une nouvelle grille ───────────────────────────────────
+    const insertPayload: Record<string, unknown> = { id, user_id: user.id, data, closed: true, inserted: false };
+    if (entrainement_id) insertPayload.entrainement_id = entrainement_id;
+    console.log('[evaluate] tentative INSERT grille_observation, id =', id);
+    console.log('[evaluate] data à insérer :', JSON.stringify(insertPayload).slice(0, 500));
+
+    const { error: insertError } = await service
+      .from('grille_observation')
+      .insert(insertPayload);
+
+    console.log('[evaluate] INSERT résultat :', JSON.stringify(insertError ?? 'OK'));
+
+    if (insertError) {
+      console.error('[evaluate] grille_observation insert error:', insertError);
+      return NextResponse.json({ error: 'Erreur BDD' }, { status: 500 });
+    }
   }
+
+  // Mise à jour de la progression (fire-and-forget)
+  (async () => {
+    try {
+      const { data: grilles } = await service
+        .from('grille_observation')
+        .select('data')
+        .filter('data->meta->>user_id', 'eq', user.id);
+
+      if (!grilles) return;
+
+      let total = 0;
+      let reussis = 0;
+      for (const g of grilles) {
+        const exos = (g.data?.exercices ?? []).filter((e: any) => e.feuille_id === feuille_id);
+        total += exos.length;
+        reussis += exos.filter((e: any) => e.reussi === true).length;
+      }
+
+      if (total === 0) return;
+
+      const score_moyen = Math.round((reussis / total) * 100);
+
+      const { error: progError } = await service
+        .from('progression_feuille')
+        .update({ nb_exercices_valides: reussis, score_moyen })
+        .eq('user_id', user.id)
+        .eq('feuille_id', feuille_id);
+
+      if (progError) console.error('[evaluate] progression update error:', progError);
+    } catch (err) {
+      console.error('[evaluate] progression update exception:', err);
+    }
+  })();
 
   // Marquer la session conversation comme terminée (fire-and-forget)
   service
@@ -281,7 +383,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     success: true,
-    grille_id: id,
+    grille_id: roue_id ?? id,
     reussi: evalResult.reussi,
     note: evalResult.note,
     validated: evalResult.validated ?? null,

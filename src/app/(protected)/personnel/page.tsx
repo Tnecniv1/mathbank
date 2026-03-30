@@ -16,19 +16,6 @@ type Notification = {
  created_at: string;
 };
 
-type MonEquipe = {
- id: string;
- nom: string;
- couleur: string;
- nb_membres: number;
-};
-
-type Membre = {
- user_id: string;
- full_name: string;
- joined_at: string;
-};
-
 type UserInfo = {
  email: string;
  first_name: string;
@@ -46,12 +33,6 @@ type UserInfo = {
  user_role: string;
 };
 
-type Feuille = {
- id: string;
- titre: string;
- ordre: number;
-};
-
 /* ---------- COMPOSANT PRINCIPAL ---------- */
 export default function PersonnelPage() {
  const router = useRouter();
@@ -60,26 +41,18 @@ export default function PersonnelPage() {
  
  // Données
  const [notifications, setNotifications] = useState<Notification[]>([]);
- const [monEquipe, setMonEquipe] = useState<MonEquipe | null>(null);
- const [isChef, setIsChef] = useState(false);
- const [mesEquipes, setMesEquipes] = useState<MonEquipe[]>([]);
- const [membres, setMembres] = useState<Membre[]>([]);
  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
 
  // Modals
  const [showRejetModal, setShowRejetModal] = useState(false);
  const [showEditModal, setShowEditModal] = useState(false);
- const [showEditEquipeModal, setShowEditEquipeModal] = useState(false);
  const [showProfileModal, setShowProfileModal] = useState(false);
 
  // Accordéon
  const [openInfos, setOpenInfos] = useState(true);
- const [openEquipes, setOpenEquipes] = useState(false);
  const [openNotifs, setOpenNotifs] = useState(false);
- // ❌ SUPPRIMÉ : showValidationModal (validation directe maintenant)
  const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
- const [equipeSelectionnee, setEquipeSelectionnee] = useState<MonEquipe | null>(null);
- 
+
  // État pour l'édition des infos
  const [editData, setEditData] = useState<UserInfo>({
  email: '',
@@ -95,13 +68,6 @@ export default function PersonnelPage() {
  adresse: '',
  date_naissance: '',
  user_role: '',
- });
-
- // État pour l'édition d'équipe
- const [editEquipeData, setEditEquipeData] = useState({
- nom: '',
- description: '',
- couleur: '#3B82F6',
  });
 
  useEffect(() => {
@@ -125,8 +91,6 @@ export default function PersonnelPage() {
 
  await loadUserInfo(session.user);
  await loadNotifications(session.user.id);
- await loadMonEquipe(session.user.id);
- await loadMesEquipes(session.user.id);
 
  } catch (error: any) {
  console.error('Erreur complète:', error);
@@ -208,31 +172,6 @@ export default function PersonnelPage() {
  }
  }
 
- async function handleSaveEquipe() {
- if (!equipeSelectionnee) return;
-
- try {
- const { error } = await supabase
- .from('equipe')
- .update({
- nom: editEquipeData.nom,
- description: editEquipeData.description || null,
- couleur: editEquipeData.couleur,
- })
- .eq('id', equipeSelectionnee.id);
-
- if (error) throw error;
-
- alert('✅ Équipe modifiée !');
- setShowEditEquipeModal(false);
- setEquipeSelectionnee(null);
- loadData();
- } catch (error: any) {
- console.error(error);
- alert('Erreur lors de la modification');
- }
- }
-
  async function loadNotifications(userId: string) {
  const { data, error } = await supabase
  .from('notification')
@@ -243,85 +182,6 @@ export default function PersonnelPage() {
 
  if (error) throw error;
  setNotifications(data || []);
- }
-
- async function loadMonEquipe(userId: string) {
- const { data: membre, error } = await supabase
- .from('membre_equipe')
- .select(`
- equipe:equipe(id, nom, couleur)
- `)
- .eq('user_id', userId)
- .single();
-
- if (error && error.code !== 'PGRST116') throw error;
-
- if (membre && membre.equipe) {
- const { data: membresCount } = await supabase
- .from('membre_equipe')
- .select('user_id', { count: 'exact' })
- .eq('equipe_id', membre.equipe.id);
-
- setMonEquipe({
- id: membre.equipe.id,
- nom: membre.equipe.nom,
- couleur: membre.equipe.couleur,
- nb_membres: membresCount?.length || 0,
- });
- }
- }
-
- async function loadMesEquipes(userId: string) {
- const { data, error } = await supabase
- .from('equipe')
- .select('id, nom, couleur')
- .eq('chef_id', userId);
-
- if (error) throw error;
-
- if (data && data.length > 0) {
- setIsChef(true);
-
- const equipesAvecNbMembres = await Promise.all(
- data.map(async (equipe) => {
- const { data: membresData } = await supabase
- .from('membre_equipe')
- .select('user_id', { count: 'exact' })
- .eq('equipe_id', equipe.id);
-
- return {
- id: equipe.id,
- nom: equipe.nom,
- couleur: equipe.couleur,
- nb_membres: membresData?.length || 0,
- };
- })
- );
-
- setMesEquipes(equipesAvecNbMembres);
-
- if (data.length > 0) {
- const equipeIds = data.map(e => e.id);
- const { data: membresData } = await supabase
- .from('membre_equipe')
- .select(`
- user_id,
- joined_at,
- equipe_id,
- profiles!inner(full_name)
- `)
- .in('equipe_id', equipeIds);
-
- if (membresData) {
- const membresFormatted = membresData.map((m: any) => ({
- user_id: m.user_id,
- full_name: m.profiles.full_name,
- joined_at: m.joined_at,
- }));
- setMembres(membresFormatted);
- }
- }
- }
  }
 
  async function handleAccepterDemande(notification: Notification) {
@@ -435,55 +295,6 @@ export default function PersonnelPage() {
  }
  }
 
- async function handleExcluireMembre(membreId: string, equipeId: string) {
- if (!confirm('Êtes-vous sûr de vouloir exclure ce membre ?')) return;
-
- try {
- const { data, error } = await supabase.rpc('exclure_membre', {
- p_membre_id: membreId,
- p_equipe_id: equipeId,
- });
-
- if (error) throw error;
-
- if (!data.success) {
- alert(data.error);
- return;
- }
-
- alert('✅ Membre exclu');
- loadData();
- } catch (error: any) {
- console.error(error);
- alert('Erreur');
- }
- }
-
- async function handleSupprimerEquipe(equipeId: string) {
- if (!confirm('⚠️ ATTENTION : Supprimer cette équipe supprimera également tous ses membres et leurs progressions. Êtes-vous sûr ?')) {
- return;
- }
-
- try {
- const { data, error } = await supabase.rpc('supprimer_equipe', {
- p_equipe_id: equipeId,
- });
-
- if (error) throw error;
-
- if (!data.success) {
- alert(data.error);
- return;
- }
-
- alert('✅ Équipe supprimée');
- loadData();
- } catch (error: any) {
- console.error(error);
- alert('Erreur lors de la suppression');
- }
- }
-
  async function marquerCommeLue(notificationId: string) {
  await supabase
  .from('notification')
@@ -516,29 +327,6 @@ export default function PersonnelPage() {
  <p className="text-ink-light">
  Gérez vos informations, équipes et notifications
  </p>
- </div>
-
- {/* Raccourcis */}
- <div className="bg-cream-100 rounded-lg px-5 py-4 border border-border">
-  <p className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-3">Raccourcis</p>
-  <div className="flex gap-3 flex-wrap">
-   {monEquipe && (
-    <button
-     onClick={() => router.push(`/gestion-equipe?id=${monEquipe.id}`)}
-     className="px-4 py-2 bg-white border border-border rounded-lg text-sm font-medium text-ink hover:bg-cream-50 transition-colors shadow-sm"
-    >
-     👥 Mon équipe →
-    </button>
-   )}
-   <a
-    href="https://mathbank.onrender.com/grille-roue.html"
-    target="_blank"
-    rel="noopener noreferrer"
-    className="px-4 py-2 bg-white border border-border rounded-lg text-sm font-medium text-ink hover:bg-cream-50 transition-colors shadow-sm"
-   >
-    📊 Grille d'observation →
-   </a>
-  </div>
  </div>
 
  {/* Accordéon — Mes Informations */}
@@ -589,66 +377,6 @@ export default function PersonnelPage() {
    </div>
   )}
  </div>
-
- {/* Accordéon — Mes Équipes (Chef) */}
- {isChef && mesEquipes.length > 0 && (
-  <div className="bg-cream-50 rounded-lg border border-border shadow-sm overflow-hidden">
-   <button
-    type="button"
-    onClick={() => setOpenEquipes(!openEquipes)}
-    className="w-full flex justify-between items-center px-6 py-4 hover:bg-cream-100 transition-colors"
-   >
-    <h2 className="text-xl font-bold text-ink">🏆 Mes Équipes (Chef)</h2>
-    <span className="text-ink-muted text-lg">{openEquipes ? '▲' : '▼'}</span>
-   </button>
-   {openEquipes && (
-    <div className="px-6 pb-6">
-     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {mesEquipes.map(equipe => (
-       <div
-        key={equipe.id}
-        className="p-4 rounded-lg border transition-all hover:shadow-sm hover:scale-105"
-        style={{ borderColor: equipe.couleur }}
-       >
-        <div className="mb-3">
-         <div className="text-lg font-bold text-ink mb-1">{equipe.nom}</div>
-         <div className="text-sm text-ink-light">
-          {equipe.nb_membres} membre{equipe.nb_membres > 1 ? 's' : ''}
-         </div>
-        </div>
-        <div className="space-y-2">
-         <button
-          onClick={() => router.push(`/gestion-equipe?id=${equipe.id}`)}
-          className="w-full px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors shadow-sm"
-         >
-          Gérer l'équipe
-         </button>
-         <div className="flex gap-2">
-          <button
-           onClick={() => {
-            setEquipeSelectionnee(equipe);
-            setEditEquipeData({ nom: equipe.nom, description: '', couleur: equipe.couleur });
-            setShowEditEquipeModal(true);
-           }}
-           className="flex-1 px-3 py-2 bg-cream-200 hover:bg-cream-200 text-ink font-medium rounded-lg transition-colors"
-          >
-           ✏️ Modifier
-          </button>
-          <button
-           onClick={() => handleSupprimerEquipe(equipe.id)}
-           className="flex-1 px-3 py-2 bg-red-100 hover:bg-red-200 text-red-600 font-medium rounded-lg transition-colors"
-          >
-           🗑️ Supprimer
-          </button>
-         </div>
-        </div>
-       </div>
-      ))}
-     </div>
-    </div>
-   )}
-  </div>
- )}
 
  {/* Accordéon — Notifications */}
  <div className="bg-cream-50 rounded-lg border border-border shadow-sm overflow-hidden">
@@ -769,17 +497,6 @@ export default function PersonnelPage() {
  />
  )}
 
- {showEditEquipeModal && equipeSelectionnee && (
- <ModalEditEquipe
- data={editEquipeData}
- onChange={setEditEquipeData}
- onClose={() => {
- setShowEditEquipeModal(false);
- setEquipeSelectionnee(null);
- }}
- onSave={handleSaveEquipe}
- />
- )}
 
  {/* ❌ MODAL SUPPRIMÉ : ModalValidationAvecFeuille (validation directe) */}
 
@@ -879,74 +596,6 @@ function ModalEditUserInfo({
  <button
  onClick={onSave}
  className="flex-1 px-4 py-3 bg-accent hover:bg-accent-hover text-ink font-semibold rounded-lg transition-all shadow-sm"
- >
- Enregistrer
- </button>
- </div>
- </div>
- </div>
- );
-}
-
-function ModalEditEquipe({
- data,
- onChange,
- onClose,
- onSave,
-}: {
- data: { nom: string; description: string; couleur: string };
- onChange: (data: any) => void;
- onClose: () => void;
- onSave: () => void;
-}) {
- return (
- <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
- <div className="bg-cream-50 rounded-lg p-6 max-w-md w-full shadow-2xl">
- <h2 className="text-2xl font-bold text-ink mb-4">
- Modifier l'équipe
- </h2>
-
- <div className="space-y-4">
- <InputField
- label="Nom de l'équipe"
- value={data.nom}
- onChange={(v) => onChange({ ...data, nom: v })}
- />
- <div>
- <label className="block text-sm font-medium mb-2 text-ink">
- Description
- </label>
- <textarea
- value={data.description}
- onChange={(e) => onChange({ ...data, description: e.target.value })}
- className="w-full border border-border rounded-lg p-3 bg-cream-50 text-ink focus:border-accent focus:ring-2 focus:ring-blue-200 transition-all"
- rows={3}
- />
- </div>
- <div>
- <label className="block text-sm font-medium mb-2 text-ink">
- Couleur
- </label>
- <input
- type="color"
- value={data.couleur}
- onChange={(e) => onChange({ ...data, couleur: e.target.value })}
- className="w-full h-12 rounded-lg cursor-pointer"
- />
- </div>
- </div>
-
- <div className="flex gap-3 mt-6">
- <button
- onClick={onClose}
- className="flex-1 px-4 py-3 bg-cream-200 hover:bg-cream-200 text-ink font-semibold rounded-lg transition-colors"
- >
- Annuler
- </button>
- <button
- onClick={onSave}
- disabled={!data.nom}
- className="flex-1 px-4 py-3 bg-accent hover:bg-accent-hover text-ink font-semibold rounded-lg disabled:opacity-50 transition-all shadow-sm"
  >
  Enregistrer
  </button>

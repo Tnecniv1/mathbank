@@ -347,10 +347,8 @@ function BadgesSection() {
 const navItems = [
  { href: '/session', emoji: '🏋️', title: 'Entraînement', description: 'Sessions de coaching IA' },
  { href: '/library', emoji: '📚', title: 'Bibliothèque', description: 'Feuilles d\'entraînement et parcours' },
- { href: '/library/sessions', emoji: '📝', title: 'Mes Sessions', description: 'Entraînements quotidiens et historique' },
  { href: '/progression', emoji: '📊', title: 'Progression', description: 'Statistiques et évolution' },
- { href: '/classement', emoji: '🏆', title: 'Classement', description: 'Performances et équipes' },
- { href: '/personnel', emoji: '👤', title: 'Personnel', description: 'Équipe et notifications' },
+ { href: '/personnel', emoji: '👤', title: 'Personnel', description: 'Notifications et profil' },
  { href: '/admin', emoji: '⚙️', title: 'Administration', description: 'Gestion des contenus' },
 ];
 
@@ -378,7 +376,7 @@ export default function HomePage() {
  </div>
 
  <div className="text-center text-sm text-ink-muted pt-4">
- <p>Système d'apprentissage collaboratif</p>
+ <p>Système d'apprentissage autonome</p>
  </div>
  </div>
  </main>

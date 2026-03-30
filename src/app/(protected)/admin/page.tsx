@@ -273,6 +273,7 @@ function ItemForm({
 }) {
  const [titre, setTitre] = useState(initial?.titre || '');
  const [ordre, setOrdre] = useState(initial?.ordre?.toString() || '');
+ const [nbExercices, setNbExercices] = useState(initial?.nb_exercices?.toString() || '');
  const [pdfFile, setPdfFile] = useState<File | null>(null);
  const [saving, setSaving] = useState(false);
  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
@@ -291,6 +292,7 @@ function ItemForm({
  // type noeud : pour les feuilles -> mecanique/chaotique, pour les autres -> direct
  if (type === 'feuille') {
  data.type = initial?.type || 'chaotique';
+ if (nbExercices !== '') data.nb_exercices = parseInt(nbExercices);
  } else {
  data.type = type;
  }
@@ -330,6 +332,15 @@ function ItemForm({
  <Input label="Titre" value={titre} onChange={setTitre} placeholder="Ex: Addition" required />
  <Input label="Ordre (optionnel)" value={ordre} onChange={setOrdre} type="number" placeholder="Laissez vide pour auto" />
  
+ {type === 'feuille' && (
+ <Input
+ label="Nombre d'exercices (optionnel)"
+ value={nbExercices}
+ onChange={setNbExercices}
+ type="number"
+ placeholder="Ex: 10"
+ />
+ )}
  {type === 'feuille' && (
  <div>
  <label className="block text-sm font-medium mb-1.5 text-ink">

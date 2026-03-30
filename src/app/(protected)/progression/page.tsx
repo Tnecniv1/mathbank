@@ -97,6 +97,8 @@ export default function TableauProgression() {
  const [userName, setUserName] = useState<string | null>(null);
  const [userCreatedAt, setUserCreatedAt] = useState<string | null>(null);
  const [sujetsOuverts, setSujetsOuverts] = useState<Set<string>>(new Set());
+ const [competences, setCompetences] = useState<Map<string, { C: number; S: number; R: number; B: number; titre: string }>>(new Map());
+ const [competencesOuverts, setCompetencesOuverts] = useState<Set<string>>(new Set());
 
  useEffect(() => {
  loadNiveaux();
@@ -168,6 +170,7 @@ export default function TableauProgression() {
  await loadScoresLocauxAvecType(niveauId, userId);
  await loadConcentrationData(niveauId, userId);
  await loadGridObjectifs(userId);
+ await fetchCompetences(userId);
 
  setLoading(false);
  } catch (err: any) {
@@ -576,6 +579,67 @@ export default function TableauProgression() {
  }
  }
 
+ async function fetchCompetences(userId: string) {
+ try {
+   const { data: grilles } = await supabase
+     .from('grille_observation')
+     .select('data')
+     .eq('user_id', userId)
+     .eq('closed', true);
+
+   if (!grilles || grilles.length === 0) {
+     setCompetences(new Map());
+     return;
+   }
+
+   const feuilleRaw = new Map<string, { C: number[]; S: number[]; R: number[]; B: number[]; titre: string }>();
+
+   for (const g of grilles) {
+     const exercices = (g.data?.exercices ?? []) as any[];
+     for (const exo of exercices) {
+       if (exo.type !== 'chaotique' || !exo.validated) continue;
+       const fid = exo.feuille_id as string;
+       if (!fid) continue;
+       if (!feuilleRaw.has(fid)) feuilleRaw.set(fid, { C: [], S: [], R: [], B: [], titre: fid });
+       const entry = feuilleRaw.get(fid)!;
+       const v = exo.validated as Record<string, boolean>;
+       const toScore = (keys: string[]) => {
+         const vals = keys.map(k => v[k]).filter(x => x != null);
+         return vals.length > 0 ? (vals.filter(Boolean).length / vals.length) * 100 : null;
+       };
+       const C = toScore(['C1', 'C2', 'C3', 'C4']);
+       const S = toScore(['S1', 'S2', 'S3', 'S4']);
+       const R = toScore(['R1', 'R2', 'R3', 'R4']);
+       const B = toScore(['B1']);
+       if (C != null) entry.C.push(C);
+       if (S != null) entry.S.push(S);
+       if (R != null) entry.R.push(R);
+       if (B != null) entry.B.push(B);
+     }
+   }
+
+   const feuilleIds = Array.from(feuilleRaw.keys());
+   if (feuilleIds.length > 0) {
+     const { data: noeuds } = await supabase.from('noeud').select('id, titre').in('id', feuilleIds);
+     for (const n of noeuds ?? []) {
+       const entry = feuilleRaw.get(n.id);
+       if (entry) entry.titre = n.titre;
+     }
+   }
+
+   const avg = (arr: number[]) => arr.length > 0 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+   const result = new Map<string, { C: number; S: number; R: number; B: number; titre: string }>();
+   for (const [fid, entry] of feuilleRaw.entries()) {
+     if (entry.C.length === 0 && entry.S.length === 0 && entry.R.length === 0 && entry.B.length === 0) continue;
+     result.set(fid, { C: avg(entry.C), S: avg(entry.S), R: avg(entry.R), B: avg(entry.B), titre: entry.titre });
+   }
+   setCompetences(result);
+ } catch (err) {
+   console.error('Erreur chargement compétences:', err);
+   setCompetences(new Map());
+ }
+ }
+
  async function loadUserInfo(userId: string) {
  try {
    const [{ data: profile }, { data: membre }] = await Promise.all([
@@ -940,6 +1004,106 @@ export default function TableauProgression() {
    </div>
 
  </div>
+
+ {/* ── Maîtrise par compétence ─────────────────────────────── */}
+ {(() => {
+   const allFids = Array.from(competences.keys());
+   const anyOpen = allFids.some(id => competencesOuverts.has(id));
+   const toggleAll = () => {
+     if (anyOpen) setCompetencesOuverts(new Set());
+     else setCompetencesOuverts(new Set(allFids));
+   };
+   const toggleCard = (fid: string) => {
+     setCompetencesOuverts(prev => {
+       const next = new Set(prev);
+       if (next.has(fid)) next.delete(fid);
+       else next.add(fid);
+       return next;
+     });
+   };
+   return (
+     <div className="p-4 sm:p-6 max-w-2xl mx-auto pb-2">
+       <button
+         onClick={competences.size > 0 ? toggleAll : undefined}
+         className="w-full flex items-center gap-2 mb-3 group"
+       >
+         <h2 className="text-sm font-bold text-[#1A1A1A] flex-1 text-left">Maîtrise par compétence</h2>
+         {competences.size > 0 && (
+           <svg
+             className={`w-3.5 h-3.5 text-[#CCCCCC] shrink-0 transition-transform duration-200 ${anyOpen ? 'rotate-180' : ''}`}
+             fill="none" viewBox="0 0 24 24" stroke="currentColor"
+           >
+             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+           </svg>
+         )}
+       </button>
+       {competences.size === 0 ? (
+         <div className="bg-white rounded-xl border border-[#E8E8E8] p-8 text-center">
+           <div className="text-[#CCC] text-sm">Complète des exercices pour voir ta progression par compétence.</div>
+         </div>
+       ) : (
+         <div className="space-y-2">
+           {Array.from(competences.entries()).map(([fid, { C, S, R, B, titre }]) => {
+             const isOpen = competencesOuverts.has(fid);
+             return (
+               <div key={fid} className="bg-white rounded-xl border border-[#E8E8E8] overflow-hidden">
+                 <button
+                   onClick={() => toggleCard(fid)}
+                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#FAFAFA] transition-colors text-left"
+                 >
+                   <span className="text-xs font-semibold text-[#1A1A1A] flex-1 min-w-0 truncate">{titre}</span>
+                   {!isOpen && (
+                     <span className="text-[10px] text-[#AAAAAA] shrink-0 tabular-nums">
+                       C {C}% · S {S}% · R {R}% · B {B}%
+                     </span>
+                   )}
+                   <svg
+                     className={`w-3 h-3 text-[#CCCCCC] shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                     fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                   >
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                   </svg>
+                 </button>
+                 {isOpen && (
+                   <div className="px-4 pb-4 border-t border-[#F3F3F3]">
+                     <div className="space-y-2 mt-3">
+                       {([
+                         { label: 'C', value: C, color: '#3B82F6', bg: '#EFF6FF' },
+                         { label: 'S', value: S, color: '#22C55E', bg: '#F0FDF4' },
+                         { label: 'R', value: R, color: '#A855F7', bg: '#FAF5FF' },
+                         { label: 'B', value: B, color: '#F59E0B', bg: '#FFFBEB' },
+                       ] as { label: string; value: number; color: string; bg: string }[]).map(({ label, value, color, bg }) => (
+                         <div key={label} className="flex items-center gap-2">
+                           <div className="w-4 text-[10px] font-bold shrink-0" style={{ color }}>{label}</div>
+                           <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: bg }}>
+                             <div
+                               className="h-full rounded-full transition-all duration-500"
+                               style={{ width: `${value}%`, backgroundColor: color }}
+                             />
+                           </div>
+                           <div className="w-7 text-right text-[10px] font-medium tabular-nums shrink-0" style={{ color }}>
+                             {value}%
+                           </div>
+                         </div>
+                       ))}
+                     </div>
+                     <div className="mt-3 text-[10px] text-[#BBBBBB] flex flex-wrap gap-x-3 gap-y-0.5">
+                       <span><span style={{ color: '#3B82F6' }}>C</span> = Compréhension</span>
+                       <span><span style={{ color: '#22C55E' }}>S</span> = Savoir</span>
+                       <span><span style={{ color: '#A855F7' }}>R</span> = Rédaction</span>
+                       <span><span style={{ color: '#F59E0B' }}>B</span> = Bilan</span>
+                     </div>
+                   </div>
+                 )}
+               </div>
+             );
+           })}
+         </div>
+       )}
+     </div>
+   );
+ })()}
+
  {/* ── Graphiques ─────────────────────────────────────────────── */}
  <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-8">
 

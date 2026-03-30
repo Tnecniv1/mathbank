@@ -23,43 +23,13 @@ export async function GET() {
     .eq('user_id', user.id)
     .single();
 
-  // ── 3. Membres d'équipe de l'utilisateur ──────────────────────────────
-  const { data: membres } = await service
-    .from('membre_equipe')
-    .select('id')
-    .eq('user_id', user.id);
-
-  if (!membres || membres.length === 0) {
-    return NextResponse.json({
-      feuilles: [],
-      profil: { full_name: profile?.full_name ?? '' },
-    });
-  }
-
-  const membreIds = membres.map((m) => m.id);
-
-  // ── 4. Feuilles autorisées (via membre_equipe.id) ─────────────────────
-  const { data: autorisees } = await service
-    .from('feuilles_autorisees')
-    .select('feuille_id')
-    .in('membre_id', membreIds);
-
-  if (!autorisees || autorisees.length === 0) {
-    return NextResponse.json({
-      feuilles: [],
-      profil: { full_name: profile?.full_name ?? '' },
-    });
-  }
-
-  const feuilleIdsAutorisees = [...new Set(autorisees.map((a) => a.feuille_id))];
-
-  // ── 5. Feuilles actives (en_cours = true) ─────────────────────────────
+  // ── 3. Feuilles actives depuis progression_feuille ────────────────────
   const { data: progressions } = await service
     .from('progression_feuille')
     .select('feuille_id')
     .eq('user_id', user.id)
     .eq('en_cours', true)
-    .in('feuille_id', feuilleIdsAutorisees);
+    .eq('est_termine', false);
 
   const feuillesActives = progressions?.map((p) => p.feuille_id) ?? [];
 
@@ -70,49 +40,79 @@ export async function GET() {
     });
   }
 
-  // ── 6. Infos des nœuds (titre, type, pdf_url) ─────────────────────────
+  // ── 4. Infos des nœuds (titre, type, pdf_url) ─────────────────────────
   const { data: noeuds } = await service
     .from('noeud')
     .select('id, titre, type, pdf_url')
     .in('id', feuillesActives);
 
-  // ── 7. Prochain exercice pour chaque feuille ──────────────────────────
-  const feuilles = await Promise.all(
-    (noeuds ?? []).map(async (noeud) => {
-      // Sessions de l'utilisateur liées à cette feuille
-      const { data: sessions } = await service
-        .from('session')
-        .select('id')
-        .eq('user_id', user.id)
-        .or(`feuille_mecanique_id.eq.${noeud.id},feuille_chaotique_id.eq.${noeud.id}`);
+  // ── 5. Prochain exercice pour chaque feuille + roue en cours (en parallèle) ──
+  const [feuillesList, openRoueResult] = await Promise.all([
+    Promise.all(
+      (noeuds ?? []).map(async (noeud) => {
+        // Sessions de l'utilisateur liées à cette feuille
+        const { data: sessions } = await service
+          .from('session')
+          .select('id')
+          .eq('user_id', user.id)
+          .or(`feuille_mecanique_id.eq.${noeud.id},feuille_chaotique_id.eq.${noeud.id}`);
 
-      let prochain_exercice = 1;
+        let prochain_exercice = 1;
 
-      if (sessions && sessions.length > 0) {
-        const sessionIds = sessions.map((s) => s.id);
+        if (sessions && sessions.length > 0) {
+          const sessionIds = sessions.map((s) => s.id);
 
-        // MAX(ordre) parmi tous les exercices de ces sessions
-        const { data: exercices } = await service
-          .from('exercice')
-          .select('ordre')
-          .in('session_id', sessionIds)
-          .order('ordre', { ascending: false })
-          .limit(1);
+          // MAX(ordre) parmi tous les exercices de ces sessions
+          const { data: exercices } = await service
+            .from('exercice')
+            .select('ordre')
+            .in('session_id', sessionIds)
+            .order('ordre', { ascending: false })
+            .limit(1);
 
-        if (exercices && exercices.length > 0) {
-          prochain_exercice = exercices[0].ordre + 1;
+          if (exercices && exercices.length > 0) {
+            prochain_exercice = exercices[0].ordre + 1;
+          }
         }
-      }
 
-      return {
-        id: noeud.id,
-        titre: noeud.titre,
-        type: noeud.type as 'mecanique' | 'chaotique',
-        pdf_url: noeud.pdf_url ?? null,
-        prochain_exercice,
-      };
-    })
-  );
+        return {
+          id: noeud.id,
+          titre: noeud.titre,
+          type: noeud.type as 'mecanique' | 'chaotique',
+          pdf_url: noeud.pdf_url ?? null,
+          prochain_exercice,
+        };
+      })
+    ),
+    // Roue ouverte pour cet élève (user_id prof, meta.user_id = élève)
+    service
+      .from('grille_observation')
+      .select('id, data')
+      .filter("data->meta->>user_id", 'eq', user.id)
+      .eq('closed', false)
+      .order('created_at', { ascending: false })
+      .limit(1),
+  ]);
+
+  // ── 6. Enrichir les feuilles avec roue_en_cours si applicable ─────────
+  const roue = openRoueResult.data?.[0] ?? null;
+
+  const feuilles = feuillesList.map((f) => {
+    if (!roue) return f;
+    const exo = (roue.data?.exercices ?? []).find(
+      (e: any) => e.feuille_id === f.id
+    );
+    if (!exo) return f;
+    return {
+      ...f,
+      roue_en_cours: {
+        roue_id: roue.id as string,
+        reference: (exo.reference ?? '') as string,
+        validated: (exo.validated ?? null) as Record<string, boolean> | null,
+        type: (exo.type ?? 'mecanique') as 'mecanique' | 'chaotique',
+      },
+    };
+  });
 
   return NextResponse.json({
     feuilles,
