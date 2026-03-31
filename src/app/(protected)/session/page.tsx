@@ -27,6 +27,10 @@ type ExoData = {
   validated: Record<string, boolean | null | undefined>;
 };
 
+type GrilleRow = { id: string; inserted: boolean };
+
+type GrilleCache = { exos: ExoData[]; rows: GrilleRow[] };
+
 // ── Géométrie roue ─────────────────────────────────────────────────────────────
 
 const W = 640, H = 640, CX = 320, CY = 320;
@@ -71,36 +75,25 @@ function RoueReadOnly({ exo }: { exo: ExoData }) {
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block' }}>
         <rect width={W} height={H} fill="#FDFAF6" />
 
-        {/* Fond des secteurs */}
         {WEDGES.map((w, i) => (
-          <path
-            key={w.id}
-            d={wedgePath(w.a1, w.a2, R_IN, R_OUT)}
+          <path key={w.id} d={wedgePath(w.a1, w.a2, R_IN, R_OUT)}
             fill={isMeca ? '#888888' : w.color}
             fillOpacity={i % 2 === 0 ? 0.09 : 0.04}
             stroke={isMeca ? '#AAAAAA' : w.color}
-            strokeWidth="0.8"
-            strokeOpacity="0.25"
-          />
+            strokeWidth="0.8" strokeOpacity="0.25" />
         ))}
 
-        {/* Rayons de séparation */}
         {SECTORS.map((s) => {
           const [x, y] = pt(s.startAngle, R_OUT + 10);
-          return (
-            <line key={s.key} x1={CX} y1={CY} x2={x} y2={y}
-              stroke={isMeca ? '#AAAAAA' : s.color} strokeWidth="2" strokeOpacity="0.45" />
-          );
+          return <line key={s.key} x1={CX} y1={CY} x2={x} y2={y}
+            stroke={isMeca ? '#AAAAAA' : s.color} strokeWidth="2" strokeOpacity="0.45" />;
         })}
 
-        {/* Cercles concentriques pointillés */}
         {([0.35, 0.67, 1] as const).map((f) => (
-          <circle key={f} cx={CX} cy={CY}
-            r={R_IN + (R_OUT - R_IN) * f}
+          <circle key={f} cx={CX} cy={CY} r={R_IN + (R_OUT - R_IN) * f}
             fill="none" stroke="#C8BBA8" strokeWidth="0.5" strokeDasharray="3,5" />
         ))}
 
-        {/* Labels wedges C1–R4 */}
         {WEDGES.map((w) => {
           const [lx, ly] = pt((w.a1 + w.a2) / 2, R_LABEL + 30);
           return (
@@ -114,7 +107,6 @@ function RoueReadOnly({ exo }: { exo: ExoData }) {
           );
         })}
 
-        {/* Labels secteurs */}
         {SECTORS.map((s) => {
           const [lx, ly] = pt(s.startAngle + 60, R_LABEL + 52);
           return (
@@ -128,48 +120,42 @@ function RoueReadOnly({ exo }: { exo: ExoData }) {
           );
         })}
 
-        {/* Croix */}
         {WEDGES.flatMap((w) =>
           (crosses[w.id] ?? []).map((c, idx) => {
             const s = 7;
-            const crossColor = isMeca ? '#777777' : w.color;
+            const col = isMeca ? '#777777' : w.color;
             return (
               <g key={`${w.id}-${idx}`}>
                 <line x1={c.x - s} y1={c.y - s} x2={c.x + s} y2={c.y + s}
-                  stroke={crossColor} strokeWidth="2.6" strokeLinecap="round" />
+                  stroke={col} strokeWidth="2.6" strokeLinecap="round" />
                 <line x1={c.x + s} y1={c.y - s} x2={c.x - s} y2={c.y + s}
-                  stroke={crossColor} strokeWidth="2.6" strokeLinecap="round" />
+                  stroke={col} strokeWidth="2.6" strokeLinecap="round" />
               </g>
             );
           })
         )}
 
-        {/* Badges de validation (chaotique uniquement) */}
         {!isMeca && WEDGES.map((w) => {
           const mid = (w.a1 + w.a2) / 2;
           const [bx, by] = pt(mid, BADGE_R);
           const val = validated[w.id];
           return (
-            <g key={w.id + 'badge'}>
+            <g key={w.id + 'b'}>
               <circle cx={bx} cy={by} r={12}
                 fill={val === true ? w.color : val === null ? '#E8E8E8' : '#FDFAF6'}
-                stroke={w.color}
-                strokeWidth="1.8"
-                strokeOpacity={val === undefined ? 0.35 : 1}
-              />
+                stroke={w.color} strokeWidth="1.8"
+                strokeOpacity={val === undefined ? 0.35 : 1} />
               <text x={bx} y={by + 0.5}
                 textAnchor="middle" dominantBaseline="middle"
                 fontSize={val === null ? '11' : '12'}
                 fill={val === true ? 'white' : val === null ? '#999' : 'transparent'}
-                fontWeight="bold"
-                style={{ userSelect: 'none' }}>
+                fontWeight="bold" style={{ userSelect: 'none' }}>
                 {val === true ? '✓' : '—'}
               </text>
             </g>
           );
         })}
 
-        {/* Centre */}
         {isMeca ? (
           <circle cx={CX} cy={CY} r={R_IN} fill="#F0EDE8" stroke="#C8BBA8" strokeWidth="1.5" />
         ) : (() => {
@@ -178,9 +164,7 @@ function RoueReadOnly({ exo }: { exo: ExoData }) {
             <>
               <circle cx={CX} cy={CY} r={R_IN}
                 fill={b1 === true ? '#3DAF6B' : b1 === null ? '#E8E8E8' : '#FDFAF6'}
-                stroke={b1 === true ? '#3DAF6B' : '#C8BBA8'}
-                strokeWidth="1.5"
-              />
+                stroke={b1 === true ? '#3DAF6B' : '#C8BBA8'} strokeWidth="1.5" />
               <text x={CX} y={CY - 7}
                 textAnchor="middle" dominantBaseline="middle"
                 fontSize="16" fontWeight="bold"
@@ -205,42 +189,76 @@ function RoueReadOnly({ exo }: { exo: ExoData }) {
 
 // ── Détail entraînement ────────────────────────────────────────────────────────
 
-function EntrainementDetail({ exos }: { exos: ExoData[] }) {
-  if (exos.length === 0) {
-    return (
-      <p className="text-xs text-[#AAAAAA] px-1 py-2">
-        Aucune roue enregistrée pour cet entraînement.
-      </p>
-    );
-  }
+function EntrainementDetail({
+  exos,
+  rows,
+  inserting,
+  insertedIds,
+  onInsert,
+}: {
+  exos: ExoData[];
+  rows: GrilleRow[];
+  inserting: Set<string>;
+  insertedIds: Set<string>;
+  onInsert: (grilleId: string) => void;
+}) {
+  const pending  = rows.filter((r) => !r.inserted && !insertedIds.has(r.id));
+  const done     = rows.filter((r) =>  r.inserted ||  insertedIds.has(r.id));
+
   return (
-    <div className="space-y-5 pt-1">
-      {exos.map((exo, i) => (
-        <div key={exo.id ?? i} className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className={`w-5 h-5 rounded-full text-white text-[9px] font-bold
-                             flex items-center justify-center shrink-0 ${
-              exo.type === 'mecanique' ? 'bg-[#185FA5]' : 'bg-[#534AB7]'
-            }`}>
-              {exo.type === 'mecanique' ? 'M' : 'C'}
-            </span>
-            <span className="text-sm font-medium text-[#1A1A1A]">{exo.reference}</span>
-            {exo.feuille_titre && (
-              <span className="text-xs text-[#AAAAAA] truncate">{exo.feuille_titre}</span>
-            )}
-            <span className={`ml-auto px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${
-              exo.reussi === true  ? 'bg-[#EAF3DE] text-[#639922]' :
-              exo.reussi === false ? 'bg-red-50 text-red-500' :
-                                     'bg-[#F3F3F3] text-[#999]'
-            }`}>
-              {exo.reussi === true ? '✓ Réussi' : exo.reussi === false ? '✗ Échoué' : 'En cours'}
-            </span>
-          </div>
-          <div className="max-w-xs">
-            <RoueReadOnly exo={exo} />
-          </div>
-        </div>
+    <div className="space-y-4 pt-1">
+
+      {/* Bouton(s) d'insertion */}
+      {pending.map((r) => (
+        <button
+          key={r.id}
+          onClick={() => onInsert(r.id)}
+          disabled={inserting.has(r.id)}
+          className="w-full py-2 rounded-xl bg-[#185FA5] text-white text-xs font-semibold
+                     hover:bg-[#1450A0] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {inserting.has(r.id) ? 'Insertion en cours…' : 'Insérer les données'}
+        </button>
       ))}
+
+      {/* Confirmation */}
+      {done.length > 0 && insertedIds.size > 0 && (
+        <p className="text-xs text-[#639922] font-semibold">✓ Données insérées</p>
+      )}
+
+      {/* Liste des exercices */}
+      {exos.length === 0 ? (
+        <p className="text-xs text-[#AAAAAA] py-1">
+          Aucune roue enregistrée pour cet entraînement.
+        </p>
+      ) : (
+        exos.map((exo, i) => (
+          <div key={exo.id ?? i} className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className={`w-5 h-5 rounded-full text-white text-[9px] font-bold
+                               flex items-center justify-center shrink-0 ${
+                exo.type === 'mecanique' ? 'bg-[#185FA5]' : 'bg-[#534AB7]'
+              }`}>
+                {exo.type === 'mecanique' ? 'M' : 'C'}
+              </span>
+              <span className="text-sm font-medium text-[#1A1A1A]">{exo.reference}</span>
+              {exo.feuille_titre && (
+                <span className="text-xs text-[#AAAAAA] truncate">{exo.feuille_titre}</span>
+              )}
+              <span className={`ml-auto px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${
+                exo.reussi === true  ? 'bg-[#EAF3DE] text-[#639922]' :
+                exo.reussi === false ? 'bg-red-50 text-red-500' :
+                                       'bg-[#F3F3F3] text-[#999]'
+              }`}>
+                {exo.reussi === true ? '✓ Réussi' : exo.reussi === false ? '✗ Échoué' : 'En cours'}
+              </span>
+            </div>
+            <div className="max-w-xs">
+              <RoueReadOnly exo={exo} />
+            </div>
+          </div>
+        ))
+      )}
     </div>
   );
 }
@@ -252,12 +270,12 @@ export default function SessionPage() {
   const [entrainements, setEntrainements] = useState<Entrainement[]>([]);
   const [loading, setLoading]             = useState(true);
   const [openId, setOpenId]               = useState<string | null>(null);
-  const [grilles, setGrilles]             = useState<Map<string, ExoData[]>>(new Map());
+  const [grilles, setGrilles]             = useState<Map<string, GrilleCache>>(new Map());
   const [loadingGrille, setLoadingGrille] = useState<string | null>(null);
+  const [inserting, setInserting]         = useState<Set<string>>(new Set());
+  const [insertedIds, setInsertedIds]     = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    loadEntrainements();
-  }, []);
+  useEffect(() => { loadEntrainements(); }, []);
 
   async function loadEntrainements() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -284,42 +302,61 @@ export default function SessionPage() {
       }
     }
 
-    setEntrainements(
-      data.map((e: any) => ({ ...e, nb_exercices: counts[e.id] ?? 0 }))
-    );
+    setEntrainements(data.map((e: any) => ({ ...e, nb_exercices: counts[e.id] ?? 0 })));
     setLoading(false);
   }
 
   async function loadGrilles(entrainementId: string) {
     if (grilles.has(entrainementId)) return;
     setLoadingGrille(entrainementId);
+
     const { data } = await supabase
       .from('grille_observation')
-      .select('id, data, closed, created_at')
+      .select('id, data, closed, inserted, created_at')
       .eq('entrainement_id', entrainementId)
       .order('created_at', { ascending: true });
 
     const exos: ExoData[] = (data ?? []).flatMap(
       (g: any) => (g.data?.exercices ?? []) as ExoData[]
     );
-    setGrilles((prev) => new Map(prev).set(entrainementId, exos));
+    const rows: GrilleRow[] = (data ?? []).map((g: any) => ({
+      id:       g.id,
+      inserted: g.inserted ?? false,
+    }));
+
+    setGrilles((prev) => new Map(prev).set(entrainementId, { exos, rows }));
     setLoadingGrille(null);
   }
 
   function toggleOpen(id: string) {
-    if (openId === id) {
-      setOpenId(null);
-    } else {
-      setOpenId(id);
-      loadGrilles(id);
+    if (openId === id) { setOpenId(null); return; }
+    setOpenId(id);
+    loadGrilles(id);
+  }
+
+  async function handleInserer(grilleId: string) {
+    setInserting((prev) => new Set(prev).add(grilleId));
+    try {
+      const res = await fetch('/api/session/inserer', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ grille_id: grilleId }),
+      });
+      if (res.ok) {
+        setInsertedIds((prev) => new Set(prev).add(grilleId));
+      } else {
+        const err = await res.json();
+        console.error('[inserer] error:', err);
+      }
+    } catch (err) {
+      console.error('[inserer] fetch error:', err);
+    } finally {
+      setInserting((prev) => { const s = new Set(prev); s.delete(grilleId); return s; });
     }
   }
 
   const today = new Date().toLocaleDateString('fr-FR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
 
   return (
@@ -348,9 +385,7 @@ export default function SessionPage() {
               </svg>
             </div>
             <div className="font-semibold text-sm text-[#1A1A1A]">Autonome</div>
-            <div className="text-xs text-[#AAAAAA] mt-0.5 leading-snug">
-              Remplis ta grille toi-même
-            </div>
+            <div className="text-xs text-[#AAAAAA] mt-0.5 leading-snug">Remplis ta grille toi-même</div>
           </button>
 
           <button
@@ -367,9 +402,7 @@ export default function SessionPage() {
               </svg>
             </div>
             <div className="font-semibold text-sm text-[#1A1A1A]">Assisté</div>
-            <div className="text-xs text-[#AAAAAA] mt-0.5 leading-snug">
-              Travaille avec le coach IA
-            </div>
+            <div className="text-xs text-[#AAAAAA] mt-0.5 leading-snug">Travaille avec le coach IA</div>
           </button>
         </div>
 
@@ -390,9 +423,7 @@ export default function SessionPage() {
                 const isEnCours = e.statut === 'en_cours';
                 const isOpen    = openId === e.id;
                 const date = new Date(e.created_at).toLocaleDateString('fr-FR', {
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
+                  day: 'numeric', month: 'long', year: 'numeric',
                 });
 
                 if (isEnCours) {
@@ -408,9 +439,7 @@ export default function SessionPage() {
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-medium text-[#1A1A1A]">{date}</span>
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold
-                                            bg-amber-50 text-amber-600">
-                              En cours
-                            </span>
+                                            bg-amber-50 text-amber-600">En cours</span>
                           </div>
                           <div className="text-xs text-[#AAAAAA] mt-0.5 flex items-center gap-2">
                             <span className="capitalize">{e.mode}</span>
@@ -420,20 +449,19 @@ export default function SessionPage() {
                         </div>
                         <svg className="w-4 h-4 text-[#CCCCCC] shrink-0"
                              fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M9 5l7 7-7 7" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
                       </div>
                     </button>
                   );
                 }
 
+                const cache = grilles.get(e.id);
+
                 return (
-                  <div key={e.id}
-                       className={`bg-white rounded-xl border transition-all ${
-                         isOpen ? 'border-[#185FA5] shadow-sm' : 'border-[#E8E8E8]'
-                       }`}>
-                    {/* Card header */}
+                  <div key={e.id} className={`bg-white rounded-xl border transition-all ${
+                    isOpen ? 'border-[#185FA5] shadow-sm' : 'border-[#E8E8E8]'
+                  }`}>
                     <button
                       onClick={() => toggleOpen(e.id)}
                       className="w-full p-4 text-left hover:bg-[#FAFAFA] transition-colors rounded-xl"
@@ -443,9 +471,7 @@ export default function SessionPage() {
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-medium text-[#1A1A1A]">{date}</span>
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold
-                                            bg-[#EAF3DE] text-[#639922]">
-                              Bouclé
-                            </span>
+                                            bg-[#EAF3DE] text-[#639922]">Bouclé</span>
                           </div>
                           <div className="text-xs text-[#AAAAAA] mt-0.5 flex items-center gap-2">
                             <span className="capitalize">{e.mode}</span>
@@ -457,19 +483,23 @@ export default function SessionPage() {
                                isOpen ? 'rotate-90' : ''
                              }`}
                              fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M9 5l7 7-7 7" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
                       </div>
                     </button>
 
-                    {/* Panneau déplié */}
                     {isOpen && (
                       <div className="px-4 pb-4 border-t border-[#F0F0F0]">
                         {loadingGrille === e.id ? (
                           <p className="text-xs text-[#AAAAAA] py-3">Chargement des roues…</p>
                         ) : (
-                          <EntrainementDetail exos={grilles.get(e.id) ?? []} />
+                          <EntrainementDetail
+                            exos={cache?.exos ?? []}
+                            rows={cache?.rows ?? []}
+                            inserting={inserting}
+                            insertedIds={insertedIds}
+                            onInsert={handleInserer}
+                          />
                         )}
                       </div>
                     )}
