@@ -20,15 +20,23 @@ export default function AuthPage() {
  const [loading, setLoading] = useState(false);
  const [error, setError] = useState<string | null>(null);
 
- // Connexion — supporte pseudo ou email
+ // Connexion — supporte email ou pseudo
  async function handleLogin(e: React.FormEvent) {
   e.preventDefault();
   setError(null);
   setLoading(true);
   try {
-   const email = loginIdentifier.includes("@")
-    ? loginIdentifier
-    : `${loginIdentifier}@mathbank.internal`;
+   let email: string;
+   if (loginIdentifier.includes("@")) {
+    email = loginIdentifier;
+   } else {
+    const { data: found, error: rpcError } = await supabase.rpc("get_email_by_pseudo", {
+     pseudo: loginIdentifier,
+    });
+    if (rpcError) throw rpcError;
+    if (!found) { setError("Pseudo introuvable"); setLoading(false); return; }
+    email = found as string;
+   }
    const { error } = await supabase.auth.signInWithPassword({ email, password: loginPassword });
    if (error) throw error;
    router.push("/");
@@ -107,7 +115,7 @@ export default function AuthPage() {
      <form onSubmit={handleLogin} className="space-y-4">
       <div>
        <label htmlFor="loginIdentifier" className="block text-sm font-medium text-ink mb-1">
-        Pseudo ou Email
+        Email ou pseudo
        </label>
        <input
         id="loginIdentifier"
@@ -115,7 +123,7 @@ export default function AuthPage() {
         required
         value={loginIdentifier}
         onChange={(e) => setLoginIdentifier(e.target.value)}
-        placeholder="monpseudo"
+        placeholder="votre@email.com ou Max_"
         className={inputCls}
        />
       </div>
