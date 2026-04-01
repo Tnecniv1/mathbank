@@ -9,6 +9,35 @@ const service = createServiceClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+// ── Score pondéré C/S/R par exercice ──────────────────────────────────────────
+
+type CriteriaScores = Record<string, boolean | null>;
+
+function calculerScore(scores: CriteriaScores): number {
+  const moyenne = (vals: (boolean | null)[]) => {
+    const actifs = vals.filter((v) => v !== null) as boolean[];
+    if (actifs.length === 0) return null;
+    return actifs.filter(Boolean).length / actifs.length;
+  };
+
+  const C = moyenne([scores.c1, scores.c2, scores.c3, scores.c4]);
+  const S = moyenne([scores.s1, scores.s2, scores.s3, scores.s4]);
+  const R = moyenne([scores.r1, scores.r2, scores.r3, scores.r4]);
+
+  const vecteurs = [
+    { val: C, poids: 50 },
+    { val: S, poids: 25 },
+    { val: R, poids: 25 },
+  ].filter((v) => v.val !== null) as { val: number; poids: number }[];
+
+  if (vecteurs.length === 0) return 0;
+
+  const totalPoids = vecteurs.reduce((s, v) => s + v.poids, 0);
+  return Math.round(
+    vecteurs.reduce((s, v) => s + v.val * v.poids, 0) / totalPoids * 100
+  );
+}
+
 // ── Durée texte → minutes ──────────────────────────────────────────────────────
 
 function parseDuree(str: string): number {
@@ -149,19 +178,35 @@ export async function POST(req: Request) {
         if (!allGrilles) return;
 
         for (const feuilleId of feuilleIds) {
-          let total = 0, reussis = 0;
+          const scores: number[] = [];
+          let reussis = 0;
+
           for (const g of allGrilles) {
             const exos = (g.data?.exercices ?? []).filter((e: any) => e.feuille_id === feuilleId);
-            total   += exos.length;
-            reussis += exos.filter((e: any) => e.reussi === true).length;
+            for (const exo of exos) {
+              if (exo.type === 'chaotique') {
+                const v = exo.validated ?? {};
+                scores.push(calculerScore({
+                  c1: v.C1 ?? null, c2: v.C2 ?? null, c3: v.C3 ?? null, c4: v.C4 ?? null,
+                  s1: v.S1 ?? null, s2: v.S2 ?? null, s3: v.S3 ?? null, s4: v.S4 ?? null,
+                  r1: v.R1 ?? null, r2: v.R2 ?? null, r3: v.R3 ?? null, r4: v.R4 ?? null,
+                }));
+              } else {
+                scores.push(exo.reussi === true ? 100 : 0);
+              }
+              if (exo.reussi === true) reussis++;
+            }
           }
-          if (total === 0) continue;
+
+          if (scores.length === 0) continue;
+
+          const score_moyen = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
 
           await service
             .from('progression_feuille')
             .update({
               nb_exercices_valides: reussis,
-              score_moyen:          Math.round((reussis / total) * 100),
+              score_moyen,
             })
             .eq('user_id', grille.user_id)
             .eq('feuille_id', feuilleId);
