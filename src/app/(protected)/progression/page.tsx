@@ -2,8 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import GridObjectifs, { GridData } from '@/components/GridObjectifs';
+import { LineChart, Line, BarChart, Bar, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // Types
 type Niveau = {
@@ -51,33 +50,16 @@ type ConcentrationData = {
  nbSessions: number;
 };
 
-type ScoreParPaquet = {
+type TrancheDonnees = {
  ordre: number;
- label: string;      // ex : "1-30", "31-60"
- scoreMoyen: number;
- nbQuestions: number;
- dateDebut: string;
- dateFin: string;
+ label: string;      // ex : "1-5", "6-10"
+ taux: number | null;
+ score: number | null;
+ erreurs: number;
 };
 
 const MAX_FEUILLES_PAR_LIGNE = 20;
 const COLONNES_AFFICHEES = 20;
-
-// Score brut par question : NULL = non évalué (exclu du calcul), 0 = évalué nul
-const calcScore = (comp: number | null, sav: number | null, red: number | null, corr: number): number => {
- // Mécanique (VRAI/FAUX) : comp et red sont NULL, savoir = 0 ou 100
- // On retourne 130 pour VRAI et 0 pour FAUX : après /1.3 = 0 ou 100
- if (comp === null && red === null) {
-   return sav !== null && sav > 0 ? 130 : 0;
- }
- // Chaotique : formule pondérée
- let sum = 0; let poids = 0;
- if (comp !== null) { sum += 50 * comp; poids += 50; }
- if (sav  !== null) { sum += 25 * sav;  poids += 25; }
- if (red  !== null) { sum += 25 * red;  poids += 25; }
- if (poids === 0) return 0;
- return (sum / poids) * (1 + 0.3 * corr);
-};
 
 export default function TableauProgression() {
  const [niveaux, setNiveaux] = useState<Niveau[]>([]);
@@ -88,17 +70,12 @@ export default function TableauProgression() {
  const [loading, setLoading] = useState(true);
  const [error, setError] = useState<string | null>(null);
  const [fullscreenBlock, setFullscreenBlock] = useState<string | null>(null);
- const [scoreType, setScoreType] = useState<'mecanique' | 'chaotique' | 'global'>('mecanique');
- const [scoresParSessionMeca, setScoresParSessionMeca] = useState<ScoreParPaquet[]>([]);
- const [scoresParSessionChaos, setScoresParSessionChaos] = useState<ScoreParPaquet[]>([]);
- const [scoresGlobaux, setScoresGlobaux] = useState<{ date: string; scoreCumulatif: number }[]>([]);
- const [gridObjectifs, setGridObjectifs] = useState<GridData[]>([]);
+ const [scoreGrilleData, setScoreGrilleData] = useState<TrancheDonnees[]>([]);
+ const [scoreGrilleView, setScoreGrilleView] = useState<'taux' | 'score' | 'erreurs'>('taux');
  const [chartRenderKey, setChartRenderKey] = useState(0);
  const [userName, setUserName] = useState<string | null>(null);
  const [userCreatedAt, setUserCreatedAt] = useState<string | null>(null);
  const [sujetsOuverts, setSujetsOuverts] = useState<Set<string>>(new Set());
- const [competences, setCompetences] = useState<Map<string, { C: number; S: number; R: number; B: number; titre: string }>>(new Map());
- const [competencesOuverts, setCompetencesOuverts] = useState<Set<string>>(new Set());
 
  useEffect(() => {
  loadNiveaux();
@@ -167,10 +144,13 @@ export default function TableauProgression() {
  processData(rawData);
  }
 
- await loadScoresLocauxAvecType(niveauId, userId);
+ const { data: arbreData } = await supabase.rpc('get_arbre_noeud', { p_racine_id: niveauId });
+ const feuilleIds = (arbreData ?? [])
+   .filter((n: any) => n.type === 'mecanique' || n.type === 'chaotique')
+   .map((n: any) => n.id as string);
+
+ await loadScoresGrille(userId, feuilleIds);
  await loadConcentrationData(niveauId, userId);
- await loadGridObjectifs(userId);
- await fetchCompetences(userId);
 
  setLoading(false);
  } catch (err: any) {
@@ -251,166 +231,82 @@ export default function TableauProgression() {
 
 
 
- async function loadScoresLocauxAvecType(niveauId: string, userId: string) {
+ async function loadScoresGrille(userId: string, feuilleIds: string[]) {
  try {
- const { data: arbreDataScores } = await supabase
- .rpc('get_arbre_noeud', { p_racine_id: niveauId });
+   const { data: grilles } = await supabase
+     .from('grille_observation')
+     .select('data, updated_at')
+     .eq('user_id', userId)
+     .order('updated_at', { ascending: true });
 
- const feuillesData = (arbreDataScores || [])
- .filter((n: any) => n.type === 'mecanique' || n.type === 'chaotique');
+   if (!grilles || grilles.length === 0) {
+     setScoreGrilleData([]);
+     return;
+   }
 
- if (!feuillesData || feuillesData.length === 0) {
- setScoresParSessionMeca([]);
- setScoresParSessionChaos([]);
- return;
- }
+   const CRITERES_KEYS = ['C1','C2','C3','C4','S1','S2','S3','S4','R1','R2','R3','R4'];
+   const TAILLE_TRANCHE = 5;
 
- const feuilleIds = feuillesData.map((f: any) => f.id);
- const feuilleIdsStr = feuilleIds.join(',');
+   const allExos: any[] = [];
+   for (const grille of grilles) {
+     const exercices = grille.data?.exercices ?? [];
+     for (const exo of exercices) {
+       if (feuilleIds.length === 0 || feuilleIds.includes(exo.feuille_id)) {
+         allExos.push(exo);
+       }
+     }
+   }
 
- // ── Archives : score_local + session_entrainement ──────────────────────
- const { data: scoresData } = await supabase
- .from('score_local')
- .select(`
- comprehension,
- savoir,
- redaction,
- correction,
- created_at,
- session_entrainement!inner(
- feuille_mecanique_id,
- feuille_chaotique_id,
- date_session,
- heure_session
- )
- `)
- .eq('session_entrainement.user_id', userId)
- .or(`feuille_mecanique_id.in.(${feuilleIdsStr}),feuille_chaotique_id.in.(${feuilleIdsStr})`, { foreignTable: 'session_entrainement' });
+   const tranches: TrancheDonnees[] = [];
+   for (let i = 0; i < allExos.length; i += TAILLE_TRANCHE) {
+     const chunk = allExos.slice(i, i + TAILLE_TRANCHE);
+     if (chunk.length === 0) break;
 
- // ── Nouvelles données : exercice + score_exercice + session ────────────
- const { data: newExercicesData } = await supabase
- .from('exercice')
- .select(`
- type,
- created_at,
- session!inner(
- user_id,
- date_session,
- feuille_mecanique_id,
- feuille_chaotique_id
- ),
- score_exercice(
- reussi,
- c1, c2, c3, c4,
- s1, s2, s3, s4,
- r1, r2, r3, r4,
- correction
- )
- `)
- .eq('session.user_id', userId)
- .or(`feuille_mecanique_id.in.(${feuilleIdsStr}),feuille_chaotique_id.in.(${feuilleIdsStr})`, { foreignTable: 'session' });
-
- // ── Construire la liste unifiée { score, date, isMecanique } ──────────
- const allMeca:  { score: number; date: string; ts: number }[] = [];
- const allChaos: { score: number; date: string; ts: number }[] = [];
-
- // Archives
- (scoresData || []).forEach((s: any) => {
- const isMecanique = s.session_entrainement.feuille_mecanique_id !== null;
- const rawScore    = calcScore(s.comprehension, s.savoir, s.redaction, s.correction);
- const scoreNorm   = rawScore / 1.3;
- const date        = s.session_entrainement.date_session;
- const ts          = new Date(`${date}T${s.session_entrainement.heure_session || '00:00:00'}`).getTime();
- if (isMecanique) allMeca.push({ score: scoreNorm, date, ts });
- else             allChaos.push({ score: scoreNorm, date, ts });
- });
-
- // Nouvelles données
- (newExercicesData || []).forEach((ex: any) => {
- const isMecanique = ex.type === 'mecanique';
- const score_ex    = ex.score_exercice?.[0];
- if (!score_ex) return;
-
- let scoreNorm: number;
- if (isMecanique) {
-   scoreNorm = score_ex.reussi ? 100 : 0;
- } else {
-   const comp   = ([score_ex.c1, score_ex.c2, score_ex.c3, score_ex.c4].filter(Boolean).length / 4) * 100;
-   const savoir = ([score_ex.s1, score_ex.s2, score_ex.s3, score_ex.s4].filter(Boolean).length / 4) * 100;
-   const red    = ([score_ex.r1, score_ex.r2, score_ex.r3, score_ex.r4].filter(Boolean).length / 4) * 100;
-   const raw    = (50 * comp + 25 * savoir + 25 * red) / 100 * (1 + (score_ex.correction ? 0.3 : 0));
-   scoreNorm    = raw / 1.3;
- }
-
- const date = ex.session.date_session;
- const ts   = new Date(ex.created_at).getTime();
- if (isMecanique) allMeca.push({ score: scoreNorm, date, ts });
- else             allChaos.push({ score: scoreNorm, date, ts });
- });
-
- // Trier chaque liste chronologiquement
- allMeca.sort((a, b)  => a.ts - b.ts);
- allChaos.sort((a, b) => a.ts - b.ts);
-
- if (allMeca.length === 0 && allChaos.length === 0) {
- setScoresParSessionMeca([]);
- setScoresParSessionChaos([]);
- setScoresGlobaux([]);
- return;
- }
-
- // Regrouper en paquets de 30 questions consécutives
- const TAILLE_PAQUET = 6;
-
- function groupEnPaquets(questions: { score: number; date: string }[]): ScoreParPaquet[] {
-   const paquets: ScoreParPaquet[] = [];
-   for (let i = 0; i < questions.length; i += TAILLE_PAQUET) {
-     const chunk = questions.slice(i, i + TAILLE_PAQUET);
      const debut = i + 1;
      const fin   = i + chunk.length;
-     const scoreMoyen = chunk.reduce((acc, q) => acc + q.score, 0) / chunk.length;
-     paquets.push({
-       ordre:      paquets.length + 1,
-       label:      `${debut}-${fin}`,
-       scoreMoyen,
-       nbQuestions: chunk.length,
-       dateDebut:  new Date(chunk[0].date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
-       dateFin:    new Date(chunk[chunk.length - 1].date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+     let totalTrue = 0;
+     let totalEvalues = 0;
+     let totalScoreExo = 0;
+     let hasAnyScore = false;
+     let totalCroix = 0;
+
+     for (const exo of chunk) {
+       const validated = exo.validated ?? {};
+       const crosses   = exo.crosses   ?? {};
+
+       let exoTrue    = 0;
+       let exoEvalues = 0;
+       for (const k of CRITERES_KEYS) {
+         const val = validated[k];
+         if (val === true || val === null) {
+           exoEvalues++;
+           if (val === true) exoTrue++;
+         }
+       }
+       if (exoEvalues > 0) {
+         hasAnyScore = true;
+         totalTrue    += exoTrue;
+         totalEvalues += exoEvalues;
+         totalScoreExo += (exoTrue / exoEvalues) * 100;
+       }
+       for (const k of Object.keys(crosses)) {
+         if (Array.isArray(crosses[k])) totalCroix += crosses[k].length;
+       }
+     }
+
+     tranches.push({
+       ordre:   tranches.length + 1,
+       label:   `${debut}-${fin}`,
+       taux:    totalEvalues > 0 ? (totalTrue / totalEvalues) * 100 : null,
+       score:   hasAnyScore ? totalScoreExo : null,
+       erreurs: totalCroix,
      });
    }
-   return paquets;
- }
 
- setScoresParSessionMeca(groupEnPaquets(allMeca));
- setScoresParSessionChaos(groupEnPaquets(allChaos));
-
- // Score global cumulatif pondéré (25% méca, 75% chaos)
- // Fusionner et trier par ts
- const allEntries = [
- ...allMeca.map(e  => ({ ...e, isMecanique: true  })),
- ...allChaos.map(e => ({ ...e, isMecanique: false })),
- ].sort((a, b) => a.ts - b.ts);
-
- const scoresGlobauxMap = new Map<string, number>();
- let cumulatifMeca  = 0;
- let cumulatifChaos = 0;
-
- allEntries.forEach(entry => {
- const ratio = entry.score / 100; // normalise [0,1]
- if (entry.isMecanique) cumulatifMeca  += ratio;
- else                   cumulatifChaos += ratio;
- scoresGlobauxMap.set(entry.date, 100 * (0.25 * cumulatifMeca + 0.75 * cumulatifChaos));
- });
-
- const scoresGlobauxArray = Array.from(scoresGlobauxMap.entries())
- .map(([date, score]) => ({ date, scoreCumulatif: score }))
- .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
- setScoresGlobaux(scoresGlobauxArray);
+   setScoreGrilleData(tranches);
  } catch (err: any) {
- console.error('Erreur chargement scores:', err);
- setScoresParSessionMeca([]);
- setScoresParSessionChaos([]);
+   console.error('Erreur chargement scores grille:', err);
+   setScoreGrilleData([]);
  }
  }
 
@@ -448,6 +344,9 @@ export default function TableauProgression() {
 
  const dateMin = date21JoursAvant.toISOString().split('T')[0];
 
+ console.log('[concentration] userId utilisé:', userId);
+ console.log('[concentration] dateMin:', dateMin);
+
  // Archives
  const { data: sessions } = await supabase
  .from('session_entrainement')
@@ -463,6 +362,9 @@ export default function TableauProgression() {
  .eq('user_id', userId)
  .gte('date_session', dateMin)
  .order('date_session', { ascending: true });
+
+ console.log('[concentration] sessions (session_entrainement):', sessions);
+ console.log('[concentration] newSessions (session):', newSessions);
 
  const aujourd_hui = new Date();
  const concentrationMap = new Map<string, { duree: number; nbSessions: number }>();
@@ -504,6 +406,10 @@ export default function TableauProgression() {
  nbSessions: data.nbSessions
  });
  }
+
+ console.log('[concentration] concentrationMap final:', Object.fromEntries(
+   Array.from(concentrationMap.entries()).filter(([, v]) => v.duree > 0 || v.nbSessions > 0)
+ ));
 
  setConcentrationData(concentrationArray);
 
@@ -553,92 +459,6 @@ export default function TableauProgression() {
  }
  }
 
- async function loadGridObjectifs(userId: string) {
- try {
-   // Trouver l'équipe du membre
-   const { data: membreData } = await supabase
-     .from('membre_equipe')
-     .select('equipe_id')
-     .eq('user_id', userId)
-     .limit(1)
-     .single();
-
-   if (!membreData) {
-     setGridObjectifs([]);
-     return;
-   }
-
-   const { data: gridData } = await supabase.rpc('get_objectifs_grid_data', {
-     p_equipe_id: membreData.equipe_id,
-     p_membre_user_id: userId,
-   });
-   setGridObjectifs(gridData || []);
- } catch (err) {
-   console.error('Erreur chargement grille objectifs:', err);
-   setGridObjectifs([]);
- }
- }
-
- async function fetchCompetences(userId: string) {
- try {
-   const { data: grilles } = await supabase
-     .from('grille_observation')
-     .select('data')
-     .eq('user_id', userId)
-     .eq('closed', true);
-
-   if (!grilles || grilles.length === 0) {
-     setCompetences(new Map());
-     return;
-   }
-
-   const feuilleRaw = new Map<string, { C: number[]; S: number[]; R: number[]; B: number[]; titre: string }>();
-
-   for (const g of grilles) {
-     const exercices = (g.data?.exercices ?? []) as any[];
-     for (const exo of exercices) {
-       if (exo.type !== 'chaotique' || !exo.validated) continue;
-       const fid = exo.feuille_id as string;
-       if (!fid) continue;
-       if (!feuilleRaw.has(fid)) feuilleRaw.set(fid, { C: [], S: [], R: [], B: [], titre: fid });
-       const entry = feuilleRaw.get(fid)!;
-       const v = exo.validated as Record<string, boolean>;
-       const toScore = (keys: string[]) => {
-         const vals = keys.map(k => v[k]).filter(x => x != null);
-         return vals.length > 0 ? (vals.filter(Boolean).length / vals.length) * 100 : null;
-       };
-       const C = toScore(['C1', 'C2', 'C3', 'C4']);
-       const S = toScore(['S1', 'S2', 'S3', 'S4']);
-       const R = toScore(['R1', 'R2', 'R3', 'R4']);
-       const B = toScore(['B1']);
-       if (C != null) entry.C.push(C);
-       if (S != null) entry.S.push(S);
-       if (R != null) entry.R.push(R);
-       if (B != null) entry.B.push(B);
-     }
-   }
-
-   const feuilleIds = Array.from(feuilleRaw.keys());
-   if (feuilleIds.length > 0) {
-     const { data: noeuds } = await supabase.from('noeud').select('id, titre').in('id', feuilleIds);
-     for (const n of noeuds ?? []) {
-       const entry = feuilleRaw.get(n.id);
-       if (entry) entry.titre = n.titre;
-     }
-   }
-
-   const avg = (arr: number[]) => arr.length > 0 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
-   const result = new Map<string, { C: number; S: number; R: number; B: number; titre: string }>();
-   for (const [fid, entry] of feuilleRaw.entries()) {
-     if (entry.C.length === 0 && entry.S.length === 0 && entry.R.length === 0 && entry.B.length === 0) continue;
-     result.set(fid, { C: avg(entry.C), S: avg(entry.S), R: avg(entry.R), B: avg(entry.B), titre: entry.titre });
-   }
-   setCompetences(result);
- } catch (err) {
-   console.error('Erreur chargement compétences:', err);
-   setCompetences(new Map());
- }
- }
 
  async function loadUserInfo(userId: string) {
  try {
@@ -834,14 +654,6 @@ export default function TableauProgression() {
      ? concentrationDataAll
      : concentrationData;
 
- // Scores paquets : N derniers en vue normale, tous en plein écran
- const PAQUETS_NORMAUX = 7;
- const scoresDisplayMeca  = fullscreenBlock === 'scores'
-   ? scoresParSessionMeca
-   : scoresParSessionMeca.slice(-PAQUETS_NORMAUX);
- const scoresDisplayChaos = fullscreenBlock === 'scores'
-   ? scoresParSessionChaos
-   : scoresParSessionChaos.slice(-PAQUETS_NORMAUX);
 
  const toggleFullscreen = (blockId: string) => {
  setFullscreenBlock(fullscreenBlock === blockId ? null : blockId);
@@ -1005,377 +817,83 @@ export default function TableauProgression() {
 
  </div>
 
- {/* ── Maîtrise par compétence ─────────────────────────────── */}
- {(() => {
-   const allFids = Array.from(competences.keys());
-   const anyOpen = allFids.some(id => competencesOuverts.has(id));
-   const toggleAll = () => {
-     if (anyOpen) setCompetencesOuverts(new Set());
-     else setCompetencesOuverts(new Set(allFids));
-   };
-   const toggleCard = (fid: string) => {
-     setCompetencesOuverts(prev => {
-       const next = new Set(prev);
-       if (next.has(fid)) next.delete(fid);
-       else next.add(fid);
-       return next;
-     });
-   };
-   return (
-     <div className="p-4 sm:p-6 max-w-2xl mx-auto pb-2">
-       <button
-         onClick={competences.size > 0 ? toggleAll : undefined}
-         className="w-full flex items-center gap-2 mb-3 group"
-       >
-         <h2 className="text-sm font-bold text-[#1A1A1A] flex-1 text-left">Maîtrise par compétence</h2>
-         {competences.size > 0 && (
-           <svg
-             className={`w-3.5 h-3.5 text-[#CCCCCC] shrink-0 transition-transform duration-200 ${anyOpen ? 'rotate-180' : ''}`}
-             fill="none" viewBox="0 0 24 24" stroke="currentColor"
-           >
-             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-           </svg>
-         )}
-       </button>
-       {competences.size === 0 ? (
-         <div className="bg-white rounded-xl border border-[#E8E8E8] p-8 text-center">
-           <div className="text-[#CCC] text-sm">Complète des exercices pour voir ta progression par compétence.</div>
-         </div>
-       ) : (
-         <div className="space-y-2">
-           {Array.from(competences.entries()).map(([fid, { C, S, R, B, titre }]) => {
-             const isOpen = competencesOuverts.has(fid);
-             return (
-               <div key={fid} className="bg-white rounded-xl border border-[#E8E8E8] overflow-hidden">
-                 <button
-                   onClick={() => toggleCard(fid)}
-                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#FAFAFA] transition-colors text-left"
-                 >
-                   <span className="text-xs font-semibold text-[#1A1A1A] flex-1 min-w-0 truncate">{titre}</span>
-                   {!isOpen && (
-                     <span className="text-[10px] text-[#AAAAAA] shrink-0 tabular-nums">
-                       C {C}% · S {S}% · R {R}% · B {B}%
-                     </span>
-                   )}
-                   <svg
-                     className={`w-3 h-3 text-[#CCCCCC] shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
-                     fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                   >
-                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                   </svg>
-                 </button>
-                 {isOpen && (
-                   <div className="px-4 pb-4 border-t border-[#F3F3F3]">
-                     <div className="space-y-2 mt-3">
-                       {([
-                         { label: 'C', value: C, color: '#3B82F6', bg: '#EFF6FF' },
-                         { label: 'S', value: S, color: '#22C55E', bg: '#F0FDF4' },
-                         { label: 'R', value: R, color: '#A855F7', bg: '#FAF5FF' },
-                         { label: 'B', value: B, color: '#F59E0B', bg: '#FFFBEB' },
-                       ] as { label: string; value: number; color: string; bg: string }[]).map(({ label, value, color, bg }) => (
-                         <div key={label} className="flex items-center gap-2">
-                           <div className="w-4 text-[10px] font-bold shrink-0" style={{ color }}>{label}</div>
-                           <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: bg }}>
-                             <div
-                               className="h-full rounded-full transition-all duration-500"
-                               style={{ width: `${value}%`, backgroundColor: color }}
-                             />
-                           </div>
-                           <div className="w-7 text-right text-[10px] font-medium tabular-nums shrink-0" style={{ color }}>
-                             {value}%
-                           </div>
-                         </div>
-                       ))}
-                     </div>
-                     <div className="mt-3 text-[10px] text-[#BBBBBB] flex flex-wrap gap-x-3 gap-y-0.5">
-                       <span><span style={{ color: '#3B82F6' }}>C</span> = Compréhension</span>
-                       <span><span style={{ color: '#22C55E' }}>S</span> = Savoir</span>
-                       <span><span style={{ color: '#A855F7' }}>R</span> = Rédaction</span>
-                       <span><span style={{ color: '#F59E0B' }}>B</span> = Bilan</span>
-                     </div>
-                   </div>
-                 )}
-               </div>
-             );
-           })}
-         </div>
-       )}
-     </div>
-   );
- })()}
 
  {/* ── Graphiques ─────────────────────────────────────────────── */}
- <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-8">
+ <div className="max-w-2xl mx-auto px-4 sm:px-6 pb-8">
 
- <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
- {/* Graphique des scores avec toggle */}
+ <div className="grid grid-cols-2 gap-6">
+ {/* Graphique des scores grille */}
  <div className={`bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden aspect-square flex flex-col ${fullscreenBlock === 'scores' ? 'fixed inset-4 z-50 aspect-auto h-full' : ''}`}>
  <div className="px-3 py-2 flex items-center justify-between">
- <div>
- <h2 className="text-sm font-bold text-ink">Progresser en mathématique</h2>
- <p className="text-purple-100 text-xs">
- {scoreType === 'mecanique'
- ? `${scoresDisplayMeca.length}${fullscreenBlock !== 'scores' && scoresParSessionMeca.length > PAQUETS_NORMAUX ? `/${scoresParSessionMeca.length}` : ''} paquet${scoresDisplayMeca.length > 1 ? 's' : ''}`
- : `${scoresDisplayChaos.length}${fullscreenBlock !== 'scores' && scoresParSessionChaos.length > PAQUETS_NORMAUX ? `/${scoresParSessionChaos.length}` : ''} paquet${scoresDisplayChaos.length > 1 ? 's' : ''}`
- }
- </p>
- </div>
- <div className="flex items-center gap-2">
- {/* Toggle Mécanique/Chaotique */}
- <div className="flex bg-cream-50/20 rounded-lg p-0.5">
- <button
- onClick={() => setScoreType('mecanique')}
- className={`px-2 py-1 text-xs font-medium rounded transition ${
- scoreType === 'mecanique'
- ? 'bg-cream-50 text-accent'
- : 'text-ink hover:bg-cream-100/10'
- }`}
- >
- M
- </button>
- <button
- onClick={() => setScoreType('chaotique')}
- className={`px-2 py-1 text-xs font-medium rounded transition ${
- scoreType === 'chaotique'
- ? 'bg-cream-50 text-purple-700'
- : 'text-ink hover:bg-cream-100/10'
- }`}
- >
- C
- </button>
- <button
- onClick={() => setScoreType('global')}
- className={`px-2 py-1 text-xs font-medium rounded transition ${
- scoreType === 'global'
- ? 'bg-cream-50 text-ink'
- : 'text-ink hover:bg-cream-100/10'
- }`}
- >
- G
- </button>
+   <div>
+     <h2 className="text-sm font-bold text-ink">Progresser en mathématique</h2>
+     <p className="text-ink-light text-xs">{scoreGrilleData.length} tranche{scoreGrilleData.length !== 1 ? 's' : ''}</p>
+   </div>
+   <div className="flex items-center gap-2">
+     <div className="flex bg-[#F0F0F0] rounded-lg p-0.5">
+       {(['taux', 'score', 'erreurs'] as const).map(v => (
+         <button
+           key={v}
+           onClick={() => setScoreGrilleView(v)}
+           className={`px-2 py-1 text-xs font-medium rounded transition ${
+             scoreGrilleView === v ? 'bg-white text-[#1A1A1A] shadow-sm' : 'text-[#888]'
+           }`}
+         >
+           {v === 'taux' ? 'Taux' : v === 'score' ? 'Score' : 'Erreurs'}
+         </button>
+       ))}
+     </div>
+     <FullscreenButton blockId="scores" />
+   </div>
  </div>
 
- <FullscreenButton blockId="scores" />
- </div>
- </div>
-
- {/* GRAPHIQUE MÉCANIQUE - PAQUETS DE 30 */}
- {scoreType === 'mecanique' && scoresDisplayMeca.length > 0 && (
- <>
- <div className="p-3 flex-1 min-h-0">
- <ResponsiveContainer key={chartRenderKey} width="100%" height="100%">
- <LineChart data={scoresDisplayMeca}>
- <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
- <XAxis
- dataKey="label"
- stroke="#71717a"
- style={{ fontSize: '9px' }}
- label={{ value: 'Paquet', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
- interval="preserveStartEnd"
- />
- <YAxis
- stroke="#71717a"
- style={{ fontSize: '10px' }}
- domain={[0, 100]}
- />
- <Tooltip
- contentStyle={{
- backgroundColor: '#fff',
- border: '1px solid #e4e4e7',
- borderRadius: '8px',
- fontSize: '11px'
- }}
- formatter={(value: any) => [`${Math.round(value)}%`, '% de réussite']}
- labelFormatter={(value: any, payload: any) => {
- const item = payload[0]?.payload;
- return item ? `Q${item.label} · ${item.nbQuestions} questions (${item.dateDebut}–${item.dateFin})` : `Paquet ${value}`;
- }}
- />
- <Line
- type="monotone"
- dataKey="scoreMoyen"
- stroke="#3b82f6"
- strokeWidth={2}
- dot={{ fill: '#3b82f6', r: 4 }}
- name="Score Moyen"
- />
- </LineChart>
- </ResponsiveContainer>
- </div>
-
- <div className="bg-accent-light/20 px-3 py-1.5 border-t border-border">
- <div className="flex justify-around text-center text-xs">
- <div>
- <div className="font-bold text-accent">
- {Math.round(scoresDisplayMeca.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresDisplayMeca.length)}%
- </div>
- <div className="text-accent text-[10px]">Moyenne</div>
- </div>
- <div>
- <div className="font-bold text-accent">
- {Math.round(Math.max(...scoresDisplayMeca.map(s => s.scoreMoyen)))}%
- </div>
- <div className="text-accent text-[10px]">Max</div>
- </div>
- <div>
- <div className="font-bold text-accent">
- {Math.round(Math.min(...scoresDisplayMeca.map(s => s.scoreMoyen)))}%
- </div>
- <div className="text-accent text-[10px]">Min</div>
- </div>
- </div>
- </div>
- </>
- )}
-
- {/* GRAPHIQUE CHAOTIQUE - PAQUETS DE 30 */}
- {scoreType === 'chaotique' && scoresDisplayChaos.length > 0 && (
- <>
- <div className="p-3 flex-1 min-h-0">
- <ResponsiveContainer key={chartRenderKey} width="100%" height="100%">
- <LineChart data={scoresDisplayChaos}>
- <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
- <XAxis
- dataKey="label"
- stroke="#71717a"
- style={{ fontSize: '9px' }}
- label={{ value: 'Paquet', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
- interval="preserveStartEnd"
- />
- <YAxis
- domain={[0, 100]}
- stroke="#71717a"
- style={{ fontSize: '10px' }}
- />
- <Tooltip
- contentStyle={{
- backgroundColor: '#fff',
- border: '1px solid #e4e4e7',
- borderRadius: '8px',
- fontSize: '11px'
- }}
- formatter={(value: any) => [`${Math.round(value)}%`, 'Moyenne']}
- labelFormatter={(value: any, payload: any) => {
- const item = payload[0]?.payload;
- return item ? `Q${item.label} · ${item.nbQuestions} questions (${item.dateDebut}–${item.dateFin})` : `Paquet ${value}`;
- }}
- />
- <Line
- type="monotone"
- dataKey="scoreMoyen"
- stroke="var(--accent)"
- strokeWidth={2}
- dot={{ fill: 'var(--accent)', r: 4 }}
- name="Score Moyen"
- />
- </LineChart>
- </ResponsiveContainer>
- </div>
-
- <div className="bg-purple-50/20 px-3 py-1.5 border-t border-purple-200">
- <div className="flex justify-around text-center text-xs">
- <div>
- <div className="font-bold text-accent">
- {Math.round(scoresDisplayChaos.reduce((acc, s) => acc + s.scoreMoyen, 0) / scoresDisplayChaos.length)}%
- </div>
- <div className="text-purple-700 text-[10px]">Moyenne</div>
- </div>
- <div>
- <div className="font-bold text-accent">
- {Math.round(Math.max(...scoresDisplayChaos.map(s => s.scoreMoyen)))}%
- </div>
- <div className="text-purple-700 text-[10px]">Max</div>
- </div>
- <div>
- <div className="font-bold text-accent">
- {Math.round(Math.min(...scoresDisplayChaos.map(s => s.scoreMoyen)))}%
- </div>
- <div className="text-purple-700 text-[10px]">Min</div>
- </div>
- </div>
- </div>
- </>
- )}
-
- {/* GRAPHIQUE GLOBAL - CUMULATIF */}
- {scoreType === 'global' && scoresGlobaux.length > 0 && (
- <>
- <div className="p-3 flex-1 min-h-0">
- <ResponsiveContainer key={chartRenderKey} width="100%" height="100%">
- <LineChart data={scoresGlobaux}>
- <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
- <XAxis
- dataKey="date"
- stroke="#71717a"
- style={{ fontSize: '10px' }}
- label={{ value: 'Date', position: 'insideBottom', offset: -5, style: { fontSize: '10px' } }}
- />
- <YAxis 
- stroke="#71717a"
- style={{ fontSize: '10px' }}
- />
- <Tooltip
- contentStyle={{
- backgroundColor: '#fff',
- border: '1px solid #e4e4e7',
- borderRadius: '8px',
- fontSize: '11px'
- }}
- formatter={(value: any) => [value.toFixed(0), 'Score Global']}
- />
- <Line
- type="monotone"
- dataKey="scoreCumulatif"
- stroke="#10b981"
- strokeWidth={2}
- dot={{ fill: '#10b981', r: 3 }}
- activeDot={{ r: 5 }}
- />
- </LineChart>
- </ResponsiveContainer>
- </div>
-
- <div className="bg-green-50/20 px-3 py-1.5 border-t border-green-200">
- <div className="flex justify-around text-center text-xs">
- <div>
- <div className="font-bold text-status-success">
- {scoresGlobaux[scoresGlobaux.length - 1].scoreCumulatif.toFixed(0)}
- </div>
- <div className="text-status-success text-[10px]">Score Actuel</div>
- </div>
- <div>
- <div className="font-bold text-status-success">
- {Math.max(...scoresGlobaux.map(s => s.scoreCumulatif)).toFixed(0)}
- </div>
- <div className="text-status-success text-[10px]">Max</div>
- </div>
- <div>
- <div className="font-bold text-status-success">
- {scoresGlobaux.length}
- </div>
- <div className="text-status-success text-[10px]">Jours</div>
- </div>
- </div>
- </div>
- </>
- )}
-
-
- {/* Messages si pas de données */}
- {scoreType === 'mecanique' && scoresParSessionMeca.length === 0 && (
- <div className="p-6 text-center text-ink-muted flex-1 min-h-0 flex flex-col items-center justify-center">
- <div className="text-2xl mb-1">📈</div>
- <p className="text-xs">Aucun score mécanique enregistré</p>
- <p className="text-[10px] text-gray-400 mt-1">Les scores sont créés lors des sessions mécaniques</p>
- </div>
- )}
-
- {scoreType === 'chaotique' && scoresParSessionChaos.length === 0 && (
- <div className="p-6 text-center text-ink-muted flex-1 min-h-0 flex flex-col items-center justify-center">
- <div className="text-2xl mb-1">📈</div>
- <p className="text-xs">Aucun score chaotique enregistré</p>
- <p className="text-[10px] text-gray-400 mt-1">Les scores sont créés lors des sessions chaotiques</p>
- </div>
+ {scoreGrilleData.length > 0 ? (
+   <div className="p-3 flex-1 min-h-0">
+     <ResponsiveContainer key={chartRenderKey} width="100%" height="100%">
+       {scoreGrilleView === 'erreurs' ? (
+         <ComposedChart data={scoreGrilleData}>
+           <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+           <XAxis dataKey="label" stroke="#71717a" style={{ fontSize: '9px' }} />
+           <YAxis yAxisId="left" stroke="#71717a" style={{ fontSize: '10px' }} allowDecimals={false} />
+           <YAxis yAxisId="right" orientation="right" domain={[0, 100]} stroke="#71717a" style={{ fontSize: '10px' }} tickFormatter={(v) => `${v}%`} />
+           <Tooltip
+             contentStyle={{ backgroundColor: '#fff', border: '1px solid #e4e4e7', borderRadius: '8px', fontSize: '11px' }}
+             formatter={(value: any, name: string) =>
+               name === 'erreurs' ? [value, 'Croix'] : [`${Math.round(value)}%`, 'Taux de réussite']
+             }
+           />
+           <Bar yAxisId="left" dataKey="erreurs" fill="#f87171" radius={[3, 3, 0, 0]} name="erreurs" />
+           <Line yAxisId="right" type="monotone" dataKey="taux" stroke="#185FA5" strokeWidth={2} dot={{ fill: '#185FA5', r: 3 }} name="taux" connectNulls />
+         </ComposedChart>
+       ) : scoreGrilleView === 'score' ? (
+         <LineChart data={scoreGrilleData}>
+           <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+           <XAxis dataKey="label" stroke="#71717a" style={{ fontSize: '9px' }} />
+           <YAxis domain={[0, 500]} stroke="#71717a" style={{ fontSize: '10px' }} />
+           <Tooltip
+             contentStyle={{ backgroundColor: '#fff', border: '1px solid #e4e4e7', borderRadius: '8px', fontSize: '11px' }}
+             formatter={(value: any) => [Math.round(value), 'Score brut']}
+           />
+           <Line type="monotone" dataKey="score" stroke="#a855f7" strokeWidth={2} dot={{ fill: '#a855f7', r: 4 }} connectNulls />
+         </LineChart>
+       ) : (
+         <LineChart data={scoreGrilleData}>
+           <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+           <XAxis dataKey="label" stroke="#71717a" style={{ fontSize: '9px' }} />
+           <YAxis domain={[0, 100]} stroke="#71717a" style={{ fontSize: '10px' }} tickFormatter={(v) => `${v}%`} />
+           <Tooltip
+             contentStyle={{ backgroundColor: '#fff', border: '1px solid #e4e4e7', borderRadius: '8px', fontSize: '11px' }}
+             formatter={(value: any) => [`${Math.round(value)}%`, 'Taux de réussite']}
+           />
+           <Line type="monotone" dataKey="taux" stroke="#185FA5" strokeWidth={2} dot={{ fill: '#185FA5', r: 4 }} connectNulls />
+         </LineChart>
+       )}
+     </ResponsiveContainer>
+   </div>
+ ) : (
+   <div className="p-6 text-center text-ink-muted flex-1 min-h-0 flex flex-col items-center justify-center">
+     <p className="text-xs">Aucune donnée de grille d'observation</p>
+   </div>
  )}
  </div>
 
@@ -1460,21 +978,6 @@ export default function TableauProgression() {
  )}
  </div>
 
- {/* Grille objectifs hebdomadaires */}
- <div className={`bg-cream-50 rounded-xl border border-border shadow-sm overflow-hidden aspect-square flex flex-col ${fullscreenBlock === 'objectifs' ? 'fixed inset-4 z-50 aspect-auto h-full' : ''}`}>
-   <div className="px-3 py-2 flex items-center justify-between">
-     <div>
-       <h2 className="text-sm font-bold text-ink">Parcours hebdomadaire</h2>
-       <p className="text-ink-light text-xs">
-         {gridObjectifs.filter(d => d.statut !== 'non_fixe').length > 0
-           ? `${gridObjectifs.filter(d => d.statut === 'succes').length}/${gridObjectifs.filter(d => d.statut !== 'non_fixe').length} réussi(s)`
-           : 'Aucun objectif'}
-       </p>
-     </div>
-     <FullscreenButton blockId="objectifs" />
-   </div>
-   <GridObjectifs data={gridObjectifs} />
- </div>
  </div>
  </div>
 </div>

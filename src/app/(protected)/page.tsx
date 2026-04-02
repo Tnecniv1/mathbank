@@ -344,10 +344,77 @@ function BadgesSection() {
  );
 }
 
+function StreakBadge() {
+ const [streak, setStreak] = useState<number | null>(null);
+
+ useEffect(() => {
+   loadStreak();
+ }, []);
+
+ async function loadStreak() {
+   try {
+     const { data: { session } } = await supabase.auth.getSession();
+     if (!session) { setStreak(0); return; }
+
+     const { data: sessions } = await supabase
+       .from('session')
+       .select('date_session')
+       .eq('user_id', session.user.id)
+       .order('date_session', { ascending: false });
+
+     if (!sessions || sessions.length === 0) { setStreak(0); return; }
+
+     const dateSet = new Set(sessions.map((s: any) => s.date_session as string));
+
+     const today = new Date();
+     today.setHours(0, 0, 0, 0);
+     const todayStr     = today.toISOString().split('T')[0];
+     const yesterdayStr = new Date(today.getTime() - 86_400_000).toISOString().split('T')[0];
+
+     // Départ : aujourd'hui si session présente, sinon hier, sinon streak = 0
+     const startStr = dateSet.has(todayStr)     ? todayStr
+                    : dateSet.has(yesterdayStr)  ? yesterdayStr
+                    : null;
+
+     if (!startStr) { setStreak(0); return; }
+
+     // Compter les jours consécutifs en remontant
+     let count = 0;
+     const cursor = new Date(startStr);
+     while (dateSet.has(cursor.toISOString().split('T')[0])) {
+       count++;
+       cursor.setDate(cursor.getDate() - 1);
+     }
+     setStreak(count);
+   } catch {
+     setStreak(0);
+   }
+ }
+
+ if (streak === null) return null;
+
+ if (streak === 0) {
+   return (
+     <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full
+                      bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium">
+       Commence aujourd'hui&nbsp;!
+     </span>
+   );
+ }
+
+ return (
+   <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full
+                    bg-amber-50 border border-amber-200 text-amber-700 text-sm font-semibold">
+     🔥 {streak} jour{streak > 1 ? 's' : ''}
+   </span>
+ );
+}
+
 const navItems = [
  { href: '/session', emoji: '🏋️', title: 'Entraînement', description: 'Sessions de coaching IA' },
  { href: '/library', emoji: '📚', title: 'Bibliothèque', description: 'Feuilles d\'entraînement et parcours' },
  { href: '/progression', emoji: '📊', title: 'Progression', description: 'Statistiques et évolution' },
+ { href: '/classement', emoji: '🏆', title: 'Classement', description: 'Score brut total par élève' },
  { href: '/personnel', emoji: '👤', title: 'Personnel', description: 'Notifications et profil' },
  { href: '/admin', emoji: '⚙️', title: 'Administration', description: 'Gestion des contenus' },
 ];
@@ -356,6 +423,10 @@ export default function HomePage() {
  return (
  <main className="min-h-screen p-6">
  <div className="max-w-4xl mx-auto space-y-8">
+
+ <div className="flex justify-end">
+   <StreakBadge />
+ </div>
 
  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
  {navItems.map((item) => (
