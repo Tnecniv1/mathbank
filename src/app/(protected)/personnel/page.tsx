@@ -49,7 +49,6 @@ export default function PersonnelPage() {
  const [showProfileModal, setShowProfileModal] = useState(false);
 
  // Accordéon
- const [openInfos, setOpenInfos] = useState(true);
  const [openNotifs, setOpenNotifs] = useState(false);
  const [notificationSelectionnee, setNotificationSelectionnee] = useState<Notification | null>(null);
 
@@ -329,54 +328,17 @@ export default function PersonnelPage() {
  </p>
  </div>
 
- {/* Accordéon — Mes Informations */}
- <div className="bg-cream-50 rounded-lg border border-border shadow-sm overflow-hidden">
-  <button
-   type="button"
-   onClick={() => setOpenInfos(!openInfos)}
-   className="w-full flex justify-between items-center px-6 py-4 hover:bg-cream-100 transition-colors"
-  >
-   <h2 className="text-xl font-bold text-ink">📋 Mes Informations</h2>
-   <span className="text-ink-muted text-lg">{openInfos ? '▲' : '▼'}</span>
-  </button>
-  {openInfos && (
-   <div className="px-6 pb-6">
-    <div className="flex justify-end gap-2 mb-4">
-     <button
-      onClick={() => setShowEditModal(true)}
-      className="px-4 py-2 bg-accent-light0 hover:bg-accent text-ink font-medium rounded-lg transition-colors shadow-sm text-sm"
-     >
-      ✏️ Modifier
-     </button>
-     <button
-      onClick={() => setShowProfileModal(true)}
-      className="px-4 py-2 bg-[#185FA5] hover:bg-[#1450a3] text-white font-medium rounded-lg transition-colors shadow-sm text-sm"
-     >
-      Modifier mes informations
-     </button>
-    </div>
-    {userInfo ? (
-     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <InfoItem label="Email" value={userInfo.email} />
-      <InfoItem label="Prénom" value={userInfo.first_name} />
-      <InfoItem label="Nom" value={userInfo.last_name} />
-      <InfoItem label="Date de naissance" value={userInfo.birth_date} />
-      <InfoItem label="Adresse" value={userInfo.address} />
-      <InfoItem label="Ville" value={userInfo.city} />
-      <InfoItem label="Code postal" value={userInfo.postal_code} />
-      <InfoItem label="Rôle" value={userInfo.role} />
-      {userInfo.pseudo && <InfoItem label="Pseudo" value={userInfo.pseudo} />}
-      {userInfo.telephone && <InfoItem label="Téléphone" value={userInfo.telephone} />}
-      {userInfo.adresse && <InfoItem label="Adresse (profil)" value={userInfo.adresse} />}
-      {userInfo.date_naissance && <InfoItem label="Date de naissance (profil)" value={userInfo.date_naissance} />}
-      {userInfo.user_role && <InfoItem label="Profil" value={userInfo.user_role} />}
-     </div>
-    ) : (
-     <div className="text-ink-muted">Aucune information disponible</div>
-    )}
-   </div>
-  )}
+ {/* Mon Profil */}
+ {userId && (
+ <div className="bg-cream-50 rounded-lg border border-border shadow-sm">
+  <div className="px-6 py-4 border-b border-border">
+   <h2 className="text-xl font-bold text-ink">👤 Mon Profil</h2>
+  </div>
+  <div className="px-6 pb-6">
+   <ProfileEditSection userId={userId} />
+  </div>
  </div>
+ )}
 
  {/* Accordéon — Notifications */}
  <div className="bg-cream-50 rounded-lg border border-border shadow-sm overflow-hidden">
@@ -680,3 +642,313 @@ function ModalRejet({
 }
 
 // ❌ COMPOSANT SUPPRIMÉ : ModalValidationAvecFeuille (validation directe sans sélection de feuille)
+
+/* ---------- MODIFIER MON PROFIL ---------- */
+
+type Feedback = { type: 'success' | 'error'; msg: string };
+
+function FeedbackMsg({ fb }: { fb: Feedback | null }) {
+ if (!fb) return null;
+ return (
+  <p className={`text-xs mt-1 ${fb.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>
+   {fb.msg}
+  </p>
+ );
+}
+
+function ProfileEditSection({ userId }: { userId: string }) {
+ const [loaded, setLoaded] = useState(false);
+
+ // Valeurs champs
+ const [pseudo, setPseudo] = useState('');
+ const [dateNaissance, setDateNaissance] = useState('');
+ const [adresse, setAdresse] = useState('');
+ const [email, setEmail] = useState('');
+ const [newPassword, setNewPassword] = useState('');
+ const [confirmPassword, setConfirmPassword] = useState('');
+ const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+ const [avatarFile, setAvatarFile] = useState<File | null>(null);
+ const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+ const [fullName, setFullName] = useState('');
+
+ // Feedbacks
+ const [pseudoFb, setPseudoFb] = useState<Feedback | null>(null);
+ const [dateNaissanceFb, setDateNaissanceFb] = useState<Feedback | null>(null);
+ const [adresseFb, setAdresseFb] = useState<Feedback | null>(null);
+ const [emailFb, setEmailFb] = useState<Feedback | null>(null);
+ const [passwordFb, setPasswordFb] = useState<Feedback | null>(null);
+ const [avatarFb, setAvatarFb] = useState<Feedback | null>(null);
+
+ // Loading par action
+ const [savingPseudo, setSavingPseudo] = useState(false);
+ const [savingDateNaissance, setSavingDateNaissance] = useState(false);
+ const [savingAdresse, setSavingAdresse] = useState(false);
+ const [savingEmail, setSavingEmail] = useState(false);
+ const [savingPassword, setSavingPassword] = useState(false);
+ const [savingAvatar, setSavingAvatar] = useState(false);
+
+ useEffect(() => { load(); }, [userId]);
+
+ async function load() {
+  const [{ data: profile }, { data: { user } }] = await Promise.all([
+   supabase.from('profiles').select('pseudo, full_name, avatar_url, date_naissance, adresse').eq('user_id', userId).single(),
+   supabase.auth.getUser(),
+  ]);
+  if (profile) {
+   setPseudo(profile.pseudo || '');
+   setDateNaissance(profile.date_naissance || '');
+   setAdresse(profile.adresse || '');
+   setAvatarUrl(profile.avatar_url || null);
+   setFullName(profile.full_name || '');
+  }
+  if (user) {
+   const displayEmail = (user.email || '').endsWith('@mathbank.internal') ? '' : (user.email || '');
+   setEmail(displayEmail);
+  }
+  setLoaded(true);
+ }
+
+ async function handleSavePseudo() {
+  setSavingPseudo(true);
+  setPseudoFb(null);
+  try {
+   const { error } = await supabase.from('profiles').update({ pseudo }).eq('user_id', userId);
+   if (error) throw error;
+   setPseudoFb({ type: 'success', msg: 'Pseudo mis à jour.' });
+  } catch (e: any) {
+   setPseudoFb({ type: 'error', msg: e.message || 'Erreur lors de la mise à jour.' });
+  } finally {
+   setSavingPseudo(false);
+  }
+ }
+
+ async function handleSaveDateNaissance() {
+  setSavingDateNaissance(true);
+  setDateNaissanceFb(null);
+  try {
+   const { error } = await supabase.from('profiles').update({ date_naissance: dateNaissance }).eq('user_id', userId);
+   if (error) throw error;
+   setDateNaissanceFb({ type: 'success', msg: 'Date de naissance mise à jour.' });
+  } catch (e: any) {
+   setDateNaissanceFb({ type: 'error', msg: e.message || 'Erreur lors de la mise à jour.' });
+  } finally {
+   setSavingDateNaissance(false);
+  }
+ }
+
+ async function handleSaveAdresse() {
+  setSavingAdresse(true);
+  setAdresseFb(null);
+  try {
+   const { error } = await supabase.from('profiles').update({ adresse }).eq('user_id', userId);
+   if (error) throw error;
+   setAdresseFb({ type: 'success', msg: 'Ville mise à jour.' });
+  } catch (e: any) {
+   setAdresseFb({ type: 'error', msg: e.message || 'Erreur lors de la mise à jour.' });
+  } finally {
+   setSavingAdresse(false);
+  }
+ }
+
+ async function handleSaveEmail() {
+  setSavingEmail(true);
+  setEmailFb(null);
+  try {
+   const { error } = await supabase.auth.updateUser({ email });
+   if (error) throw error;
+   setEmailFb({ type: 'success', msg: `Un email de confirmation a été envoyé à ${email}.` });
+  } catch (e: any) {
+   setEmailFb({ type: 'error', msg: e.message || 'Erreur lors de la mise à jour.' });
+  } finally {
+   setSavingEmail(false);
+  }
+ }
+
+ async function handleSavePassword() {
+  setPasswordFb(null);
+  if (newPassword.length < 8) {
+   setPasswordFb({ type: 'error', msg: 'Le mot de passe doit contenir au moins 8 caractères.' });
+   return;
+  }
+  if (newPassword !== confirmPassword) {
+   setPasswordFb({ type: 'error', msg: 'Les deux mots de passe ne correspondent pas.' });
+   return;
+  }
+  setSavingPassword(true);
+  try {
+   const { error } = await supabase.auth.updateUser({ password: newPassword });
+   if (error) throw error;
+   setPasswordFb({ type: 'success', msg: 'Mot de passe modifié.' });
+   setNewPassword('');
+   setConfirmPassword('');
+  } catch (e: any) {
+   setPasswordFb({ type: 'error', msg: e.message || 'Erreur lors de la mise à jour.' });
+  } finally {
+   setSavingPassword(false);
+  }
+ }
+
+ async function handleSaveAvatar() {
+  if (!avatarFile) return;
+  setSavingAvatar(true);
+  setAvatarFb(null);
+  try {
+   const ext = avatarFile.name.split('.').pop() ?? 'jpg';
+   const path = `${userId}/avatar.${ext}`;
+   const { error: uploadError } = await supabase.storage
+    .from('avatars')
+    .upload(path, avatarFile, { upsert: true });
+   if (uploadError) throw uploadError;
+   const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
+   const publicUrl = urlData.publicUrl;
+   const { error: updateError } = await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('user_id', userId);
+   if (updateError) throw updateError;
+   setAvatarUrl(publicUrl);
+   setAvatarFile(null);
+   setAvatarPreview(null);
+   setAvatarFb({ type: 'success', msg: 'Photo de profil mise à jour.' });
+  } catch (e: any) {
+   setAvatarFb({ type: 'error', msg: e.message || "Erreur lors de l'upload." });
+  } finally {
+   setSavingAvatar(false);
+  }
+ }
+
+ function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  setAvatarFile(file);
+  const reader = new FileReader();
+  reader.onload = () => setAvatarPreview(reader.result as string);
+  reader.readAsDataURL(file);
+ }
+
+ const initials = fullName.trim()
+  ? fullName.trim().split(' ').filter(Boolean).map((w: string) => w[0]).join('').substring(0, 2).toUpperCase()
+  : '?';
+
+ const inputCls = 'w-full border border-border rounded-lg px-3 py-2 bg-cream-50 text-ink text-sm focus:border-[#185FA5] focus:ring-2 focus:ring-blue-100 outline-none transition-all';
+ const btnCls = 'px-4 py-2 bg-[#185FA5] hover:bg-[#1450A0] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors shrink-0';
+
+ if (!loaded) return <div className="text-sm text-[#AAAAAA] py-4">Chargement...</div>;
+
+ return (
+  <div className="space-y-6 pt-2">
+
+   {/* ── Pseudo ── */}
+   <div>
+    <h3 className="text-sm font-semibold text-ink mb-2">Pseudo</h3>
+    <div className="flex gap-2">
+     <input type="text" value={pseudo} onChange={e => setPseudo(e.target.value)} className={inputCls} />
+     <button onClick={handleSavePseudo} disabled={savingPseudo} className={btnCls}>
+      {savingPseudo ? '…' : 'Enregistrer'}
+     </button>
+    </div>
+    <FeedbackMsg fb={pseudoFb} />
+   </div>
+
+   <hr className="border-border" />
+
+   {/* ── Date de naissance ── */}
+   <div>
+    <h3 className="text-sm font-semibold text-ink mb-2">Date de naissance</h3>
+    <div className="flex gap-2">
+     <input type="date" value={dateNaissance} onChange={e => setDateNaissance(e.target.value)} className={inputCls} />
+     <button onClick={handleSaveDateNaissance} disabled={savingDateNaissance} className={btnCls}>
+      {savingDateNaissance ? '…' : 'Enregistrer'}
+     </button>
+    </div>
+    <FeedbackMsg fb={dateNaissanceFb} />
+   </div>
+
+   <hr className="border-border" />
+
+   {/* ── Ville ── */}
+   <div>
+    <h3 className="text-sm font-semibold text-ink mb-2">Ville</h3>
+    <div className="flex gap-2">
+     <input type="text" value={adresse} onChange={e => setAdresse(e.target.value)} className={inputCls} />
+     <button onClick={handleSaveAdresse} disabled={savingAdresse} className={btnCls}>
+      {savingAdresse ? '…' : 'Enregistrer'}
+     </button>
+    </div>
+    <FeedbackMsg fb={adresseFb} />
+   </div>
+
+   <hr className="border-border" />
+
+   {/* ── Email ── */}
+   <div>
+    <h3 className="text-sm font-semibold text-ink mb-2">Email</h3>
+    <div className="flex gap-2">
+     <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} />
+     <button onClick={handleSaveEmail} disabled={savingEmail} className={btnCls}>
+      {savingEmail ? '…' : 'Modifier'}
+     </button>
+    </div>
+    <FeedbackMsg fb={emailFb} />
+   </div>
+
+   <hr className="border-border" />
+
+   {/* ── Mot de passe ── */}
+   <div>
+    <h3 className="text-sm font-semibold text-ink mb-2">Mot de passe</h3>
+    <div className="space-y-2">
+     <input
+      type="password"
+      value={newPassword}
+      onChange={e => setNewPassword(e.target.value)}
+      placeholder="Nouveau mot de passe"
+      className={inputCls}
+     />
+     <input
+      type="password"
+      value={confirmPassword}
+      onChange={e => setConfirmPassword(e.target.value)}
+      placeholder="Confirmer le mot de passe"
+      className={inputCls}
+     />
+     <div className="flex justify-end">
+      <button onClick={handleSavePassword} disabled={savingPassword || !newPassword} className={btnCls}>
+       {savingPassword ? '…' : 'Modifier'}
+      </button>
+     </div>
+    </div>
+    <FeedbackMsg fb={passwordFb} />
+   </div>
+
+   <hr className="border-border" />
+
+   {/* ── Photo de profil ── */}
+   <div>
+    <h3 className="text-sm font-semibold text-ink mb-3">Photo de profil</h3>
+    <div className="flex items-center gap-4">
+     <div className="w-16 h-16 rounded-full overflow-hidden bg-[#185FA5] flex items-center justify-center shrink-0">
+      {(avatarPreview || avatarUrl) ? (
+       // eslint-disable-next-line @next/next/no-img-element
+       <img src={avatarPreview ?? avatarUrl!} alt="Avatar" className="w-full h-full object-cover" />
+      ) : (
+       <span className="text-white font-bold text-lg select-none">{initials}</span>
+      )}
+     </div>
+     <div className="flex-1 space-y-2">
+      <input
+       type="file"
+       accept="image/*"
+       onChange={handleFileChange}
+       className="text-sm text-ink-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-cream-200 file:text-ink hover:file:bg-cream-300 file:cursor-pointer"
+      />
+      {avatarFile && (
+       <button onClick={handleSaveAvatar} disabled={savingAvatar} className={btnCls}>
+        {savingAvatar ? '…' : 'Enregistrer'}
+       </button>
+      )}
+     </div>
+    </div>
+    <FeedbackMsg fb={avatarFb} />
+   </div>
+
+  </div>
+ );
+}

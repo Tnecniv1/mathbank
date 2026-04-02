@@ -21,6 +21,22 @@ export default async function RootLayout({ children }: { children: React.ReactNo
  );
  const { data: { user } } = await supabase.auth.getUser();
 
+ let displayName: string | null = null;
+ let avatarUrl: string | null = null;
+ let initiales = '?';
+ if (user) {
+  const { data: profile } = await supabase
+   .from('profiles')
+   .select('pseudo, avatar_url')
+   .eq('user_id', user.id)
+   .single();
+  displayName = profile?.pseudo || user.email || null;
+  avatarUrl = profile?.avatar_url || null;
+  initiales = displayName
+   ? displayName.trim().split(/\s+/).map((w: string) => w[0]).join('').substring(0, 2).toUpperCase()
+   : '?';
+ }
+
  return (
  <html lang="fr">
  <body className="min-h-screen bg-cream-100 text-ink">
@@ -33,7 +49,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
  <div className="flex items-center gap-3">
  {user ? (
  <>
- <span className="hidden sm:inline text-base text-ink-light">{user.email}</span>
+ <div className="hidden sm:flex items-center gap-2">
+  {avatarUrl ? (
+   // eslint-disable-next-line @next/next/no-img-element
+   <img src={avatarUrl} alt={initiales} className="w-8 h-8 rounded-full object-cover shrink-0" />
+  ) : (
+   <div className="w-8 h-8 rounded-full bg-[#185FA5] text-white text-xs font-bold flex items-center justify-center shrink-0 select-none">
+    {initiales}
+   </div>
+  )}
+  <span className="text-base text-ink-light">{displayName}</span>
+ </div>
  <SignOutButton />
  </>
  ) : (

@@ -434,6 +434,7 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
     setExercices(next);
     setActiveExoId(newExo.id);
     setRoueeActive(true);
+    setRoueeReadonly(false);
     scheduleAutoSave(next, sessionsRef.current);
   }, [exercices, feuilleMeca, feuilleChaos, scheduleAutoSave]);
 
@@ -484,6 +485,7 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
 
   const reporterExo = useCallback(() => {
     setActiveExoId(null);
+    setRoueeReadonly(false);
   }, []);
 
   const abandonnerExo = useCallback(() => {

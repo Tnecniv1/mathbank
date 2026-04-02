@@ -457,7 +457,7 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
             </div>
           ) : (
             <div className="space-y-2">
-              {allRoues.flatMap((r) => r.exercices).map((exo) => {
+              {allRoues.flatMap((r) => r.exercices.map((exo) => ({ ...exo, roueClosed: r.closed }))).map((exo) => {
                 const CRITERES = ['C1','C2','C3','C4','S1','S2','S3','S4','R1','R2','R3','R4'];
                 let valides = 0, evalues = 0;
                 for (const k of CRITERES) {
@@ -487,6 +487,11 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
                         </div>
                         <div className="text-xs text-[#AAAAAA] mt-0.5">{exo.reference}</div>
                       </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${
+                        exo.roueClosed ? 'bg-[#1A1A1A] text-white' : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        {exo.roueClosed ? 'Bouclée' : 'En cours'}
+                      </span>
                       {score !== null ? (
                         <span className={`text-sm font-bold shrink-0 ${
                           score === 100 ? 'text-[#639922]' : score >= 50 ? 'text-amber-500' : 'text-[#999]'

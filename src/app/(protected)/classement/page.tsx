@@ -8,6 +8,7 @@ type EntreeClassement = {
   userId: string;
   nom: string;
   scoreBrut: number;
+  avatarUrl: string | null;
 };
 
 
@@ -37,8 +38,9 @@ export default function ClassementPage() {
 
       const entrees: EntreeClassement[] = (data ?? []).map((row: any) => ({
         userId:    row.user_id,
-        nom:       row.full_name ?? 'Inconnu',
+        nom:       row.pseudo ?? row.full_name ?? 'Inconnu',
         scoreBrut: Math.round(row.score_brut),
+        avatarUrl: row.avatar_url ?? null,
       }));
 
       setClassement(entrees);
@@ -122,10 +124,16 @@ export default function ClassementPage() {
                   </div>
 
                   {/* Avatar */}
-                  <div className="w-9 h-9 rounded-full bg-[#185FA5] flex items-center justify-center
-                                  text-white font-bold text-xs shrink-0 select-none">
-                    {initiales}
-                  </div>
+                  {entree.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={entree.avatarUrl} alt={initiales}
+                         className="w-10 h-10 rounded-full object-cover shrink-0" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-[#185FA5] flex items-center justify-center
+                                    text-white font-bold text-xs shrink-0 select-none">
+                      {initiales}
+                    </div>
+                  )}
 
                   {/* Nom */}
                   <span className={`flex-1 text-sm font-medium min-w-0 truncate ${

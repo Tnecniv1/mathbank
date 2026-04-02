@@ -151,13 +151,6 @@ export function WheelForm({
   return (
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
 
-      {/* Bandeau lecture seule */}
-      {readonly && (
-        <div className="bg-[#FFF8E7] border border-[#F0D080] rounded-xl px-4 py-2 text-xs text-[#8B6914] text-center">
-          Lecture seule — exercice bouclé
-        </div>
-      )}
-
       {/* Référence */}
       <input
         value={reference}
@@ -170,6 +163,11 @@ export function WheelForm({
           readonly ? 'cursor-default text-[#888]' : ''
         }`}
       />
+
+      {/* Titre feuille */}
+      {exo.feuille_titre && (
+        <p className="text-xs text-[#AAAAAA] px-1">{exo.feuille_titre}</p>
+      )}
 
       {/* SVG Roue */}
       <div className="bg-white rounded-2xl border border-[#E8E0D4] overflow-hidden shadow-sm">
