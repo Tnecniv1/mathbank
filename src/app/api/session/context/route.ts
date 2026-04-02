@@ -50,30 +50,18 @@ export async function GET() {
   const [feuillesList, openRoueResult] = await Promise.all([
     Promise.all(
       (noeuds ?? []).map(async (noeud) => {
-        // Sessions de l'utilisateur liées à cette feuille
-        const { data: sessions } = await service
-          .from('session')
-          .select('id')
-          .eq('user_id', user.id)
-          .or(`feuille_mecanique_id.eq.${noeud.id},feuille_chaotique_id.eq.${noeud.id}`);
+        // Compte les exercices déjà enregistrés dans grille_observation pour cette feuille
+        const { data: grilles } = await service
+          .from('grille_observation')
+          .select('data')
+          .eq('user_id', user.id);
 
-        let prochain_exercice = 1;
-
-        if (sessions && sessions.length > 0) {
-          const sessionIds = sessions.map((s) => s.id);
-
-          // MAX(ordre) parmi tous les exercices de ces sessions
-          const { data: exercices } = await service
-            .from('exercice')
-            .select('ordre')
-            .in('session_id', sessionIds)
-            .order('ordre', { ascending: false })
-            .limit(1);
-
-          if (exercices && exercices.length > 0) {
-            prochain_exercice = exercices[0].ordre + 1;
-          }
+        let nbExistants = 0;
+        for (const g of grilles ?? []) {
+          const exercices = (g.data?.exercices ?? []) as { feuille_id?: string }[];
+          nbExistants += exercices.filter((e) => e.feuille_id === noeud.id).length;
         }
+        const prochain_exercice = nbExistants + 1;
 
         return {
           id: noeud.id,

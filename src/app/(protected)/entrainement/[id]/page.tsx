@@ -36,6 +36,12 @@ type RoueObsData = {
   exercices: Exercice[];
 };
 
+type FeuilleActive = {
+  id: string;
+  titre: string;
+  type: 'mecanique' | 'chaotique';
+};
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function EntrainementPage({ params }: { params: Promise<{ id: string }> }) {
@@ -58,6 +64,8 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
   const [duree, setDuree]         = useState<number>(30);
   const [starting, setStarting]         = useState(false);
   const [boucling, setBoucling]         = useState(false);
+  const [feuillesActives, setFeuillesActives] = useState<FeuilleActive[]>([]);
+  const [selectedFeuilleId, setSelectedFeuilleId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editDuree, setEditDuree]       = useState<string>('');
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
@@ -166,27 +174,56 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
       );
     }
 
+    if (uid && mounted) {
+      const { data: progs } = await supabase
+        .from('progression_feuille')
+        .select('feuille_id, noeud:noeud!feuille_id(id, titre, type)')
+        .eq('user_id', uid)
+        .eq('en_cours', true)
+        .eq('est_termine', false);
+      if (mounted) {
+        const fa: FeuilleActive[] = (progs ?? [])
+          .filter((p: any) => p.noeud)
+          .map((p: any) => ({
+            id:    p.noeud.id,
+            titre: p.noeud.titre,
+            type:  p.noeud.type as 'mecanique' | 'chaotique',
+          }));
+        setFeuillesActives(fa);
+        if (fa.length === 1) setSelectedFeuilleId(fa[0].id);
+      }
+    }
+
     setLoading(false);
   }
 
   async function handleDemarrer() {
     if (!userId || !dateSession) return;
+    if (mode === 'assiste' && feuillesActives.length >= 2 && !selectedFeuilleId) return;
     setStarting(true);
     try {
+      const feuille = mode === 'assiste'
+        ? feuillesActives.find((f) => f.id === selectedFeuilleId) ?? null
+        : null;
+      const sessionPayload: Record<string, unknown> = {
+        entrainement_id: entrainementId,
+        user_id:         userId,
+        date_session:    dateSession,
+        duree:           duree || 0,
+        mode,
+        closed:          false,
+      };
+      if (feuille) {
+        if (feuille.type === 'mecanique') sessionPayload.feuille_mecanique_id = feuille.id;
+        else                              sessionPayload.feuille_chaotique_id  = feuille.id;
+      }
       const { data, error } = await supabase
         .from('session')
-        .insert({
-          entrainement_id: entrainementId,
-          user_id:         userId,
-          date_session:    dateSession,
-          duree:           duree || 0,
-          mode,
-          closed:          false,
-        })
+        .insert(sessionPayload)
         .select('id')
         .single();
       if (error || !data) {
-        console.error('[demarrer] session insert error:', error);
+        console.error('[demarrer] session insert error:', JSON.stringify(error));
         return;
       }
       router.push(`/entrainement/${entrainementId}/${mode}?session_id=${data.id}`);
@@ -322,10 +359,35 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
               </button>
             </div>
 
+            {/* Sélecteur de feuille (mode assisté, 2+ feuilles actives) */}
+            {mode === 'assiste' && feuillesActives.length >= 2 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-[#555]">Feuille à travailler</p>
+                <div className="flex gap-2">
+                  {feuillesActives.map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setSelectedFeuilleId(f.id)}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-colors text-left ${
+                        selectedFeuilleId === f.id
+                          ? f.type === 'mecanique'
+                            ? 'bg-[#185FA5] text-white border-[#185FA5]'
+                            : 'bg-[#534AB7] text-white border-[#534AB7]'
+                          : 'bg-white text-[#555] border-[#E8E8E8] hover:border-[#185FA5]'
+                      }`}
+                    >
+                      <span className="block font-bold">{f.type === 'mecanique' ? 'M' : 'C'}</span>
+                      <span className="truncate block">{f.titre}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Démarrer */}
             <button
               onClick={handleDemarrer}
-              disabled={starting || !dateSession}
+              disabled={starting || !dateSession || (mode === 'assiste' && feuillesActives.length >= 2 && !selectedFeuilleId)}
               className="w-full py-3 rounded-xl bg-[#185FA5] text-white font-semibold text-sm
                          hover:bg-[#1450A0] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
