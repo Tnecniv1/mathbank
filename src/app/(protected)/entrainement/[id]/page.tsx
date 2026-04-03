@@ -204,6 +204,21 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
 
   async function handleDemarrer() {
     if (!userId || !dateSession) return;
+
+    const { data: existingSession } = await supabase
+      .from('session')
+      .select('id')
+      .eq('entrainement_id', entrainementId)
+      .eq('closed', false)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (existingSession) {
+      router.push(`/entrainement/${entrainementId}/autonome?session_id=${existingSession.id}`);
+      return;
+    }
+
     setStarting(true);
     try {
       const { data, error } = await supabase

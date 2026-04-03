@@ -411,10 +411,9 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
       try {
         const { data: sessRows } = await supabase
           .from('session')
-          .select('id, closed, updated_at')
+          .select('id, closed, created_at')
           .eq('entrainement_id', entrainementId)
-          .eq('mode', 'autonome')
-          .order('updated_at', { ascending: false });
+          .order('created_at', { ascending: false });
 
         if (sessRows && sessRows.length > 0) {
           const sessIds = sessRows.map((s) => s.id as string);
@@ -439,12 +438,16 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
             });
           }
 
-          setAllRoues(sessRows.map((s) => ({
+          const roues = sessRows.map((s) => ({
             id:         s.id as string,
             closed:     (s.closed as boolean) ?? false,
-            updated_at: s.updated_at as string,
+            updated_at: s.created_at as string,
             data:       { exercices: obsMap[s.id as string] ?? [] },
-          })));
+          }));
+          setAllRoues(roues);
+          console.log('[autonome] sessRows:', JSON.stringify(sessRows));
+          console.log('[autonome] obsRows:', JSON.stringify(obsRows));
+          console.log('[autonome] allRoues:', JSON.stringify(roues));
         }
       } catch {
         // Pas de roues — démarrage vide normal
@@ -458,7 +461,20 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
   // ── Lire session_id depuis l'URL ──────────────────────────────────────────────
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get('session_id');
-    if (id) { setSessionId(id); sessionIdRef.current = id; }
+    if (!id) return;
+    const verify = async () => {
+      const { data: sessCheck } = await supabase
+        .from('session')
+        .select('id')
+        .eq('id', id)
+        .single();
+      if (sessCheck) {
+        setSessionId(id);
+        sessionIdRef.current = id;
+      }
+      // Si sessCheck est null, on n'initialise pas sessionIdRef — le hub permettra de choisir la bonne session
+    };
+    verify();
   }, []);
 
   // ── Exercices ─────────────────────────────────────────────────────────────────
