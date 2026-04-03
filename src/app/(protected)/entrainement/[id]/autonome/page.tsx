@@ -562,8 +562,22 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
 
   // ── Boucler ───────────────────────────────────────────────────────────────────
   const boucler = async () => {
-    // Annuler le debounce en cours et sauvegarder immédiatement avec closed=true
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+
+    // Si aucune observation liée à cette session, supprimer la session et retourner
+    if (sessionIdRef.current) {
+      const { count } = await supabase
+        .from('observation')
+        .select('id', { count: 'exact', head: true })
+        .eq('session_id', sessionIdRef.current);
+      if ((count ?? 0) === 0) {
+        await supabase.from('session').delete().eq('id', sessionIdRef.current);
+        router.push(`/entrainement/${entrainementId}`);
+        return;
+      }
+    }
+
+    // Annuler le debounce en cours et sauvegarder immédiatement avec closed=true
     setBouclageLoading(true);
     setBouclageError(null);
     try {
