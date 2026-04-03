@@ -102,14 +102,14 @@ export async function POST(req: Request) {
     entrainement_id?: string;
   } = body;
 
-  // Cas spécial : bouclage sans photo (juste fermer la roue)
+  // Cas spécial : bouclage sans photo (juste fermer l'observation)
   if (roue_id && boucler && !photo_base64) {
     const { error: closeError } = await service
-      .from('grille_observation')
+      .from('observation')
       .update({ closed: true })
       .eq('id', roue_id);
     if (closeError) {
-      console.error('[evaluate] close roue error:', closeError);
+      console.error('[evaluate] close observation error:', closeError);
       return NextResponse.json({ error: 'Erreur BDD' }, { status: 500 });
     }
     return NextResponse.json({ success: true, closed: true });
@@ -228,130 +228,88 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Réponse IA invalide' }, { status: 500 });
   }
 
-  // 9. Construire le data JSONB complet
+  // 9. Construire le JSONB aplati + scores
   const now = new Date();
   const id  = String(now.getTime());
 
-  const exerciceEntry: Record<string, unknown> = {
-    id: `${id}_exo`,
-    type: feuilleType,
-    reference,
-    feuille_id,
-    reussi: evalResult.reussi ?? false,
-  };
+  const CRITERES_EVAL = ['C1','C2','C3','C4','S1','S2','S3','S4','R1','R2','R3','R4'];
+  const validated = evalResult.validated ?? {};
+  let trueCount = 0, evalCount = 0;
+  for (const k of CRITERES_EVAL) {
+    const v = validated[k];
+    if (v === true || v === null) { evalCount++; if (v === true) trueCount++; }
+  }
+  const score_global = evalCount > 0 ? Math.round(trueCount / evalCount * 100) : null;
+  const bilan = (validated as Record<string, boolean | null>).B1 ?? null;
 
-  if (feuilleType === 'chaotique') {
-    exerciceEntry.crosses = {
+  const obsData: Record<string, unknown> = {
+    validated: feuilleType === 'chaotique' ? (evalResult.validated ?? {}) : {},
+    crosses: feuilleType === 'chaotique' ? {
       C1: [], C2: [], C3: [], C4: [],
       S1: [], S2: [], S3: [], S4: [],
       R1: [], R2: [], R3: [], R4: [],
       B1: [],
-    };
-    exerciceEntry.validated = evalResult.validated ?? {
-      C1: false, C2: false, C3: false, C4: false,
-      S1: false, S2: false, S3: false, S4: false,
-      R1: false, R2: false, R3: false, R4: false,
-      B1: false,
-    };
-  }
-
-  const data = {
-    id,
-    meta: {
-      user_id: user.id,
-      nom,
-      prenom,
-      feuille: feuilleTitre,
-      sessions: [{ date: now.toISOString().slice(0, 10), duree: `${Math.round((now.getTime() - (session_start_time ?? now.getTime())) / 60000)}min` }],
-      note: evalResult.note ?? '',
-    },
-    exercices: [exerciceEntry],
-    closed: true,
-    closedAt: now.toISOString(),
-    inserted: false,
+    } : {},
+    note: evalResult.note ?? '',
   };
 
-  // 10. INSERT ou UPDATE dans grille_observation (service-role, bypass RLS)
-  if (roue_id) {
-    // ── Mise à jour d'une roue existante ────────────────────────────────
-    const { data: existingRow, error: fetchError } = await service
-      .from('grille_observation')
-      .select('data')
-      .eq('id', roue_id)
+  // Résoudre le session_id depuis entrainement_id si nécessaire
+  let resolvedSessionId: string | null = null;
+  if (entrainement_id) {
+    const { data: sessRow } = await service
+      .from('session')
+      .select('id')
+      .eq('entrainement_id', entrainement_id)
+      .order('created_at', { ascending: false })
+      .limit(1)
       .single();
+    resolvedSessionId = sessRow?.id ?? null;
+  }
 
-    if (fetchError || !existingRow) {
-      console.error('[evaluate] roue introuvable:', fetchError);
-      return NextResponse.json({ error: 'Roue introuvable' }, { status: 404 });
-    }
+  // 10. UPSERT dans observation (service-role, bypass RLS)
+  const obsPayload: Record<string, unknown> = {
+    id:           roue_id ?? id,
+    user_id:      user.id,
+    session_id:   resolvedSessionId,
+    feuille_id,
+    mode:         'assiste',
+    reference,
+    type:         feuilleType,
+    reussi:       evalResult.reussi ?? false,
+    data:         obsData,
+    closed:       boucler ?? true,
+    score_global,
+    bilan,
+    nb_erreurs:   0,
+    updated_at:   now.toISOString(),
+  };
 
-    const updatedData = { ...existingRow.data };
-    const exoIndex = (updatedData.exercices ?? []).findIndex(
-      (e: any) => e.reference === reference
-    );
-    if (exoIndex !== -1) {
-      updatedData.exercices[exoIndex] = {
-        ...updatedData.exercices[exoIndex],
-        reussi: evalResult.reussi,
-        ...(evalResult.validated !== undefined && { validated: evalResult.validated }),
-      };
-    }
-    updatedData.meta = {
-      ...updatedData.meta,
-      note: evalResult.note ?? updatedData.meta?.note ?? '',
-    };
+  console.log('[evaluate] UPSERT observation, id =', obsPayload.id);
 
-    console.log('[evaluate] UPDATE grille_observation, roue_id =', roue_id);
-    const updatePayload: Record<string, unknown> = { data: updatedData, closed: boucler ?? false };
-    if (entrainement_id) updatePayload.entrainement_id = entrainement_id;
+  const { error: upsertError } = await service
+    .from('observation')
+    .upsert(obsPayload);
 
-    const { error: updateError } = await service
-      .from('grille_observation')
-      .update(updatePayload)
-      .eq('id', roue_id);
+  console.log('[evaluate] UPSERT résultat :', JSON.stringify(upsertError ?? 'OK'));
 
-    console.log('[evaluate] UPDATE résultat :', JSON.stringify(updateError ?? 'OK'));
-
-    if (updateError) {
-      console.error('[evaluate] grille_observation update error:', updateError);
-      return NextResponse.json({ error: 'Erreur BDD' }, { status: 500 });
-    }
-  } else {
-    // ── Création d'une nouvelle grille ───────────────────────────────────
-    const insertPayload: Record<string, unknown> = { id, user_id: user.id, data, closed: true, inserted: false };
-    if (entrainement_id) insertPayload.entrainement_id = entrainement_id;
-    console.log('[evaluate] tentative INSERT grille_observation, id =', id);
-    console.log('[evaluate] data à insérer :', JSON.stringify(insertPayload).slice(0, 500));
-
-    const { error: insertError } = await service
-      .from('grille_observation')
-      .insert(insertPayload);
-
-    console.log('[evaluate] INSERT résultat :', JSON.stringify(insertError ?? 'OK'));
-
-    if (insertError) {
-      console.error('[evaluate] grille_observation insert error:', insertError);
-      return NextResponse.json({ error: 'Erreur BDD' }, { status: 500 });
-    }
+  if (upsertError) {
+    console.error('[evaluate] observation upsert error:', upsertError);
+    return NextResponse.json({ error: 'Erreur BDD' }, { status: 500 });
   }
 
   // Mise à jour de la progression (fire-and-forget)
   (async () => {
     try {
-      const { data: grilles } = await service
-        .from('grille_observation')
-        .select('data')
-        .filter('data->meta->>user_id', 'eq', user.id);
+      const { data: obsList } = await service
+        .from('observation')
+        .select('reussi')
+        .eq('user_id', user.id)
+        .eq('feuille_id', feuille_id);
 
-      if (!grilles) return;
+      if (!obsList) return;
 
-      let total = 0;
-      let reussis = 0;
-      for (const g of grilles) {
-        const exos = (g.data?.exercices ?? []).filter((e: any) => e.feuille_id === feuille_id);
-        total += exos.length;
-        reussis += exos.filter((e: any) => e.reussi === true).length;
-      }
+      const total   = obsList.length;
+      const reussis = obsList.filter((o: any) => o.reussi === true).length;
 
       if (total === 0) return;
 
@@ -383,10 +341,10 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     success: true,
-    grille_id: roue_id ?? id,
-    reussi: evalResult.reussi,
-    note: evalResult.note,
-    validated: evalResult.validated ?? null,
-    type: feuilleType,
+    grille_id:  roue_id ?? id,
+    reussi:     evalResult.reussi,
+    note:       evalResult.note,
+    validated:  evalResult.validated ?? null,
+    type:       feuilleType,
   });
 }

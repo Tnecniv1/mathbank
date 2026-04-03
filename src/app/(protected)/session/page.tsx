@@ -68,18 +68,27 @@ export default function SessionPage() {
 
     const ids = data.map((e: any) => e.id);
 
-    const [{ data: grilles }, { data: sessionsData }] = await Promise.all([
-      supabase.from('grille_observation').select('entrainement_id, data').in('entrainement_id', ids),
-      supabase.from('session').select('entrainement_id, duree, date_session').in('entrainement_id', ids),
-    ]);
+    const { data: sessionsData } = await supabase
+      .from('session')
+      .select('id, entrainement_id, duree, date_session')
+      .in('entrainement_id', ids);
 
-    // ── Comptage exercices (roues) ────────────────────────────────────────────
+    const sessionIds = (sessionsData ?? []).map((s: any) => s.id as string);
+    const { data: observations } = sessionIds.length > 0
+      ? await supabase.from('observation').select('session_id, data').in('session_id', sessionIds)
+      : { data: [] as any[] };
+
+    // Map session → entrainement
+    const sessEntMap: Record<string, string> = {};
+    for (const s of sessionsData ?? []) {
+      if (s.id && s.entrainement_id) sessEntMap[s.id] = s.entrainement_id;
+    }
+
+    // ── Comptage exercices (observations) ────────────────────────────────────
     const counts: Record<string, number> = {};
-    for (const g of grilles ?? []) {
-      if (g.entrainement_id) {
-        const exos = g.data?.exercices ?? [];
-        counts[g.entrainement_id] = (counts[g.entrainement_id] ?? 0) + exos.length;
-      }
+    for (const obs of observations ?? []) {
+      const entId = sessEntMap[obs.session_id];
+      if (entId) counts[entId] = (counts[entId] ?? 0) + 1;
     }
 
     // ── Stats sessions ────────────────────────────────────────────────────────
@@ -98,23 +107,23 @@ export default function SessionPage() {
     const scoreAcc: Record<string, { valides: number; evalues: number; brut: number; hasData: boolean }> = {};
     for (const id of ids) scoreAcc[id] = { valides: 0, evalues: 0, brut: 0, hasData: false };
 
-    for (const g of grilles ?? []) {
-      if (!g.entrainement_id || !scoreAcc[g.entrainement_id]) continue;
-      for (const exo of g.data?.exercices ?? []) {
-        let exoValides = 0, exoEvalues = 0;
-        for (const k of CRITERES) {
-          const v = exo.validated?.[k];
-          if (v === true || v === null) {
-            exoEvalues++;
-            if (v === true) exoValides++;
-          }
+    for (const obs of observations ?? []) {
+      const entId = sessEntMap[obs.session_id];
+      if (!entId || !scoreAcc[entId]) continue;
+      const validated = obs.data?.validated ?? {};
+      let exoValides = 0, exoEvalues = 0;
+      for (const k of CRITERES) {
+        const v = validated[k];
+        if (v === true || v === null) {
+          exoEvalues++;
+          if (v === true) exoValides++;
         }
-        if (exoEvalues > 0) {
-          scoreAcc[g.entrainement_id].valides  += exoValides;
-          scoreAcc[g.entrainement_id].evalues  += exoEvalues;
-          scoreAcc[g.entrainement_id].brut     += Math.round((exoValides / exoEvalues) * 100);
-          scoreAcc[g.entrainement_id].hasData   = true;
-        }
+      }
+      if (exoEvalues > 0) {
+        scoreAcc[entId].valides += exoValides;
+        scoreAcc[entId].evalues += exoEvalues;
+        scoreAcc[entId].brut    += Math.round((exoValides / exoEvalues) * 100);
+        scoreAcc[entId].hasData  = true;
       }
     }
 

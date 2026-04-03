@@ -14,11 +14,10 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
 
-  // user_id dans grille_observation = prof ; l'élève est dans data->meta->user_id
   const { data: rows, error } = await service
-    .from('grille_observation')
-    .select('id, data, created_at')
-    .filter("data->meta->>user_id", 'eq', user.id)
+    .from('observation')
+    .select('id, data, feuille_id, reference, type, reussi, created_at')
+    .eq('user_id', user.id)
     .eq('closed', false)
     .order('created_at', { ascending: false })
     .limit(1);
@@ -32,14 +31,14 @@ export async function GET() {
     return NextResponse.json({ roue_id: null });
   }
 
-  const roue = rows[0];
-  const exercices = (roue.data?.exercices ?? []).map((e: any) => ({
-    feuille_id: e.feuille_id ?? null,
-    reference: e.reference ?? '',
-    type: (e.type ?? 'mecanique') as 'mecanique' | 'chaotique',
-    validated: e.validated ?? null,
-    reussi: e.reussi ?? null,
-  }));
+  const obs = rows[0];
+  const exercices = [{
+    feuille_id: obs.feuille_id ?? null,
+    reference:  obs.reference ?? '',
+    type:       (obs.type ?? 'mecanique') as 'mecanique' | 'chaotique',
+    validated:  obs.data?.validated ?? null,
+    reussi:     obs.reussi ?? null,
+  }];
 
-  return NextResponse.json({ roue_id: roue.id, exercices });
+  return NextResponse.json({ roue_id: obs.id, exercices });
 }

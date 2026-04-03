@@ -24,7 +24,6 @@ type SessionData = {
   id: string;
   created_at: string;
   duree: number | null;
-  mode: 'autonome' | 'assiste' | null;
   nb_exercices: number;
   date_session: string | null;
 };
@@ -36,11 +35,6 @@ type RoueObsData = {
   exercices: Exercice[];
 };
 
-type FeuilleActive = {
-  id: string;
-  titre: string;
-  type: 'mecanique' | 'chaotique';
-};
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
@@ -59,13 +53,10 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
 
   // Formulaire nouvelle session
   const todayISO = new Date().toISOString().slice(0, 10);
-  const [mode, setMode]           = useState<'autonome' | 'assiste'>('autonome');
   const [dateSession, setDateSession] = useState(todayISO);
   const [duree, setDuree]         = useState<number>(30);
   const [starting, setStarting]         = useState(false);
   const [boucling, setBoucling]         = useState(false);
-  const [feuillesActives, setFeuillesActives] = useState<FeuilleActive[]>([]);
-  const [selectedFeuilleId, setSelectedFeuilleId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editDuree, setEditDuree]       = useState<string>('');
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
@@ -92,7 +83,7 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
 
     const { data: sessData } = await supabase
       .from('session')
-      .select('id, created_at, duree, mode, date_session, exercice(id)')
+      .select('id, created_at, duree, date_session, closed')
       .eq('entrainement_id', entrainementId)
       .order('created_at', { ascending: false });
     if (!mounted) return;
@@ -102,40 +93,36 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
         id:           s.id,
         created_at:   s.created_at,
         duree:        s.duree ?? null,
-        mode:         s.mode ?? null,
-        nb_exercices: (s.exercice ?? []).length,
+        nb_exercices: 0,
         date_session: s.date_session ?? null,
       }))
     );
 
-    const { data: roueeData } = await supabase
-      .from('grille_observation')
-      .select('id, closed, updated_at, data')
-      .eq('entrainement_id', entrainementId)
-      .order('updated_at', { ascending: false });
+    // Charger les observations via les sessions de cet entrainement
+    const sessionIdsForObs = (sessData ?? []).map((s: any) => s.id as string);
+    let obsData: any[] | null = null;
+    if (sessionIdsForObs.length > 0) {
+      const { data: obsBySess } = await supabase
+        .from('observation')
+        .select('id, session_id, feuille_id, type, reference, reussi, data, updated_at')
+        .in('session_id', sessionIdsForObs)
+        .order('updated_at', { ascending: false });
+      obsData = obsBySess ?? [];
+    }
+    // Fallback : observations migrées avec session_id = null → chercher par user_id + entrainement_id indirect
+    if ((!obsData || obsData.length === 0) && uid) {
+      const { data: obsByUser } = await supabase
+        .from('observation')
+        .select('id, session_id, feuille_id, type, reference, reussi, data, updated_at')
+        .eq('user_id', uid)
+        .is('session_id', null)
+        .order('updated_at', { ascending: false });
+      obsData = obsByUser ?? [];
+    }
     if (!mounted) return;
 
-    const parsedRoues: RoueObsData[] = (roueeData ?? []).map((r: any) => ({
-      id:         r.id,
-      closed:     r.closed ?? false,
-      updated_at: r.updated_at,
-      exercices:  (r.data?.exercices ?? []).map((e: any) => ({
-        id:            e.id,
-        type:          e.type as 'mecanique' | 'chaotique',
-        feuille_id:    e.feuille_id ?? '',
-        feuille_titre: e.feuille_titre ?? '',
-        reference:     e.reference ?? '',
-        reussi:        e.reussi ?? null,
-        mecaList:      e.mecaList ?? [],
-        validated:     e.validated ?? {},
-        crosses:       e.crosses ?? {},
-      })),
-    }));
-
     // Résolution des titres de feuilles depuis la table noeud
-    const feuilleIds = [...new Set(
-      parsedRoues.flatMap((r) => r.exercices.map((e) => e.feuille_id).filter(Boolean))
-    )];
+    const feuilleIds = [...new Set((obsData ?? []).map((o: any) => o.feuille_id).filter(Boolean))];
     const titreMap: Record<string, string> = {};
     if (feuilleIds.length > 0) {
       const { data: noeuds } = await supabase
@@ -145,16 +132,54 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
       if (!mounted) return;
       (noeuds ?? []).forEach((n: any) => { titreMap[n.id] = n.titre; });
     }
-    const routesWithTitres = parsedRoues.map((r) => ({
-      ...r,
-      exercices: r.exercices.map((e) => ({
-        ...e,
-        feuille_titre: titreMap[e.feuille_id] ?? e.feuille_titre ?? e.feuille_id,
-      })),
-    }));
+
+    // Grouper les observations par session pour construire les RoueObsData
+    const sessionClosedMap: Record<string, boolean> = {};
+    const sessionUpdatedMap: Record<string, string> = {};
+    for (const s of sessData ?? []) {
+      sessionClosedMap[s.id] = (s as any).closed ?? false;
+      sessionUpdatedMap[s.id] = (s as any).updated_at ?? s.created_at;
+    }
+    const ORPHAN_KEY = '__orphan__';
+    const obsMapBySess: Record<string, Exercice[]> = {};
+    for (const obs of obsData ?? []) {
+      const key = obs.session_id ?? ORPHAN_KEY;
+      if (!obsMapBySess[key]) obsMapBySess[key] = [];
+      obsMapBySess[key].push({
+        id:            obs.id,
+        type:          obs.type as 'mecanique' | 'chaotique',
+        feuille_id:    obs.feuille_id ?? '',
+        feuille_titre: titreMap[obs.feuille_id] ?? obs.feuille_id ?? '',
+        reference:     obs.reference ?? '',
+        reussi:        obs.reussi ?? null,
+        mecaList:      [],
+        validated:     obs.data?.validated ?? {},
+        crosses:       obs.data?.crosses ?? {},
+      });
+    }
+
+    // Roues liées à une session connue
+    const routesWithTitres: RoueObsData[] = sessionIdsForObs
+      .filter((sid) => obsMapBySess[sid])
+      .map((sid) => ({
+        id:         sid,
+        closed:     sessionClosedMap[sid] ?? false,
+        updated_at: sessionUpdatedMap[sid] ?? '',
+        exercices:  obsMapBySess[sid],
+      }));
+
+    // Observations orphelines (session_id = null) → regroupées en une pseudo-roue
+    if (obsMapBySess[ORPHAN_KEY]) {
+      routesWithTitres.push({
+        id:         ORPHAN_KEY,
+        closed:     true,
+        updated_at: '',
+        exercices:  obsMapBySess[ORPHAN_KEY],
+      });
+    }
 
     setAllRoues(routesWithTitres);
-    setTotalExoAutonome(routesWithTitres.reduce((acc, r) => acc + r.exercices.length, 0));
+    setTotalExoAutonome((obsData ?? []).length);
 
     const sessionIds = (sessData ?? []).map((s: any) => s.id);
     if (sessionIds.length > 0) {
@@ -174,59 +199,29 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
       );
     }
 
-    if (uid && mounted) {
-      const { data: progs } = await supabase
-        .from('progression_feuille')
-        .select('feuille_id, noeud:noeud!feuille_id(id, titre, type)')
-        .eq('user_id', uid)
-        .eq('en_cours', true)
-        .eq('est_termine', false);
-      if (mounted) {
-        const fa: FeuilleActive[] = (progs ?? [])
-          .filter((p: any) => p.noeud)
-          .map((p: any) => ({
-            id:    p.noeud.id,
-            titre: p.noeud.titre,
-            type:  p.noeud.type as 'mecanique' | 'chaotique',
-          }));
-        setFeuillesActives(fa);
-        if (fa.length === 1) setSelectedFeuilleId(fa[0].id);
-      }
-    }
-
     setLoading(false);
   }
 
   async function handleDemarrer() {
     if (!userId || !dateSession) return;
-    if (mode === 'assiste' && feuillesActives.length >= 2 && !selectedFeuilleId) return;
     setStarting(true);
     try {
-      const feuille = mode === 'assiste'
-        ? feuillesActives.find((f) => f.id === selectedFeuilleId) ?? null
-        : null;
-      const sessionPayload: Record<string, unknown> = {
-        entrainement_id: entrainementId,
-        user_id:         userId,
-        date_session:    dateSession,
-        duree:           duree || 0,
-        mode,
-        closed:          false,
-      };
-      if (feuille) {
-        if (feuille.type === 'mecanique') sessionPayload.feuille_mecanique_id = feuille.id;
-        else                              sessionPayload.feuille_chaotique_id  = feuille.id;
-      }
       const { data, error } = await supabase
         .from('session')
-        .insert(sessionPayload)
+        .insert({
+          entrainement_id: entrainementId,
+          user_id:         userId,
+          date_session:    dateSession,
+          duree:           duree || 0,
+          closed:          false,
+        })
         .select('id')
         .single();
       if (error || !data) {
         console.error('[demarrer] session insert error:', JSON.stringify(error));
         return;
       }
-      router.push(`/entrainement/${entrainementId}/${mode}?session_id=${data.id}`);
+      router.push(`/entrainement/${entrainementId}/autonome?session_id=${data.id}`);
     } finally {
       setStarting(false);
     }
@@ -335,59 +330,10 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
               </div>
             </div>
 
-            {/* Mode */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => setMode('autonome')}
-                className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${
-                  mode === 'autonome'
-                    ? 'bg-[#185FA5] text-white border-[#185FA5]'
-                    : 'bg-white text-[#555] border-[#E8E8E8] hover:border-[#185FA5]'
-                }`}
-              >
-                Autonome
-              </button>
-              <button
-                onClick={() => setMode('assiste')}
-                className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${
-                  mode === 'assiste'
-                    ? 'bg-[#185FA5] text-white border-[#185FA5]'
-                    : 'bg-white text-[#555] border-[#E8E8E8] hover:border-[#185FA5]'
-                }`}
-              >
-                Assisté
-              </button>
-            </div>
-
-            {/* Sélecteur de feuille (mode assisté, 2+ feuilles actives) */}
-            {mode === 'assiste' && feuillesActives.length >= 2 && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-[#555]">Feuille à travailler</p>
-                <div className="flex gap-2">
-                  {feuillesActives.map((f) => (
-                    <button
-                      key={f.id}
-                      onClick={() => setSelectedFeuilleId(f.id)}
-                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-colors text-left ${
-                        selectedFeuilleId === f.id
-                          ? f.type === 'mecanique'
-                            ? 'bg-[#185FA5] text-white border-[#185FA5]'
-                            : 'bg-[#534AB7] text-white border-[#534AB7]'
-                          : 'bg-white text-[#555] border-[#E8E8E8] hover:border-[#185FA5]'
-                      }`}
-                    >
-                      <span className="block font-bold">{f.type === 'mecanique' ? 'M' : 'C'}</span>
-                      <span className="truncate block">{f.titre}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Démarrer */}
             <button
               onClick={handleDemarrer}
-              disabled={starting || !dateSession || (mode === 'assiste' && feuillesActives.length >= 2 && !selectedFeuilleId)}
+              disabled={starting || !dateSession}
               className="w-full py-3 rounded-xl bg-[#185FA5] text-white font-semibold text-sm
                          hover:bg-[#1450A0] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -478,15 +424,6 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
                         ) : null}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        {s.mode && (
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                            s.mode === 'autonome'
-                              ? 'bg-[#E6F1FB] text-[#185FA5]'
-                              : 'bg-[#F0EEFF] text-[#534AB7]'
-                          }`}>
-                            {s.mode === 'autonome' ? 'Autonome' : 'Assisté'}
-                          </span>
-                        )}
                         <button
                           onClick={() => { setEditingSessionId(s.id); setEditDuree(String(s.duree ?? '')); }}
                           className="text-[#CCCCCC] hover:text-[#555] transition-colors text-base leading-none"

@@ -233,13 +233,19 @@ export default function TableauProgression() {
 
  async function loadScoresGrille(userId: string, feuilleIds: string[]) {
  try {
-   const { data: grilles } = await supabase
-     .from('grille_observation')
-     .select('data, updated_at')
+   let query = supabase
+     .from('observation')
+     .select('data, feuille_id, updated_at')
      .eq('user_id', userId)
      .order('updated_at', { ascending: true });
 
-   if (!grilles || grilles.length === 0) {
+   if (feuilleIds.length > 0) {
+     query = query.in('feuille_id', feuilleIds);
+   }
+
+   const { data: observations } = await query;
+
+   if (!observations || observations.length === 0) {
      setScoreGrilleData([]);
      return;
    }
@@ -247,15 +253,11 @@ export default function TableauProgression() {
    const CRITERES_KEYS = ['C1','C2','C3','C4','S1','S2','S3','S4','R1','R2','R3','R4'];
    const TAILLE_TRANCHE = 5;
 
-   const allExos: any[] = [];
-   for (const grille of grilles) {
-     const exercices = grille.data?.exercices ?? [];
-     for (const exo of exercices) {
-       if (feuilleIds.length === 0 || feuilleIds.includes(exo.feuille_id)) {
-         allExos.push(exo);
-       }
-     }
-   }
+   const allExos: any[] = observations.map((obs: any) => ({
+     feuille_id: obs.feuille_id,
+     validated:  obs.data?.validated ?? {},
+     crosses:    obs.data?.crosses   ?? {},
+   }));
 
    const tranches: TrancheDonnees[] = [];
    for (let i = 0; i < allExos.length; i += TAILLE_TRANCHE) {

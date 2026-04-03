@@ -249,12 +249,14 @@ export async function POST(req: Request) {
     prochain_exercice,
     reprise,
     roue_en_cours,
+    observation_id,
   }: {
     messages: ClientMessage[];
     feuille_id: string;
     prochain_exercice: number;
     reprise?: boolean;
     roue_en_cours?: RoueEnCours;
+    observation_id?: string;
   } = body;
 
   if (!feuille_id || !Array.isArray(messages)) {
@@ -420,14 +422,17 @@ export async function POST(req: Request) {
         ...messagesForStorage,
         { role: 'assistant', content: accumulated, timestamp: new Date().toISOString() },
       ];
+      const insertPayload: Record<string, unknown> = {
+        user_id: user.id,
+        feuille_id,
+        exercice_numero: prochain_exercice ?? 1,
+        messages: fullHistory,
+      };
+      if (observation_id) insertPayload.observation_id = observation_id;
+
       service
         .from('conversation_history')
-        .insert({
-          user_id: user.id,
-          feuille_id,
-          exercice_numero: prochain_exercice ?? 1,
-          messages: fullHistory,
-        })
+        .insert(insertPayload)
         .then(({ error }) => {
           if (error) console.error('[session/chat] conversation_history insert error:', error);
         });

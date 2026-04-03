@@ -46,61 +46,48 @@ export async function GET() {
     .select('id, titre, type, pdf_url')
     .in('id', feuillesActives);
 
-  // ── 5. Prochain exercice pour chaque feuille + roue en cours (en parallèle) ──
-  const [feuillesList, openRoueResult] = await Promise.all([
-    Promise.all(
-      (noeuds ?? []).map(async (noeud) => {
-        // Compte les exercices déjà enregistrés dans grille_observation pour cette feuille
-        const { data: grilles } = await service
-          .from('grille_observation')
-          .select('data')
-          .eq('user_id', user.id);
+  // ── 5. Prochain exercice + roue en cours par feuille ────────────────────
+  const feuilles = await Promise.all(
+    (noeuds ?? []).map(async (noeud) => {
+      const [countResult, openObsResult] = await Promise.all([
+        service
+          .from('observation')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('feuille_id', noeud.id),
+        service
+          .from('observation')
+          .select('id, data, reference, type')
+          .eq('user_id', user.id)
+          .eq('feuille_id', noeud.id)
+          .eq('closed', false)
+          .order('updated_at', { ascending: false })
+          .limit(1),
+      ]);
 
-        let nbExistants = 0;
-        for (const g of grilles ?? []) {
-          const exercices = (g.data?.exercices ?? []) as { feuille_id?: string }[];
-          nbExistants += exercices.filter((e) => e.feuille_id === noeud.id).length;
-        }
-        const prochain_exercice = nbExistants + 1;
+      const prochain_exercice = (countResult.count ?? 0) + 1;
+      const obsRow = openObsResult.data?.[0] ?? null;
 
-        return {
-          id: noeud.id,
-          titre: noeud.titre,
-          type: noeud.type as 'mecanique' | 'chaotique',
-          pdf_url: noeud.pdf_url ?? null,
-          prochain_exercice,
+      const entry: Record<string, unknown> = {
+        id: noeud.id,
+        titre: noeud.titre,
+        type: noeud.type as 'mecanique' | 'chaotique',
+        pdf_url: noeud.pdf_url ?? null,
+        prochain_exercice,
+      };
+
+      if (obsRow) {
+        entry.roue_en_cours = {
+          roue_id:   obsRow.id as string,
+          reference: (obsRow.reference ?? '') as string,
+          validated: (obsRow.data?.validated ?? null) as Record<string, boolean> | null,
+          type:      (obsRow.type ?? 'mecanique') as 'mecanique' | 'chaotique',
         };
-      })
-    ),
-    // Roue ouverte pour cet élève (user_id prof, meta.user_id = élève)
-    service
-      .from('grille_observation')
-      .select('id, data')
-      .filter("data->meta->>user_id", 'eq', user.id)
-      .eq('closed', false)
-      .order('created_at', { ascending: false })
-      .limit(1),
-  ]);
+      }
 
-  // ── 6. Enrichir les feuilles avec roue_en_cours si applicable ─────────
-  const roue = openRoueResult.data?.[0] ?? null;
-
-  const feuilles = feuillesList.map((f) => {
-    if (!roue) return f;
-    const exo = (roue.data?.exercices ?? []).find(
-      (e: any) => e.feuille_id === f.id
-    );
-    if (!exo) return f;
-    return {
-      ...f,
-      roue_en_cours: {
-        roue_id: roue.id as string,
-        reference: (exo.reference ?? '') as string,
-        validated: (exo.validated ?? null) as Record<string, boolean> | null,
-        type: (exo.type ?? 'mecanique') as 'mecanique' | 'chaotique',
-      },
-    };
-  });
+      return entry;
+    })
+  );
 
   return NextResponse.json({
     feuilles,

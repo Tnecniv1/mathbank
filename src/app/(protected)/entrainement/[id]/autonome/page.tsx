@@ -334,7 +334,7 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
   const [roueeReadonly, setRoueeReadonly]     = useState(false);
 
   // ── Persistance ───────────────────────────────────────────────────────────────
-  const roueeId      = useRef<string | null>(null);   // ID de la ligne grille_observation
+  const sessionIdRef = useRef<string | null>(null);   // session DB id en cours
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionsRef  = useRef<Session[]>([]);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
@@ -346,27 +346,45 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
   const today    = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
   const todayISO = new Date().toISOString().slice(0, 10);
 
-  // ── Upsert grille_observation ─────────────────────────────────────────────────
+  // ── Upsert observation (une ligne par exercice) ───────────────────────────────
   const saveToSupabase = useCallback(async (
     exos: Exercice[],
-    sess: Session[],
+    _sess: Session[],
     closed: boolean,
   ): Promise<void> => {
-    if (!userId) return;
-    if (!roueeId.current) roueeId.current = Date.now().toString();
-    const id     = roueeId.current;
-    const feuille = feuilleMeca?.titre ?? feuilleChaos?.titre ?? '';
-    const { error } = await supabase.from('grille_observation').upsert({
-      id,
-      user_id:         userId,
-      data:            { id, meta: { feuille, sessions: sess }, exercices: exos, closed },
-      closed,
-      inserted:        false,
-      entrainement_id: entrainementId,
-      updated_at:      new Date().toISOString(),
-    });
-    if (error) throw new Error(error.message);
-  }, [userId, entrainementId, feuilleMeca, feuilleChaos]);
+    const sid = sessionIdRef.current;
+    if (!userId || !sid) return;
+    const CRITERES = ['C1','C2','C3','C4','S1','S2','S3','S4','R1','R2','R3','R4'];
+    for (const exo of exos) {
+      const validated = exo.validated ?? {};
+      const crosses   = exo.crosses   ?? {};
+      let trueCount = 0, evalCount = 0;
+      for (const k of CRITERES) {
+        const v = validated[k];
+        if (v === true || v === null) { evalCount++; if (v === true) trueCount++; }
+      }
+      const score_global = evalCount > 0 ? Math.round(trueCount / evalCount * 100) : null;
+      const nb_erreurs   = Object.values(crosses).reduce((s: number, arr: unknown[]) => s + arr.length, 0);
+      const bilan        = (validated.B1 as boolean | null | undefined) ?? null;
+      const { error } = await supabase.from('observation').upsert({
+        id:           exo.id,
+        user_id:      userId,
+        session_id:   sid,
+        feuille_id:   exo.feuille_id,
+        mode:         'autonome',
+        reference:    exo.reference,
+        type:         exo.type,
+        reussi:       exo.reussi,
+        data:         { validated: exo.validated, crosses: exo.crosses },
+        closed,
+        score_global,
+        nb_erreurs,
+        bilan,
+        updated_at:   new Date().toISOString(),
+      });
+      if (error) throw new Error(error.message);
+    }
+  }, [userId]);
 
   // Debounce 2 s — identique à grille-roue.html scheduleSave
   const scheduleAutoSave = useCallback((exos: Exercice[], sess: Session[]) => {
@@ -389,16 +407,45 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
         setCtxError(err.message ?? 'Erreur de chargement');
       }
 
-      // ── Charger toutes les roues pour cet entrainement ─────────────────────
+      // ── Charger toutes les roues (sessions autonomes + observations) ─────────
       try {
-        const { data: rows } = await supabase
-          .from('grille_observation')
-          .select('id, closed, updated_at, data')
+        const { data: sessRows } = await supabase
+          .from('session')
+          .select('id, closed, updated_at')
           .eq('entrainement_id', entrainementId)
-          .or('inserted.eq.false,inserted.is.null')
+          .eq('mode', 'autonome')
           .order('updated_at', { ascending: false });
 
-        if (rows) setAllRoues(rows as RoueRow[]);
+        if (sessRows && sessRows.length > 0) {
+          const sessIds = sessRows.map((s) => s.id as string);
+          const { data: obsRows } = await supabase
+            .from('observation')
+            .select('id, session_id, feuille_id, type, reference, reussi, data')
+            .in('session_id', sessIds);
+
+          const obsMap: Record<string, Exercice[]> = {};
+          for (const obs of obsRows ?? []) {
+            if (!obsMap[obs.session_id]) obsMap[obs.session_id] = [];
+            obsMap[obs.session_id].push({
+              id:            obs.id,
+              type:          obs.type as 'mecanique' | 'chaotique',
+              feuille_id:    obs.feuille_id ?? '',
+              feuille_titre: '',
+              reference:     obs.reference ?? '',
+              reussi:        obs.reussi ?? null,
+              mecaList:      [],
+              validated:     obs.data?.validated ?? {},
+              crosses:       obs.data?.crosses ?? {},
+            });
+          }
+
+          setAllRoues(sessRows.map((s) => ({
+            id:         s.id as string,
+            closed:     (s.closed as boolean) ?? false,
+            updated_at: s.updated_at as string,
+            data:       { exercices: obsMap[s.id as string] ?? [] },
+          })));
+        }
       } catch {
         // Pas de roues — démarrage vide normal
       }
@@ -411,7 +458,7 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
   // ── Lire session_id depuis l'URL ──────────────────────────────────────────────
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get('session_id');
-    if (id) setSessionId(id);
+    if (id) { setSessionId(id); sessionIdRef.current = id; }
   }, []);
 
   // ── Exercices ─────────────────────────────────────────────────────────────────
@@ -456,12 +503,11 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
 
   // ── Charger une roue existante ───────────────────────────────────────────────
   const loadRoue = useCallback((row: RoueRow) => {
-    roueeId.current = row.id;
+    // row.id est le session_id dans le nouveau design
+    setSessionId(row.id);
+    sessionIdRef.current = row.id;
     const exos = (row.data.exercices ?? []) as Exercice[];
-    const sess = (row.data.meta?.sessions ?? []) as Session[];
     setExercices(exos);
-    setSessions(sess);
-    sessionsRef.current = sess;
     setRoueeActive(true);
     setRoueeReadonly(row.closed);
     if (exos.length > 0) setActiveExoId(exos[0].id);
@@ -492,6 +538,11 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
     if (!activeExo) return;
     removeExercice(activeExo.id);
   }, [activeExo, removeExercice]);
+
+  // ── Choix de mode avant de créer une roue ────────────────────────────────────
+  const handleNouvelleRoue = useCallback((type: 'mecanique' | 'chaotique') => {
+    addExercice(type);
+  }, [addExercice]);
 
   // ── Boucler ───────────────────────────────────────────────────────────────────
   const boucler = async () => {
@@ -632,10 +683,11 @@ export default function AutonomePage({ params }: { params: Promise<{ id: string 
             feuilleMeca={feuilleMeca}
             feuilleChaos={feuilleChaos}
             onReprendre={loadRoue}
-            onNouvelle={addExercice}
+            onNouvelle={handleNouvelleRoue}
           />
         )}
       </div>
+
     </div>
   );
 }

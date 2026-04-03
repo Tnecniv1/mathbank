@@ -580,9 +580,9 @@ export default function AutonomePage() {
   const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | null>(null);
   const [sessions, setSessions]     = useState<Session[]>([]);
 
-  const sessionId  = useRef<string>(Date.now().toString());
-  const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionDbId = useRef<string | null>(null);
+  const saveTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const feuilleMeca  = ctx?.feuilles.find((f) => f.type === 'mecanique') ?? null;
   const feuilleChaos = ctx?.feuilles.find((f) => f.type === 'chaotique') ?? null;
@@ -629,38 +629,64 @@ export default function AutonomePage() {
     return null;
   }, [entrainementId, userId]);
 
+  // ── Session ───────────────────────────────────────────────────────────────────
+  const ensureSession = useCallback(async (eid: string): Promise<string | null> => {
+    if (sessionDbId.current) return sessionDbId.current;
+    if (!userId) return null;
+    const { data, error } = await supabase
+      .from('session')
+      .insert({ user_id: userId, entrainement_id: eid, mode: 'autonome', date_session: new Date().toISOString().slice(0, 10), duree: 0 })
+      .select('id')
+      .single();
+    if (!error && data) { sessionDbId.current = data.id; return data.id; }
+    console.error('[autonome] create session error:', error);
+    return null;
+  }, [userId]);
+
   // ── Sauvegarde ────────────────────────────────────────────────────────────────
   const saveGrille = useCallback((exos: Exercice[], eid: string | null, closed = false) => {
-    if (!userId) return;
-    const payload = {
-      id:              sessionId.current,
-      user_id:         userId,
-      closed,
-      inserted:        false,
-      entrainement_id: eid ?? null,
-      data: {
-        id:   sessionId.current,
-        meta: {
-          user_id:  userId,
-          feuille:  exos[0]?.feuille_titre ?? '',
-          sessions,
-          nom: '', prenom: '', note: '',
-        },
-        exercices:       exos,
-        entrainement_id: eid ?? null,
-        closed,
-        inserted: false,
-      },
-    };
-    supabase.from('grille_observation').upsert(payload).then(({ error }) => {
-      if (error) console.error('[autonome] save error:', error);
-      else {
+    if (!userId || !eid) return;
+    (async () => {
+      try {
+        const sid = await ensureSession(eid);
+        if (!sid) return;
+        const CRITERES = ['C1','C2','C3','C4','S1','S2','S3','S4','R1','R2','R3','R4'];
+        for (const exo of exos) {
+          const validated = exo.validated ?? {};
+          const crosses   = exo.crosses   ?? {};
+          let trueCount = 0, evalCount = 0;
+          for (const k of CRITERES) {
+            const v = validated[k];
+            if (v === true || v === null) { evalCount++; if (v === true) trueCount++; }
+          }
+          const score_global = evalCount > 0 ? Math.round(trueCount / evalCount * 100) : null;
+          const nb_erreurs   = Object.values(crosses).reduce((s: number, arr: unknown[]) => s + arr.length, 0);
+          const bilan        = (validated.B1 as boolean | null | undefined) ?? null;
+          await supabase.from('observation').upsert({
+            id:           exo.id,
+            user_id:      userId,
+            session_id:   sid,
+            feuille_id:   exo.feuille_id,
+            mode:         'autonome',
+            reference:    exo.reference,
+            type:         exo.type,
+            reussi:       exo.reussi,
+            data:         { validated: exo.validated, crosses: exo.crosses },
+            closed,
+            score_global,
+            nb_erreurs,
+            bilan,
+            updated_at:   new Date().toISOString(),
+          });
+        }
         setSaveStatus('saved');
         if (savedTimer.current) clearTimeout(savedTimer.current);
         savedTimer.current = setTimeout(() => setSaveStatus(null), 2500);
+      } catch (err) {
+        console.error('[autonome] saveGrille error:', err);
       }
-    });
-  }, [userId, sessions]);
+    })();
+  }, [userId, ensureSession]);
 
   const scheduleSave = useCallback((exos: Exercice[], eid: string | null) => {
     setSaveStatus('saving');
