@@ -432,7 +432,7 @@ export async function POST(req: Request) {
 
       service
         .from('conversation_history')
-        .insert(insertPayload)
+        .upsert(insertPayload, { onConflict: 'user_id,feuille_id,exercice_numero' })
         .then(({ error }) => {
           if (error) console.error('[session/chat] conversation_history insert error:', error);
         });

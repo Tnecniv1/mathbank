@@ -6,36 +6,30 @@ import { supabase } from '@/lib/supabaseClient';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type EntStats = {
-  nb_sessions: number;
-  temps_total_min: number;
-  score_pct: number | null;
-  score_brut: number | null;
-};
-
-type Entrainement = {
+type EntCard = {
   id: string;
-  statut: 'en_cours' | 'boucle';
+  feuille_id: string | null;
+  feuille_titre: string | null;
+  reference: string | null;
+  statut: 'en_cours' | 'termine' | 'reporte' | 'abandonne';
   created_at: string;
-  nb_exercices: number;
-  stats: EntStats | null;
-  date_min: string | null;
-  date_max: string | null;
+  score_global: number | null;
+  nb_sessions: number;
+  duree_totale: number;
 };
 
-const CRITERES = ['C1','C2','C3','C4','S1','S2','S3','S4','R1','R2','R3','R4'];
+type FeuilleActive = {
+  id: string;
+  titre: string;
+  type: string;
+};
 
-function formatPlage(min: string | null, max: string | null, fallback: string): string {
-  if (!min) return fallback;
-  const dMin = new Date(min);
-  if (!max || min === max) {
-    return dMin.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
-  }
-  const dMax = new Date(max);
-  const start = dMin.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
-  const end   = dMax.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
-  return `${start} — ${end}`;
-}
+const STATUT_CONFIG: Record<string, { label: string; bg: string; text: string; border: string }> = {
+  en_cours:  { label: 'En cours',  bg: 'bg-amber-50',    text: 'text-amber-600',  border: 'border-amber-300'  },
+  termine:   { label: 'Terminé',   bg: 'bg-[#EAF3DE]',   text: 'text-[#639922]',  border: 'border-[#C8E0A8]'  },
+  reporte:   { label: 'Reporté',   bg: 'bg-[#F3F3F3]',   text: 'text-[#999]',     border: 'border-[#E8E8E8]'  },
+  abandonne: { label: 'Abandonné', bg: 'bg-red-50',       text: 'text-red-500',    border: 'border-red-200'    },
+};
 
 function formatTemps(mins: number): string {
   if (mins < 60) return `${mins}min`;
@@ -48,124 +42,150 @@ function formatTemps(mins: number): string {
 
 export default function SessionPage() {
   const router = useRouter();
-  const [entrainements, setEntrainements] = useState<Entrainement[]>([]);
-  const [loading, setLoading]             = useState(true);
-  const [creating, setCreating]           = useState(false);
+  const [cards, setCards]         = useState<EntCard[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [feuilles, setFeuilles]   = useState<FeuilleActive[]>([]);
+  const [feuilleId, setFeuilleId] = useState('');
+  const [reference, setReference] = useState('');
+  const [creating, setCreating]   = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
-  useEffect(() => { loadEntrainements(); }, []);
+  useEffect(() => { loadCards(); }, []);
 
-  async function loadEntrainements() {
+  async function loadCards() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { setLoading(false); return; }
+    const userId = session.user.id;
 
-    const { data } = await supabase
+    const { data: ents } = await supabase
       .from('entrainement')
-      .select('id, statut, created_at')
-      .eq('user_id', session.user.id)
+      .select('id, feuille_id, reference, statut, created_at')
+      .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
-    if (!data || data.length === 0) { setLoading(false); return; }
+    if (!ents || ents.length === 0) { setLoading(false); return; }
 
-    const ids = data.map((e: any) => e.id);
+    const ids = ents.map((e: any) => e.id);
+    const feuilleIds = [...new Set(ents.map((e: any) => e.feuille_id).filter(Boolean))] as string[];
 
-    const { data: sessionsData } = await supabase
+    // Titres des feuilles
+    const titreMap: Record<string, string> = {};
+    if (feuilleIds.length > 0) {
+      const { data: noeuds } = await supabase
+        .from('noeud')
+        .select('id, titre')
+        .in('id', feuilleIds);
+      for (const n of noeuds ?? []) titreMap[n.id] = n.titre;
+    }
+
+    // Observations liées
+    const { data: obs } = await supabase
+      .from('observation')
+      .select('entrainement_id_final, score_global')
+      .in('entrainement_id_final', ids);
+    const obsMap: Record<string, number | null> = {};
+    for (const o of obs ?? []) {
+      if (o.entrainement_id_final) obsMap[o.entrainement_id_final] = o.score_global;
+    }
+
+    // Statistiques des sessions
+    const { data: sessions } = await supabase
       .from('session')
-      .select('id, entrainement_id, duree, date_session')
+      .select('entrainement_id, duree')
       .in('entrainement_id', ids);
-
-    const sessionIds = (sessionsData ?? []).map((s: any) => s.id as string);
-    const { data: observations } = sessionIds.length > 0
-      ? await supabase.from('observation').select('session_id, data').in('session_id', sessionIds)
-      : { data: [] as any[] };
-
-    // Map session → entrainement
-    const sessEntMap: Record<string, string> = {};
-    for (const s of sessionsData ?? []) {
-      if (s.id && s.entrainement_id) sessEntMap[s.id] = s.entrainement_id;
+    const sessStats: Record<string, { count: number; duree: number }> = {};
+    for (const id of ids) sessStats[id] = { count: 0, duree: 0 };
+    for (const s of sessions ?? []) {
+      if (!s.entrainement_id || !sessStats[s.entrainement_id]) continue;
+      sessStats[s.entrainement_id].count++;
+      if (s.duree) sessStats[s.entrainement_id].duree += s.duree;
     }
 
-    // ── Comptage exercices (observations) ────────────────────────────────────
-    const counts: Record<string, number> = {};
-    for (const obs of observations ?? []) {
-      const entId = sessEntMap[obs.session_id];
-      if (entId) counts[entId] = (counts[entId] ?? 0) + 1;
-    }
-
-    // ── Stats sessions ────────────────────────────────────────────────────────
-    const statsMap: Record<string, EntStats> = {};
-    for (const id of ids) statsMap[id] = { nb_sessions: 0, temps_total_min: 0, score_pct: null, score_brut: null };
-
-    for (const s of sessionsData ?? []) {
-      if (!s.entrainement_id || !statsMap[s.entrainement_id]) continue;
-      statsMap[s.entrainement_id].nb_sessions++;
-      const raw = s.duree;
-      const mins = typeof raw === 'number' ? raw : parseInt(String(raw ?? '0'));
-      if (!isNaN(mins)) statsMap[s.entrainement_id].temps_total_min += mins;
-    }
-
-    // ── Score global et score brut (critères validés) ────────────────────────
-    const scoreAcc: Record<string, { valides: number; evalues: number; brut: number; hasData: boolean }> = {};
-    for (const id of ids) scoreAcc[id] = { valides: 0, evalues: 0, brut: 0, hasData: false };
-
-    for (const obs of observations ?? []) {
-      const entId = sessEntMap[obs.session_id];
-      if (!entId || !scoreAcc[entId]) continue;
-      const validated = obs.data?.validated ?? {};
-      let exoValides = 0, exoEvalues = 0;
-      for (const k of CRITERES) {
-        const v = validated[k];
-        if (v === true || v === null) {
-          exoEvalues++;
-          if (v === true) exoValides++;
-        }
-      }
-      if (exoEvalues > 0) {
-        scoreAcc[entId].valides += exoValides;
-        scoreAcc[entId].evalues += exoEvalues;
-        scoreAcc[entId].brut    += Math.round((exoValides / exoEvalues) * 100);
-        scoreAcc[entId].hasData  = true;
-      }
-    }
-
-    for (const id of ids) {
-      const { valides, evalues, brut, hasData } = scoreAcc[id];
-      if (evalues > 0) statsMap[id].score_pct = Math.round((valides / evalues) * 100);
-      if (hasData)    statsMap[id].score_brut = brut;
-    }
-
-    // ── Plage de dates par entraînement ──────────────────────────────────────
-    const dateMinMap: Record<string, string> = {};
-    const dateMaxMap: Record<string, string> = {};
-    for (const s of sessionsData ?? []) {
-      if (!s.entrainement_id || !s.date_session) continue;
-      const id = s.entrainement_id;
-      const d  = s.date_session as string;
-      if (!dateMinMap[id] || d < dateMinMap[id]) dateMinMap[id] = d;
-      if (!dateMaxMap[id] || d > dateMaxMap[id]) dateMaxMap[id] = d;
-    }
-
-    setEntrainements(data.map((e: any) => ({
-      ...e,
-      nb_exercices: counts[e.id] ?? 0,
-      stats: statsMap[e.id] ?? null,
-      date_min: dateMinMap[e.id] ?? null,
-      date_max: dateMaxMap[e.id] ?? null,
+    setCards(ents.map((e: any) => ({
+      id:           e.id,
+      feuille_id:   e.feuille_id ?? null,
+      feuille_titre: e.feuille_id ? (titreMap[e.feuille_id] ?? null) : null,
+      reference:    e.reference ?? null,
+      statut:       e.statut as EntCard['statut'],
+      created_at:   e.created_at,
+      score_global: obsMap[e.id] ?? null,
+      nb_sessions:  sessStats[e.id]?.count ?? 0,
+      duree_totale: sessStats[e.id]?.duree ?? 0,
     })));
     setLoading(false);
   }
 
-  async function handleNouvelEntrainement() {
+  async function openModal() {
+    setModalError(null);
+    setReference('');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data: progressions } = await supabase
+      .from('progression_feuille')
+      .select('feuille_id')
+      .eq('user_id', session.user.id)
+      .eq('en_cours', true);
+
+    const ids = (progressions ?? []).map((p: any) => p.feuille_id).filter(Boolean) as string[];
+    if (ids.length > 0) {
+      const { data: noeuds } = await supabase
+        .from('noeud')
+        .select('id, titre, type')
+        .in('id', ids);
+      const list = (noeuds ?? []) as FeuilleActive[];
+      setFeuilles(list);
+      if (list.length > 0) setFeuilleId(list[0].id);
+    } else {
+      setFeuilles([]);
+      setFeuilleId('');
+    }
+    setShowModal(true);
+  }
+
+  async function handleCreate() {
+    if (!feuilleId) return;
     setCreating(true);
+    setModalError(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const { data, error } = await supabase
+      const userId = session.user.id;
+
+      // Max 1 en_cours
+      const { data: existing } = await supabase
         .from('entrainement')
-        .insert({ user_id: session.user.id, statut: 'en_cours' })
+        .select('id')
+        .eq('user_id', userId)
+        .eq('statut', 'en_cours')
+        .limit(1);
+      if (existing && existing.length > 0) {
+        setShowModal(false);
+        router.push(`/entrainement/${existing[0].id}`);
+        return;
+      }
+
+      const { data: ent, error } = await supabase
+        .from('entrainement')
+        .insert({ user_id: userId, feuille_id: feuilleId, reference: reference || null, statut: 'en_cours' })
         .select('id')
         .single();
-      if (error || !data) { console.error('[session] create error:', error); return; }
-      router.push(`/entrainement/${data.id}`);
+      if (error || !ent) { setModalError('Erreur lors de la création.'); return; }
+
+      // Observation vide
+      await supabase.from('observation').insert({
+        entrainement_id_final: ent.id,
+        user_id:   userId,
+        data:      { validated: {}, crosses: {} },
+        score_global: null,
+        nb_erreurs: 0,
+        bilan:     null,
+        closed:    false,
+      });
+
+      setShowModal(false);
+      router.push(`/entrainement/${ent.id}`);
     } finally {
       setCreating(false);
     }
@@ -175,9 +195,6 @@ export default function SessionPage() {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
 
-  const enCours = entrainements.filter((e) => e.statut === 'en_cours');
-  const boucles = entrainements.filter((e) => e.statut === 'boucle');
-
   return (
     <div className="min-h-screen bg-[#F5F4EF]">
       <div className="max-w-lg mx-auto p-4 sm:p-6 space-y-6">
@@ -185,127 +202,125 @@ export default function SessionPage() {
         {/* ── Header ─────────────────────────────────────────────── */}
         <div className="flex items-start justify-between pt-2">
           <div>
-            <h1 className="text-xl font-bold text-[#1A1A1A]">Entraînement</h1>
+            <h1 className="text-xl font-bold text-[#1A1A1A]">Entraînements</h1>
             <p className="text-xs text-[#AAAAAA] mt-0.5 capitalize">{today}</p>
           </div>
           <button
-            onClick={handleNouvelEntrainement}
-            disabled={creating}
+            onClick={openModal}
             className="px-4 py-2 rounded-xl bg-[#185FA5] text-white text-sm font-semibold
-                       hover:bg-[#1450A0] transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                       hover:bg-[#1450A0] transition-colors shrink-0"
           >
-            {creating ? '…' : '+ Nouvel entraînement'}
+            + Nouvel entraînement
           </button>
         </div>
 
-        {/* ── Entraînements en cours ──────────────────────────────── */}
+        {/* ── Liste ──────────────────────────────────────────────── */}
         {loading ? (
           <div className="text-sm text-[#AAAAAA]">Chargement...</div>
+        ) : cards.length === 0 ? (
+          <div className="bg-white rounded-xl border border-[#E8E8E8] p-8 text-center">
+            <div className="text-[#CCC] text-sm">Aucun entraînement pour l'instant.</div>
+            <div className="text-[#BBB] text-xs mt-1">Crée ton premier entraînement !</div>
+          </div>
         ) : (
-          <>
-            {enCours.length > 0 && (
-              <div>
-                <h2 className="text-sm font-bold text-[#1A1A1A] mb-3">En cours</h2>
-                <div className="space-y-2">
-                  {enCours.map((e) => (
-                    <button
-                      key={e.id}
-                      onClick={() => router.push(`/entrainement/${e.id}`)}
-                      className="w-full bg-white rounded-xl border border-amber-300
-                                 hover:border-amber-400 p-4 text-left hover:shadow-sm transition-all"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-medium text-[#1A1A1A]">
-                              {formatPlage(e.date_min, e.date_max,
-                                new Date(e.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-                              )}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold
-                                            bg-amber-50 text-amber-600">En cours</span>
-                          </div>
-                          <div className="text-xs text-[#AAAAAA] mt-0.5">
-                            {e.nb_exercices} exercice{e.nb_exercices !== 1 ? 's' : ''}
-                          </div>
-                        </div>
-                        <svg className="w-4 h-4 text-[#CCCCCC] shrink-0"
-                             fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
+          <div className="space-y-2">
+            {cards.map((c) => {
+              const cfg = STATUT_CONFIG[c.statut] ?? STATUT_CONFIG.en_cours;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => router.push(`/entrainement/${c.id}`)}
+                  className={`w-full bg-white rounded-xl border ${cfg.border}
+                               hover:shadow-sm p-4 text-left transition-all`}
+                >
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-[#1A1A1A] truncate">
+                        {c.feuille_titre ?? '—'}
                       </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {boucles.length > 0 && (
-              <div>
-                <h2 className="text-sm font-bold text-[#1A1A1A] mb-3">Historique</h2>
-                <div className="space-y-2">
-                  {boucles.map((e) => {
-                    const st = e.stats;
-                    const scoreBrut = st?.score_brut;
-                    const scoreColor =
-                      scoreBrut === null || scoreBrut === undefined ? 'text-[#AAAAAA]' :
-                      scoreBrut > 200 ? 'text-[#639922]' :
-                      scoreBrut > 100 ? 'text-amber-500' :
-                                        'text-[#AAAAAA]';
-                    return (
-                      <button
-                        key={e.id}
-                        onClick={() => router.push(`/entrainement/${e.id}`)}
-                        className="w-full bg-white rounded-xl border border-[#E8E8E8]
-                                   hover:border-[#185FA5] p-4 text-left hover:shadow-sm transition-all"
-                      >
-                        {/* Header */}
-                        <div className="flex items-center justify-between gap-3 mb-3">
-                          <div className="flex items-center gap-2 flex-wrap min-w-0">
-                            <span className="text-sm font-medium text-[#1A1A1A]">
-                              {formatPlage(e.date_min, e.date_max,
-                                new Date(e.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-                              )}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold
-                                            bg-[#EAF3DE] text-[#639922]">Bouclé</span>
-                          </div>
-                          <svg className="w-4 h-4 text-[#CCCCCC] shrink-0"
-                               fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                          </svg>
-                        </div>
-                        {/* Métriques */}
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            { label: 'Sessions',    value: st ? String(st.nb_sessions) : '—', color: 'text-[#1A1A1A]' },
-                            { label: 'Durée',       value: st && st.temps_total_min > 0 ? formatTemps(st.temps_total_min) : '—', color: 'text-[#1A1A1A]' },
-                            { label: 'Score brut',  value: scoreBrut !== null && scoreBrut !== undefined ? String(scoreBrut) : '—', color: scoreColor },
-                          ].map(({ label, value, color }) => (
-                            <div key={label}
-                              className="bg-[#F5F4EF] rounded-lg px-2.5 py-2">
-                              <div className="text-[11px] text-[#AAAAAA] leading-tight">{label}</div>
-                              <div className={`text-base font-medium mt-0.5 ${color}`}>{value}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {entrainements.length === 0 && (
-              <div className="bg-white rounded-xl border border-[#E8E8E8] p-8 text-center">
-                <div className="text-[#CCC] text-sm">Aucun entraînement pour l'instant.</div>
-                <div className="text-[#BBB] text-xs mt-1">Crée ton premier entraînement !</div>
-              </div>
-            )}
-          </>
+                      {c.reference && (
+                        <div className="text-xs text-[#888] mt-0.5">{c.reference}</div>
+                      )}
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${cfg.bg} ${cfg.text}`}>
+                      {cfg.label}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { label: 'Score',    value: c.score_global !== null ? `${c.score_global}%` : '—' },
+                      { label: 'Sessions', value: c.nb_sessions > 0 ? String(c.nb_sessions) : '—' },
+                      { label: 'Durée',    value: c.duree_totale > 0 ? formatTemps(c.duree_totale) : '—' },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="bg-[#F5F4EF] rounded-lg px-2.5 py-2">
+                        <div className="text-[11px] text-[#AAAAAA] leading-tight">{label}</div>
+                        <div className="text-base font-medium mt-0.5 text-[#1A1A1A]">{value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         )}
 
       </div>
+
+      {/* ── Modal création ──────────────────────────────────────── */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4">
+            <h2 className="text-base font-bold text-[#1A1A1A]">Nouvel entraînement</h2>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-[#888] uppercase tracking-wide">Feuille</label>
+                <select
+                  value={feuilleId}
+                  onChange={(e) => setFeuilleId(e.target.value)}
+                  className="mt-1 w-full px-3 py-2.5 bg-[#F9F9F9] border border-[#E8E8E8] rounded-xl
+                             text-sm focus:outline-none focus:border-[#185FA5] transition-colors"
+                >
+                  {feuilles.length === 0 && <option value="">Aucune feuille active</option>}
+                  {feuilles.map((f) => (
+                    <option key={f.id} value={f.id}>{f.titre}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-[#888] uppercase tracking-wide">Référence</label>
+                <input
+                  type="text"
+                  value={reference}
+                  onChange={(e) => setReference(e.target.value)}
+                  placeholder="Exo1"
+                  className="mt-1 w-full px-3 py-2.5 bg-[#F9F9F9] border border-[#E8E8E8] rounded-xl
+                             text-sm focus:outline-none focus:border-[#185FA5] transition-colors"
+                />
+              </div>
+              {modalError && <p className="text-xs text-red-500">{modalError}</p>}
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setShowModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-white border border-[#E8E8E8] text-[#555]
+                           font-semibold text-sm hover:bg-[#F5F5F5] transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleCreate}
+                disabled={creating || !feuilleId}
+                className="flex-1 py-2.5 rounded-xl bg-[#185FA5] text-white font-semibold text-sm
+                           hover:bg-[#1450A0] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {creating ? '…' : 'Démarrer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
