@@ -112,11 +112,12 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
     }
 
     // Observation
-    const { data: obs } = await supabase
+    const { data: obs, error: obsError } = await supabase
       .from('observation')
       .select('id, data, score_global, nb_erreurs, bilan, closed')
       .eq('entrainement_id_final', entrainementId)
       .single();
+    console.log('[entrainement] obs result:', obs, obsError);
     if (!mounted) return;
     if (obs) {
       setObsId(obs.id);
@@ -172,7 +173,7 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
       let trueCount = 0, evalCount = 0;
       for (const k of CRITERES) {
         const v = validated[k];
-        if (v === true || v === null) { evalCount++; if (v === true) trueCount++; }
+        if (v === true || v === false) { evalCount++; if (v === true) trueCount++; }
       }
       const score_global = evalCount > 0 ? Math.round(trueCount / evalCount * 100) : null;
       const nb_erreurs   = Object.values(crosses).reduce((s: number, arr: unknown[]) => s + arr.length, 0);
@@ -200,6 +201,26 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
         .from('observation')
         .update({ closed: true })
         .eq('entrainement_id_final', entrainementId);
+
+      if (statut === 'termine' && userId && entrainement?.feuille_id) {
+        const feuille_id = entrainement.feuille_id;
+        const { data: obsRows } = await supabase
+          .from('observation')
+          .select('closed, score_global')
+          .eq('user_id', userId)
+          .eq('feuille_id', feuille_id);
+        if (obsRows) {
+          const nb_valides = obsRows.filter((r) => r.closed === true).length;
+          const scores = obsRows.map((r) => r.score_global).filter((s): s is number => s !== null && s !== undefined);
+          const score_moy = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+          await supabase
+            .from('progression_feuille')
+            .update({ nb_exercices_valides: nb_valides, score_moyen: score_moy })
+            .eq('user_id', userId)
+            .eq('feuille_id', feuille_id);
+        }
+      }
+
       setEntrainement((e) => e ? { ...e, statut } : e);
     } finally {
       setActioning(false);

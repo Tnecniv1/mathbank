@@ -122,25 +122,14 @@ export default function SessionPage() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
-    const { data: progressions } = await supabase
-      .from('progression_feuille')
-      .select('feuille_id')
-      .eq('user_id', session.user.id)
-      .eq('en_cours', true);
-
-    const ids = (progressions ?? []).map((p: any) => p.feuille_id).filter(Boolean) as string[];
-    if (ids.length > 0) {
-      const { data: noeuds } = await supabase
-        .from('noeud')
-        .select('id, titre, type')
-        .in('id', ids);
-      const list = (noeuds ?? []) as FeuilleActive[];
-      setFeuilles(list);
-      if (list.length > 0) setFeuilleId(list[0].id);
-    } else {
-      setFeuilles([]);
-      setFeuilleId('');
-    }
+    const { data: noeuds } = await supabase
+      .from('noeud')
+      .select('id, titre, type')
+      .in('type', ['mecanique', 'chaotique'])
+      .order('titre', { ascending: true });
+    const list = (noeuds ?? []) as FeuilleActive[];
+    setFeuilles(list);
+    if (list.length > 0) setFeuilleId(list[0].id);
     setShowModal(true);
   }
 
@@ -174,7 +163,8 @@ export default function SessionPage() {
       if (error || !ent) { setModalError('Erreur lors de la création.'); return; }
 
       // Observation vide
-      await supabase.from('observation').insert({
+      const { error: obsError } = await supabase.from('observation').insert({
+        id: Date.now().toString(),
         entrainement_id_final: ent.id,
         user_id:   userId,
         data:      { validated: {}, crosses: {} },
@@ -183,6 +173,7 @@ export default function SessionPage() {
         bilan:     null,
         closed:    false,
       });
+      console.log('[handleCreate] obs insert error:', obsError);
 
       setShowModal(false);
       router.push(`/entrainement/${ent.id}`);

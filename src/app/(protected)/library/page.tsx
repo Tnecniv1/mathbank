@@ -669,21 +669,34 @@ function SlotVideModal({
  onConclureDone: (type: 'mecanique' | 'chaotique') => void;
 }) {
  const label = type === 'mecanique' ? 'mécanique' : 'chaotique';
+ const [list, setList] = useState<{ id: string; titre: string; type: string; pdf_url: string }[]>([]);
+ const [adding, setAdding] = useState<string | null>(null);
 
- const feuilles: FeuilleEntrainement[] = [];
- if (parcours) {
-  parcours.sujets.forEach(sujet => {
-   (sujet.feuilles ?? []).forEach(f => { if (f.type === type) feuilles.push(f); });
-   sujet.chapitres.forEach(ch => ch.feuilles.forEach(f => { if (f.type === type) feuilles.push(f); }));
-  });
+ useEffect(() => {
+  supabase
+   .from('noeud')
+   .select('id, titre, type, pdf_url')
+   .eq('type', type)
+   .order('titre', { ascending: true })
+   .then(({ data: noeuds }) => setList((noeuds ?? []) as { id: string; titre: string; type: string; pdf_url: string }[]));
+ }, [type]);
+
+ async function handleAjouter(feuilleId: string) {
+  if (adding) return;
+  setAdding(feuilleId);
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+   await supabase
+    .from('progression_feuille')
+    .upsert(
+     { user_id: session.user.id, feuille_id: feuilleId, en_cours: true, est_termine: false, auto_inscrit: true },
+     { onConflict: 'user_id,feuille_id' }
+    );
+   await onUpdateProgression();
+   onClose();
+  }
+  setAdding(null);
  }
-
- const candidates = feuilles.filter(f => {
-  const prog = progressions.get(f.id);
-  const estTerminee = prog?.est_termine === true || prog?.statut === 'validee';
-  const estEnCours = prog?.en_cours === true && !estTerminee;
-  return feuillesAccessibles.has(f.id) && !estEnCours && !estTerminee;
- });
 
  return (
   <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -693,21 +706,19 @@ function SlotVideModal({
      <p className="text-sm text-ink-muted mt-1">Sélectionne la prochaine feuille à commencer</p>
     </div>
     <div className="flex-1 overflow-y-auto p-6 space-y-2">
-     {candidates.length === 0 ? (
+     {list.length === 0 ? (
       <p className="text-center text-ink-muted py-8">Aucune feuille disponible pour le moment.</p>
      ) : (
-      candidates.map(f => (
-       <FeuilleCard
+      list.map(f => (
+       <button
         key={f.id}
-        feuille={f}
-        progression={progressions.get(f.id) || null}
-        typesActifs={typesActifs}
-        feuillesDebloquees={feuillesDebloquees}
-        feuillesAccessibles={feuillesAccessibles}
-        onOpen={() => window.open(f.pdf_url, '_blank')}
-        onUpdateProgression={async () => { await onUpdateProgression(); onClose(); }}
-        onConclureDone={onConclureDone}
-       />
+        onClick={() => handleAjouter(f.id)}
+        disabled={adding === f.id}
+        className="w-full text-left px-4 py-3 rounded-lg border border-border bg-cream-50 hover:border-accent hover:shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+       >
+        <span className="font-medium text-ink">{f.titre}</span>
+        {adding === f.id && <span className="ml-2 text-sm text-ink-muted">…</span>}
+       </button>
       ))
      )}
     </div>

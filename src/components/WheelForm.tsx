@@ -272,7 +272,7 @@ export function WheelForm({
             const cycleBadge = (e: React.MouseEvent | React.TouchEvent) => {
               e.stopPropagation();
               const cur = validated[w.id];
-              const next = cur === undefined ? true : cur === true ? null : undefined;
+              const next = cur === true ? false : cur === false ? null : true;
               onChange(exo.id, { validated: { ...validated, [w.id]: next } });
             };
             return (
@@ -282,21 +282,19 @@ export function WheelForm({
               >
                 <circle cx={bx} cy={by} r={20} fill="transparent" />
                 <circle cx={bx} cy={by} r={12}
-                  fill={val === true ? w.color : val === null ? '#B0A090' : '#FDFAF6'}
-                  stroke={val === null ? '#B0A090' : w.color}
+                  fill={val === true ? '#534AB7' : val === false ? '#1A1A1A' : '#FDFAF6'}
+                  stroke={val === true ? '#534AB7' : val === false ? '#1A1A1A' : '#C8BBA8'}
                   strokeWidth="1.8"
                 />
                 {val === true
                   ? <text x={bx} y={by + 0.5} textAnchor="middle" dominantBaseline="middle"
                       fontSize="12" fill="white" fontWeight="bold"
                       style={{ pointerEvents: 'none', userSelect: 'none' }}>✓</text>
-                  : val === null
+                  : val === false
                     ? <text x={bx} y={by + 0.5} textAnchor="middle" dominantBaseline="middle"
-                        fontSize="14" fill="white" fontWeight="bold"
-                        style={{ pointerEvents: 'none', userSelect: 'none' }}>—</text>
-                    : <circle cx={bx} cy={by} r={4}
-                        fill="none" stroke={w.color} strokeWidth="1.2" opacity="0.35"
-                        style={{ pointerEvents: 'none' }} />
+                        fontSize="12" fill="white" fontWeight="bold"
+                        style={{ pointerEvents: 'none', userSelect: 'none' }}>✗</text>
+                    : null
                 }
               </g>
             );
@@ -308,7 +306,7 @@ export function WheelForm({
             const cycleB1 = (e: React.MouseEvent | React.TouchEvent) => {
               e.stopPropagation();
               const cur = validated['B1'];
-              const next = cur === undefined ? true : cur === true ? null : undefined;
+              const next = cur === true ? false : cur === false ? null : true;
               onChange(exo.id, { validated: { ...validated, B1: next } });
             };
             return (
@@ -317,23 +315,23 @@ export function WheelForm({
                 onTouchEnd={readonly ? undefined : (e) => { e.preventDefault(); cycleB1(e); }}
               >
                 <circle cx={CX} cy={CY} r={R_IN}
-                  fill={b1 === true ? '#3DAF6B' : b1 === null ? '#E8E8E8' : '#FDFAF6'}
-                  stroke={b1 === true ? '#3DAF6B' : '#C8BBA8'}
+                  fill={b1 === true ? '#3DAF6B' : b1 === false ? '#1A1A1A' : '#FDFAF6'}
+                  stroke={b1 === true ? '#3DAF6B' : b1 === false ? '#1A1A1A' : '#C8BBA8'}
                   strokeWidth="1.5"
                 />
                 <text x={CX} y={CY - 7}
                   textAnchor="middle" dominantBaseline="middle"
                   fontSize="16" fontWeight="bold"
-                  fill={b1 === true ? 'white' : b1 === null ? '#999' : '#8B7355'}
+                  fill={b1 === true || b1 === false ? 'white' : '#8B7355'}
                   style={{ pointerEvents: 'none', userSelect: 'none' }}>
-                  {b1 === true ? '✓' : b1 === null ? '—' : 'B1'}
+                  {b1 === true ? '✓' : b1 === false ? '✗' : 'B1'}
                 </text>
                 <text x={CX} y={CY + 11}
                   textAnchor="middle" dominantBaseline="middle"
                   fontSize="8" fontFamily="Georgia, serif"
-                  fill={b1 === true ? 'rgba(255,255,255,0.75)' : '#B0A090'}
+                  fill={b1 === true || b1 === false ? 'rgba(255,255,255,0.75)' : '#B0A090'}
                   style={{ pointerEvents: 'none', userSelect: 'none' }}>
-                  Bilan
+                  Résultat
                 </text>
               </g>
             );
