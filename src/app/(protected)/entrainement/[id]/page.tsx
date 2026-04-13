@@ -194,8 +194,8 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
   }, [entrainementId]);
 
   const handleWheelChange = useCallback((id: string, patch: Partial<Exercice>) => {
-    requireKey(() => handleWheelChangeSave(id, patch));
-  }, [requireKey, handleWheelChangeSave]);
+    handleWheelChangeSave(id, patch);
+  }, [handleWheelChangeSave]);
 
   // ── Statut actions ──────────────────────────────────────────────────────────
 
@@ -341,7 +341,7 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
         {isEnCours && (
           <div className="flex gap-2">
             <button
-              onClick={() => requireKey(() => handleStatut('termine'))}
+              onClick={() => handleStatut('termine')}
               disabled={actioning}
               className="flex-1 py-2.5 rounded-xl bg-[#639922] text-white font-semibold text-sm
                          hover:bg-[#527A1B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -349,7 +349,7 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
               Terminer
             </button>
             <button
-              onClick={() => requireKey(() => handleStatut('reporte'))}
+              onClick={() => handleStatut('reporte')}
               disabled={actioning}
               className="flex-1 py-2.5 rounded-xl bg-white border border-[#E8E8E8] text-[#555]
                          font-semibold text-sm hover:bg-[#F5F5F5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -357,7 +357,7 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
               Reporter
             </button>
             <button
-              onClick={() => requireKey(() => handleStatut('abandonne'))}
+              onClick={() => handleStatut('abandonne')}
               disabled={actioning}
               className="flex-1 py-2.5 rounded-xl bg-red-50 border border-red-200 text-red-500
                          font-semibold text-sm hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
