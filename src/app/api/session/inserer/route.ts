@@ -170,7 +170,7 @@ export async function POST(req: Request) {
 
           await service
             .from('progression_feuille')
-            .update({ nb_exercices_valides: reussis, score_moyen })
+            .update({ nb_exercices_valides: reussis, score_moyen, statut: 'validee', en_cours: false })
             .eq('user_id', sessionRow.user_id)
             .eq('feuille_id', feuilleId);
         }

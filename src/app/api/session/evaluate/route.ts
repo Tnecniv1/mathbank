@@ -234,12 +234,14 @@ export async function POST(req: Request) {
 
   const CRITERES_EVAL = ['C1','C2','C3','C4','S1','S2','S3','S4','R1','R2','R3','R4'];
   const validated = evalResult.validated ?? {};
-  let trueCount = 0, evalCount = 0;
+  let score = 0, hasEval = false;
   for (const k of CRITERES_EVAL) {
     const v = validated[k];
-    if (v === true || v === null) { evalCount++; if (v === true) trueCount++; }
+    if (v === true)                { score += 1; hasEval = true; }
+    else if (v === false || v === null) { score -= 1; hasEval = true; }
+    // v === undefined → absent, ne compte pas
   }
-  const score_global = evalCount > 0 ? Math.round(trueCount / evalCount * 100) : null;
+  const score_global = hasEval ? score : null;
   const bilan = (validated as Record<string, boolean | null>).B1 ?? null;
 
   const obsData: Record<string, unknown> = {
@@ -315,9 +317,12 @@ export async function POST(req: Request) {
 
       const score_moyen = Math.round((reussis / total) * 100);
 
+      const progPatch: Record<string, unknown> = { nb_exercices_valides: reussis, score_moyen };
+      if (boucler === true) { progPatch.statut = 'validee'; progPatch.en_cours = false; }
+
       const { error: progError } = await service
         .from('progression_feuille')
-        .update({ nb_exercices_valides: reussis, score_moyen })
+        .update(progPatch)
         .eq('user_id', user.id)
         .eq('feuille_id', feuille_id);
 

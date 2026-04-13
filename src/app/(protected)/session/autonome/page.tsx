@@ -654,12 +654,15 @@ export default function AutonomePage() {
         for (const exo of exos) {
           const validated = exo.validated ?? {};
           const crosses   = exo.crosses   ?? {};
-          let trueCount = 0, evalCount = 0;
+          let score = 0, hasEval = false;
           for (const k of CRITERES) {
-            const v = validated[k];
-            if (v === true || v === null) { evalCount++; if (v === true) trueCount++; }
+            const v          = validated[k];
+            const hasCrosses = Array.isArray(crosses[k]) && (crosses[k] as unknown[]).length > 0;
+            if (v === true)                             { score += 1; hasEval = true; }
+            else if (v === false || v === null || hasCrosses) { score -= 1; hasEval = true; }
+            // v === undefined et pas de crosses → absent, ne compte pas
           }
-          const score_global = evalCount > 0 ? Math.round(trueCount / evalCount * 100) : null;
+          const score_global = hasEval ? score : null;
           const nb_erreurs   = Object.values(crosses).reduce((s: number, arr: unknown[]) => s + arr.length, 0);
           const bilan        = (validated.B1 as boolean | null | undefined) ?? null;
           await supabase.from('observation').upsert({

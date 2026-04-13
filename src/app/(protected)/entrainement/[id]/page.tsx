@@ -4,6 +4,8 @@ import React, { use, useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { WheelForm, Exercice } from '@/components/WheelForm';
+import { useSecretKey } from '@/hooks/useSecretKey';
+import { SecretKeyModal } from '@/components/SecretKeyModal';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -73,6 +75,9 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
 
   // Statut actions
   const [actioning, setActioning] = useState(false);
+
+  // Clé secrète
+  const { requireKey, showKeyModal, submitKey, dismissKeyModal } = useSecretKey();
 
   useEffect(() => {
     let mounted = true;
@@ -157,7 +162,7 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
 
   // ── WheelForm ───────────────────────────────────────────────────────────────
 
-  const handleWheelChange = useCallback((id: string, patch: Partial<Exercice>) => {
+  const handleWheelChangeSave = useCallback((id: string, patch: Partial<Exercice>) => {
     setExo((prev) => {
       if (!prev) return prev;
       const next = { ...prev, ...patch };
@@ -188,36 +193,65 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
     }, 1500);
   }, [entrainementId]);
 
+  const handleWheelChange = useCallback((id: string, patch: Partial<Exercice>) => {
+    requireKey(() => handleWheelChangeSave(id, patch));
+  }, [requireKey, handleWheelChangeSave]);
+
   // ── Statut actions ──────────────────────────────────────────────────────────
 
-  async function handleStatut(statut: 'termine' | 'reporte' | 'abandonne') {
+  async function handleReprendre() {
     setActioning(true);
     try {
       await supabase
         .from('entrainement')
-        .update({ statut, updated_at: new Date().toISOString() })
+        .update({ statut: 'en_cours', updated_at: new Date().toISOString() })
         .eq('id', entrainementId);
       await supabase
         .from('observation')
-        .update({ closed: true })
+        .update({ closed: false })
         .eq('entrainement_id_final', entrainementId);
+      setEntrainement((e) => e ? { ...e, statut: 'en_cours' } : e);
+    } finally {
+      setActioning(false);
+    }
+  }
+
+  async function handleStatut(statut: 'termine' | 'reporte' | 'abandonne') {
+    setActioning(true);
+    try {
+      const { error: entError } = await supabase
+        .from('entrainement')
+        .update({ statut, updated_at: new Date().toISOString() })
+        .eq('id', entrainementId);
+      if (entError) console.error('[handleStatut] entrainement update error:', entError);
+
+      // L'observation n'est fermée que définitivement (terminé/abandonné), pas pour un report
+      if (statut !== 'reporte') {
+        const { error: obsError } = await supabase
+          .from('observation')
+          .update({ closed: true })
+          .eq('entrainement_id_final', entrainementId);
+        if (obsError) console.error('[handleStatut] observation close error:', obsError);
+      }
 
       if (statut === 'termine' && userId && entrainement?.feuille_id) {
         const feuille_id = entrainement.feuille_id;
-        const { data: obsRows } = await supabase
+        const { data: obsRows, error: obsRowsError } = await supabase
           .from('observation')
           .select('closed, score_global')
           .eq('user_id', userId)
           .eq('feuille_id', feuille_id);
+        if (obsRowsError) console.error('[handleStatut] observation select error:', obsRowsError);
         if (obsRows) {
           const nb_valides = obsRows.filter((r) => r.closed === true).length;
           const scores = obsRows.map((r) => r.score_global).filter((s): s is number => s !== null && s !== undefined);
           const score_moy = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-          await supabase
+          const { error: progError } = await supabase
             .from('progression_feuille')
-            .update({ nb_exercices_valides: nb_valides, score_moyen: score_moy })
+            .update({ nb_exercices_valides: nb_valides, score_moyen: score_moy, statut: 'validee', en_cours: false })
             .eq('user_id', userId)
             .eq('feuille_id', feuille_id);
+          if (progError) console.error('[handleStatut] progression_feuille update error:', progError);
         }
       }
 
@@ -274,6 +308,7 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
   const statut    = entrainement?.statut ?? 'en_cours';
   const cfg       = STATUT_CONFIG[statut] ?? STATUT_CONFIG.en_cours;
   const isEnCours = statut === 'en_cours';
+  const isReporte = statut === 'reporte';
 
   return (
     <div className="min-h-screen bg-[#F5F4EF]">
@@ -306,7 +341,7 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
         {isEnCours && (
           <div className="flex gap-2">
             <button
-              onClick={() => handleStatut('termine')}
+              onClick={() => requireKey(() => handleStatut('termine'))}
               disabled={actioning}
               className="flex-1 py-2.5 rounded-xl bg-[#639922] text-white font-semibold text-sm
                          hover:bg-[#527A1B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -314,7 +349,7 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
               Terminer
             </button>
             <button
-              onClick={() => handleStatut('reporte')}
+              onClick={() => requireKey(() => handleStatut('reporte'))}
               disabled={actioning}
               className="flex-1 py-2.5 rounded-xl bg-white border border-[#E8E8E8] text-[#555]
                          font-semibold text-sm hover:bg-[#F5F5F5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -322,7 +357,7 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
               Reporter
             </button>
             <button
-              onClick={() => handleStatut('abandonne')}
+              onClick={() => requireKey(() => handleStatut('abandonne'))}
               disabled={actioning}
               className="flex-1 py-2.5 rounded-xl bg-red-50 border border-red-200 text-red-500
                          font-semibold text-sm hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -330,6 +365,18 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
               Abandonner
             </button>
           </div>
+        )}
+
+        {/* ── Bouton Reprendre (reporte seulement) ───────────────── */}
+        {isReporte && (
+          <button
+            onClick={() => requireKey(handleReprendre)}
+            disabled={actioning}
+            className="w-full py-2.5 rounded-xl bg-[#185FA5] text-white font-semibold text-sm
+                       hover:bg-[#1450A0] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Reprendre l'entraînement
+          </button>
         )}
 
         {/* ── Sessions ────────────────────────────────────────────── */}
@@ -443,6 +490,11 @@ export default function EntrainementPage({ params }: { params: Promise<{ id: str
         </div>
 
       </div>
+
+      {/* ── Modal clé secrète ───────────────────────────────────── */}
+      {showKeyModal && (
+        <SecretKeyModal onSubmit={submitKey} onDismiss={dismissKeyModal} />
+      )}
 
       {/* ── Modal ajout session ──────────────────────────────────── */}
       {showSessionModal && (

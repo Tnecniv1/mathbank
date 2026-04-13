@@ -235,7 +235,7 @@ export default function TableauProgression() {
  try {
    let query = supabase
      .from('observation')
-     .select('data, feuille_id, updated_at')
+     .select('score_global, nb_erreurs, updated_at')
      .eq('user_id', userId)
      .order('updated_at', { ascending: true });
 
@@ -250,58 +250,35 @@ export default function TableauProgression() {
      return;
    }
 
-   const CRITERES_KEYS = ['C1','C2','C3','C4','S1','S2','S3','S4','R1','R2','R3','R4'];
    const TAILLE_TRANCHE = 5;
 
-   const allExos: any[] = observations.map((obs: any) => ({
-     feuille_id: obs.feuille_id,
-     validated:  obs.data?.validated ?? {},
-     crosses:    obs.data?.crosses   ?? {},
-   }));
-
    const tranches: TrancheDonnees[] = [];
-   for (let i = 0; i < allExos.length; i += TAILLE_TRANCHE) {
-     const chunk = allExos.slice(i, i + TAILLE_TRANCHE);
+   for (let i = 0; i < observations.length; i += TAILLE_TRANCHE) {
+     const chunk = observations.slice(i, i + TAILLE_TRANCHE) as any[];
      if (chunk.length === 0) break;
 
      const debut = i + 1;
      const fin   = i + chunk.length;
-     let totalTrue = 0;
-     let totalEvalues = 0;
-     let totalScoreExo = 0;
-     let hasAnyScore = false;
-     let totalCroix = 0;
 
-     for (const exo of chunk) {
-       const validated = exo.validated ?? {};
-       const crosses   = exo.crosses   ?? {};
+     // Taux : % d'observations avec score_global > 0
+     const nbPositifs = chunk.filter((o: any) => (o.score_global ?? 0) > 0).length;
+     const taux = (nbPositifs / chunk.length) * 100;
 
-       let exoTrue    = 0;
-       let exoEvalues = 0;
-       for (const k of CRITERES_KEYS) {
-         const val = validated[k];
-         if (val === true || val === null) {
-           exoEvalues++;
-           if (val === true) exoTrue++;
-         }
-       }
-       if (exoEvalues > 0) {
-         hasAnyScore = true;
-         totalTrue    += exoTrue;
-         totalEvalues += exoEvalues;
-         totalScoreExo += (exoTrue / exoEvalues) * 100;
-       }
-       for (const k of Object.keys(crosses)) {
-         if (Array.isArray(crosses[k])) totalCroix += crosses[k].length;
-       }
-     }
+     // Score : somme brute des score_global (peut être négatif)
+     const hasAnyScore = chunk.some((o: any) => o.score_global !== null);
+     const score = hasAnyScore
+       ? chunk.reduce((s: number, o: any) => s + (o.score_global ?? 0), 0)
+       : null;
+
+     // Erreurs : somme brute des nb_erreurs
+     const erreurs = chunk.reduce((s: number, o: any) => s + (o.nb_erreurs ?? 0), 0);
 
      tranches.push({
        ordre:   tranches.length + 1,
        label:   `${debut}-${fin}`,
-       taux:    totalEvalues > 0 ? (totalTrue / totalEvalues) * 100 : null,
-       score:   hasAnyScore ? totalScoreExo : null,
-       erreurs: totalCroix,
+       taux,
+       score,
+       erreurs,
      });
    }
 
@@ -871,10 +848,10 @@ export default function TableauProgression() {
          <LineChart data={scoreGrilleData}>
            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
            <XAxis dataKey="label" stroke="#71717a" style={{ fontSize: '9px' }} />
-           <YAxis domain={[0, 500]} stroke="#71717a" style={{ fontSize: '10px' }} />
+           <YAxis domain={['auto', 'auto']} stroke="#71717a" style={{ fontSize: '10px' }} />
            <Tooltip
              contentStyle={{ backgroundColor: '#fff', border: '1px solid #e4e4e7', borderRadius: '8px', fontSize: '11px' }}
-             formatter={(value: any) => [Math.round(value), 'Score brut']}
+             formatter={(value: any) => [value, 'Score (pts)']}
            />
            <Line type="monotone" dataKey="score" stroke="#a855f7" strokeWidth={2} dot={{ fill: '#a855f7', r: 4 }} connectNulls />
          </LineChart>

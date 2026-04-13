@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { useSecretKey } from '@/hooks/useSecretKey';
+import { SecretKeyModal } from '@/components/SecretKeyModal';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -42,6 +44,7 @@ function formatTemps(mins: number): string {
 
 export default function SessionPage() {
   const router = useRouter();
+  const { requireKey, showKeyModal, submitKey, dismissKeyModal } = useSecretKey();
   const [cards, setCards]         = useState<EntCard[]>([]);
   const [loading, setLoading]     = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -167,6 +170,7 @@ export default function SessionPage() {
         id: Date.now().toString(),
         entrainement_id_final: ent.id,
         user_id:   userId,
+        feuille_id: feuilleId,
         data:      { validated: {}, crosses: {} },
         score_global: null,
         nb_erreurs: 0,
@@ -174,6 +178,14 @@ export default function SessionPage() {
         closed:    false,
       });
       console.log('[handleCreate] obs insert error:', obsError);
+
+      // Marquer la feuille comme en cours dans la progression
+      await supabase
+        .from('progression_feuille')
+        .upsert(
+          { user_id: userId, feuille_id: feuilleId, en_cours: true },
+          { onConflict: 'user_id,feuille_id' }
+        );
 
       setShowModal(false);
       router.push(`/entrainement/${ent.id}`);
@@ -197,7 +209,7 @@ export default function SessionPage() {
             <p className="text-xs text-[#AAAAAA] mt-0.5 capitalize">{today}</p>
           </div>
           <button
-            onClick={openModal}
+            onClick={() => requireKey(openModal)}
             className="px-4 py-2 rounded-xl bg-[#185FA5] text-white text-sm font-semibold
                        hover:bg-[#1450A0] transition-colors shrink-0"
           >
@@ -239,7 +251,7 @@ export default function SessionPage() {
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     {[
-                      { label: 'Score',    value: c.score_global !== null ? `${c.score_global}%` : '—' },
+                      { label: 'Score',    value: c.score_global !== null ? String(c.score_global) : '—' },
                       { label: 'Sessions', value: c.nb_sessions > 0 ? String(c.nb_sessions) : '—' },
                       { label: 'Durée',    value: c.duree_totale > 0 ? formatTemps(c.duree_totale) : '—' },
                     ].map(({ label, value }) => (
@@ -256,6 +268,11 @@ export default function SessionPage() {
         )}
 
       </div>
+
+      {/* ── Modal clé secrète ───────────────────────────────────── */}
+      {showKeyModal && (
+        <SecretKeyModal onSubmit={submitKey} onDismiss={dismissKeyModal} />
+      )}
 
       {/* ── Modal création ──────────────────────────────────────── */}
       {showModal && (
