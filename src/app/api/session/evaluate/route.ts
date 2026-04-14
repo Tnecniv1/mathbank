@@ -234,24 +234,26 @@ export async function POST(req: Request) {
 
   const CRITERES_EVAL = ['C1','C2','C3','C4','S1','S2','S3','S4','R1','R2','R3','R4'];
   const validated = evalResult.validated ?? {};
+  const crosses: Record<string, unknown[]> = feuilleType === 'chaotique' ? {
+    C1: [], C2: [], C3: [], C4: [],
+    S1: [], S2: [], S3: [], S4: [],
+    R1: [], R2: [], R3: [], R4: [],
+    B1: [],
+  } : {};
   let score = 0, hasEval = false;
   for (const k of CRITERES_EVAL) {
     const v = validated[k];
-    if (v === true)                { score += 1; hasEval = true; }
-    else if (v === false || v === null) { score -= 1; hasEval = true; }
-    // v === undefined → absent, ne compte pas
+    const hasCrosses = Array.isArray(crosses[k]) && crosses[k].length > 0;
+    if (v === true)                                     { score += 1; hasEval = true; }
+    else if (v === false || v === null || hasCrosses)   { score -= 1; hasEval = true; }
+    // v === undefined et pas de crosses → absent, ne compte pas
   }
   const score_global = hasEval ? score : null;
   const bilan = (validated as Record<string, boolean | null>).B1 ?? null;
 
   const obsData: Record<string, unknown> = {
     validated: feuilleType === 'chaotique' ? (evalResult.validated ?? {}) : {},
-    crosses: feuilleType === 'chaotique' ? {
-      C1: [], C2: [], C3: [], C4: [],
-      S1: [], S2: [], S3: [], S4: [],
-      R1: [], R2: [], R3: [], R4: [],
-      B1: [],
-    } : {},
+    crosses,
     note: evalResult.note ?? '',
   };
 
