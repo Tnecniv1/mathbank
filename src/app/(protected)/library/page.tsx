@@ -282,7 +282,7 @@ function FeuilleCard({
  const { error } = await supabase
  .from('progression_feuille')
  .upsert(
- { user_id: session.user.id, feuille_id: feuille.id, en_cours: true, est_termine: false, auto_inscrit: true },
+ { user_id: session.user.id, feuille_id: feuille.id, en_cours: true, est_termine: false },
  { onConflict: 'user_id,feuille_id' }
  );
  if (!error) {
@@ -689,7 +689,7 @@ function SlotVideModal({
    await supabase
     .from('progression_feuille')
     .upsert(
-     { user_id: session.user.id, feuille_id: feuilleId, en_cours: true, est_termine: false, auto_inscrit: true },
+     { user_id: session.user.id, feuille_id: feuilleId, en_cours: true, est_termine: false },
      { onConflict: 'user_id,feuille_id' }
     );
    await onUpdateProgression();

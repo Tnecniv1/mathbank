@@ -125,10 +125,27 @@ export default function SessionPage() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
+    // Ne lister que les feuilles marquées en_cours = true pour cet utilisateur
+    const { data: progs } = await supabase
+      .from('progression_feuille')
+      .select('feuille_id')
+      .eq('user_id', session.user.id)
+      .eq('en_cours', true)
+      .eq('est_termine', false);
+
+    const feuilleIds = (progs ?? []).map((p: any) => p.feuille_id).filter(Boolean);
+
+    if (feuilleIds.length === 0) {
+      setFeuilles([]);
+      setFeuilleId('');
+      setShowModal(true);
+      return;
+    }
+
     const { data: noeuds } = await supabase
       .from('noeud')
       .select('id, titre, type')
-      .in('type', ['mecanique', 'chaotique'])
+      .in('id', feuilleIds)
       .order('titre', { ascending: true });
     const list = (noeuds ?? []) as FeuilleActive[];
     setFeuilles(list);
