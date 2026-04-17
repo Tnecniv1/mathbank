@@ -234,7 +234,6 @@ function FeuilleCard({
 }) {
  const [showModal, setShowModal] = useState(false);
  const [adding, setAdding] = useState(false);
- const [typeBlockMsg, setTypeBlockMsg] = useState<string | null>(null);
 
  // ── Calcul des états ──────────────────────────────────────────────────
  const estTerminee = progression?.est_termine === true || progression?.statut === 'validee';
@@ -247,38 +246,14 @@ function FeuilleCard({
  const estAccessible = feuillesAccessibles.has(feuille.id);
  const estVerrouilee = !estTerminee && !estEnCours && !estAccessible;
  const peutAjouter = estAccessible && !estEnCours && !estTerminee;
- const typeEstBloque = peutAjouter && typesActifs.has(feuille.type);
 
  // ── Handlers ──────────────────────────────────────────────────────────
  const handleAjouter = async (e: React.MouseEvent | React.KeyboardEvent) => {
  e.stopPropagation();
- if (typeEstBloque || adding) return;
+ if (adding) return;
  setAdding(true);
- setTypeBlockMsg(null);
  const { data: { session } } = await supabase.auth.getSession();
  if (session) {
- // Vérification contrainte : 1 feuille active par type
- const { data: actives } = await supabase
- .from('progression_feuille')
- .select('feuille_id')
- .eq('user_id', session.user.id)
- .eq('en_cours', true)
- .eq('est_termine', false);
-
- if (actives && actives.length > 0) {
- const ids = actives.map((f: any) => f.feuille_id);
- const { data: noeuds } = await supabase
- .from('noeud')
- .select('type')
- .in('id', ids);
- if (noeuds?.some((n: any) => n.type === feuille.type)) {
- const label = feuille.type === 'mecanique' ? 'mécanique' : 'chaotique';
- setTypeBlockMsg(`Tu as déjà une feuille ${label} en cours. Termine-la avant d'en commencer une nouvelle.`);
- setAdding(false);
- return;
- }
- }
-
  const { error } = await supabase
  .from('progression_feuille')
  .upsert(
@@ -408,7 +383,7 @@ function FeuilleCard({
  )}
 
  {/* Bouton Ajouter (état débloquée) */}
- {peutAjouter && !typeEstBloque && (
+ {peutAjouter && (
  <div className="flex justify-end mt-1 pr-1">
  <div
  role="button" tabIndex={0}
@@ -419,13 +394,6 @@ function FeuilleCard({
  {adding ? '…' : '+ Ajouter'}
  </div>
  </div>
- )}
-
- {/* Message blocage type */}
- {(typeEstBloque || typeBlockMsg) && (
- <p className="mt-1 px-3 text-xs text-ink-muted italic">
- {typeBlockMsg ?? `Tu as déjà une feuille ${feuille.type === 'mecanique' ? 'mécanique' : 'chaotique'} en cours. Termine-la avant d'en commencer une nouvelle.`}
- </p>
  )}
 
  {/* Modal de progression */}
@@ -1206,7 +1174,7 @@ export default function LibraryPage() {
   <h2 className="text-2xl font-['IBM_Plex_Mono'] font-bold text-status-success flex items-center gap-2">
   🔥 En Progression
   <span className="text-sm font-normal text-status-success/70">
-   ({feuillesEnProgression.length}/2)
+   ({feuillesEnProgression.length})
   </span>
   </h2>
   <span className="text-status-success text-lg">{progressionOuverte ? '▼' : '▶'}</span>
