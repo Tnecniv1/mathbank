@@ -243,9 +243,8 @@ function FeuilleCard({
  const scoreMoyen = progression?.score_moyen ?? 0;
  const seuilAtteint = nbExo != null && nbExo > 0 && nbValides >= nbExo && scoreMoyen >= 70;
  const pretAConclure = estEnCours && seuilAtteint;
- const estAccessible = feuillesAccessibles.has(feuille.id);
- const estVerrouilee = !estTerminee && !estEnCours && !estAccessible;
- const peutAjouter = estAccessible && !estEnCours && !estTerminee;
+ const estVerrouilee = false;
+ const peutAjouter = !estEnCours && !estTerminee;
 
  // ── Handlers ──────────────────────────────────────────────────────────
  const handleAjouter = async (e: React.MouseEvent | React.KeyboardEvent) => {
@@ -594,115 +593,6 @@ function DeblocageModal({
 }
 
 
-/* ---------- Slot vide ---------- */
-function SlotVide({ type, onClick }: { type: 'mecanique' | 'chaotique'; onClick: () => void }) {
- const label = type === 'mecanique' ? 'mécanique' : 'chaotique';
- return (
-  <button
-   onClick={onClick}
-   className="group flex items-center gap-4 w-full px-4 py-3 rounded-lg border-2 border-dashed border-status-success/30 bg-cream-50 hover:border-status-success/60 hover:bg-status-success/5 transition-all duration-200"
-  >
-   <div className="flex items-center justify-center w-10 h-10 rounded-full border-2 border-dashed border-status-success/40 text-status-success/50 group-hover:border-status-success group-hover:text-status-success transition-colors text-2xl font-light leading-none">
-    +
-   </div>
-   <div className="flex-1 text-left">
-    <div className="text-sm text-status-success/60 group-hover:text-status-success/90 transition-colors">
-     Ajouter une feuille {label}
-    </div>
-   </div>
-  </button>
- );
-}
-
-/* ---------- Modal sélection slot vide ---------- */
-function SlotVideModal({
- type,
- parcours,
- progressions,
- typesActifs,
- feuillesDebloquees,
- feuillesAccessibles,
- onClose,
- onUpdateProgression,
- onConclureDone,
-}: {
- type: 'mecanique' | 'chaotique';
- parcours: Niveau | null;
- progressions: Map<string, Progression>;
- typesActifs: Set<string>;
- feuillesDebloquees: Set<string>;
- feuillesAccessibles: Set<string>;
- onClose: () => void;
- onUpdateProgression: () => Promise<void>;
- onConclureDone: (type: 'mecanique' | 'chaotique') => void;
-}) {
- const label = type === 'mecanique' ? 'mécanique' : 'chaotique';
- const [list, setList] = useState<{ id: string; titre: string; type: string; pdf_url: string }[]>([]);
- const [adding, setAdding] = useState<string | null>(null);
-
- useEffect(() => {
-  supabase
-   .from('noeud')
-   .select('id, titre, type, pdf_url')
-   .eq('type', type)
-   .order('titre', { ascending: true })
-   .then(({ data: noeuds }) => setList((noeuds ?? []) as { id: string; titre: string; type: string; pdf_url: string }[]));
- }, [type]);
-
- async function handleAjouter(feuilleId: string) {
-  if (adding) return;
-  setAdding(feuilleId);
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session) {
-   await supabase
-    .from('progression_feuille')
-    .upsert(
-     { user_id: session.user.id, feuille_id: feuilleId, en_cours: true, est_termine: false },
-     { onConflict: 'user_id,feuille_id' }
-    );
-   await onUpdateProgression();
-   onClose();
-  }
-  setAdding(null);
- }
-
- return (
-  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-   <div className="bg-cream-50 rounded-lg shadow-2xl max-w-lg w-full max-h-[80vh] flex flex-col">
-    <div className="p-6 border-b border-border">
-     <h2 className="text-xl font-bold text-ink">Choisir une feuille {label}</h2>
-     <p className="text-sm text-ink-muted mt-1">Sélectionne la prochaine feuille à commencer</p>
-    </div>
-    <div className="flex-1 overflow-y-auto p-6 space-y-2">
-     {list.length === 0 ? (
-      <p className="text-center text-ink-muted py-8">Aucune feuille disponible pour le moment.</p>
-     ) : (
-      list.map(f => (
-       <button
-        key={f.id}
-        onClick={() => handleAjouter(f.id)}
-        disabled={adding === f.id}
-        className="w-full text-left px-4 py-3 rounded-lg border border-border bg-cream-50 hover:border-accent hover:shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-       >
-        <span className="font-medium text-ink">{f.titre}</span>
-        {adding === f.id && <span className="ml-2 text-sm text-ink-muted">…</span>}
-       </button>
-      ))
-     )}
-    </div>
-    <div className="p-6 border-t border-border flex justify-end">
-     <button
-      onClick={onClose}
-      className="px-4 py-2 bg-cream-200 hover:bg-cream-300 text-ink rounded-lg transition-colors"
-     >
-      Fermer
-     </button>
-    </div>
-   </div>
-  </div>
- );
-}
-
 /* ---------- Composant Chapitre ---------- */
 function ChapitreSection({ chapitre, progressions, typesActifs, feuillesDebloquees, feuillesAccessibles, onOpenPdf, onProgressionUpdate, onConclureDone }: { chapitre: Chapitre; progressions: Map<string, Progression>; typesActifs: Set<string>; feuillesDebloquees: Set<string>; feuillesAccessibles: Set<string>; onOpenPdf: (url: string) => void; onProgressionUpdate: () => Promise<void>; onConclureDone: (type: 'mecanique' | 'chaotique') => void }) {
  const [isOpen, setIsOpen] = useState(false);
@@ -829,7 +719,6 @@ export default function LibraryPage() {
  const [feuillesDebloquees, setFeuillesDebloquees] = useState<Set<string>>(new Set());
  const [feuillesAccessibles, setFeuillesAccessibles] = useState<Set<string>>(new Set());
  const [deblocageModal, setDeblocageModal] = useState<{ type: 'mecanique' | 'chaotique' } | null>(null);
- const [slotModal, setSlotModal] = useState<'mecanique' | 'chaotique' | null>(null);
 
  // Chargement initial des niveaux
  useEffect(() => {
@@ -1165,7 +1054,7 @@ export default function LibraryPage() {
  </div>
  </header>
 
- {/* Section En Progression (toujours visible — 2 slots) */}
+ {/* Section En Progression */}
  <div className="mb-8 rounded-lg border border-status-success/30">
  <button
   onClick={() => setProgressionOuverte(v => !v)}
@@ -1181,31 +1070,25 @@ export default function LibraryPage() {
  </button>
  {progressionOuverte && (
   <div className="px-6 pb-6 space-y-2">
-  {(['mecanique', 'chaotique'] as const).map(type => {
-   const occupied = feuillesEnProgression.find(({ feuille }) => feuille.type === type);
-   if (occupied) {
-    return (
-     <FeuilleCard
-      key={occupied.feuille.id}
-      feuille={occupied.feuille}
-      progression={occupied.progression}
-      typesActifs={typesActifs}
-      feuillesDebloquees={feuillesDebloquees}
-      feuillesAccessibles={feuillesAccessibles}
-      onOpen={() => handleOpenPdf(occupied.feuille.pdf_url)}
-      onUpdateProgression={handleProgressionUpdate}
-      onConclureDone={handleConclureDone}
-     />
-    );
-   }
-   return (
-    <SlotVide
-     key={type}
-     type={type}
-     onClick={() => setSlotModal(type)}
+  {feuillesEnProgression.length === 0 ? (
+   <p className="text-sm text-status-success/60 py-2">
+    Aucune feuille en cours. Ajoute-en une depuis la liste ci-dessous.
+   </p>
+  ) : (
+   feuillesEnProgression.map(({ feuille, progression }) => (
+    <FeuilleCard
+     key={feuille.id}
+     feuille={feuille}
+     progression={progression}
+     typesActifs={typesActifs}
+     feuillesDebloquees={feuillesDebloquees}
+     feuillesAccessibles={feuillesAccessibles}
+     onOpen={() => handleOpenPdf(feuille.pdf_url)}
+     onUpdateProgression={handleProgressionUpdate}
+     onConclureDone={handleConclureDone}
     />
-   );
-  })}
+   ))
+  )}
   </div>
  )}
  </div>
@@ -1267,21 +1150,6 @@ export default function LibraryPage() {
  </div>
  )}
  </div>
-
- {/* Modal slot vide */}
- {slotModal && (
- <SlotVideModal
- type={slotModal}
- parcours={parcours}
- progressions={progressions}
- typesActifs={typesActifs}
- feuillesDebloquees={feuillesDebloquees}
- feuillesAccessibles={feuillesAccessibles}
- onClose={() => setSlotModal(null)}
- onUpdateProgression={handleProgressionUpdate}
- onConclureDone={handleConclureDone}
- />
- )}
 
  {/* Modal de déblocage */}
  {deblocageModal && (

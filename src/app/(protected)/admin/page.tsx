@@ -1249,8 +1249,10 @@ export default function AdminPage() {
  const item1 = items[index];
  const item2 = items[direction === 'up' ? index - 1 : index + 1];
 
- await supabase.from('noeud').update({ ordre: item2.ordre }).eq('id', item1.id);
- await supabase.from('noeud').update({ ordre: item1.ordre }).eq('id', item2.id);
+ const { error: e1 } = await supabase.from('noeud').update({ ordre: item2.ordre }).eq('id', item1.id);
+ const { error: e2 } = await supabase.from('noeud').update({ ordre: item1.ordre }).eq('id', item2.id);
+ if (e1) console.error('[moveItem] update item1 error:', e1);
+ if (e2) console.error('[moveItem] update item2 error:', e2);
 
  if ((item1.type === 'mecanique' || item1.type === 'chaotique') && item1.parent_id) {
  await recalculerOrdres(item1.parent_id);
@@ -1316,6 +1318,7 @@ export default function AdminPage() {
    if (feuille?.pdf_url) await deletePdfFromStorage(feuille.pdf_url);
 
    const { error } = await supabase.rpc('delete_feuille_chef', { p_feuille_id: id });
+   if (error) console.error('[deleteItem] RPC error:', error);
    if (!error && parentId) await recalculerOrdres(parentId);
    if (!error) await loadData();
    return;
